@@ -4176,8 +4176,7 @@ function _composerPrefillIntentFromLocation(){
       if(qs.get('title')) parts.push(qs.get('title'));
       if(qs.get('text')) parts.push(qs.get('text'));
       if(qs.get('url')) parts.push(qs.get('url'));
-      text=parts.join('
-');
+      text=parts.join(String.fromCharCode(10));
     }
     return {
       hasParams:true,
