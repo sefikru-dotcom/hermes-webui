@@ -11672,6 +11672,10 @@ function _thinkingActivityNode(text, open, disclosureKey){
   const row=document.createElement('div');
   row.className='agent-activity-thinking';
   row.setAttribute('data-worklog-thinking-card','1');
+  if(open){
+    row.setAttribute('data-thinking-active','1');
+    row.setAttribute('data-live-thinking','1');
+  }
   if(disclosureKey) row.setAttribute('data-thinking-key', String(disclosureKey));
   row.innerHTML=_thinkingCardHtml(text, open);
   _renderThinkingInto(row,text);
@@ -13215,7 +13219,8 @@ function _anchorSceneNodeForRow(row, opts){
     if(window._showThinking===false) return null;
     const text=String(row.text||row.thinking&&row.thinking.text||'').trim();
     if(!text) return null;
-    node=_thinkingActivityNode(text, false, row.row_id||row.local_id||'anchor-thinking');
+    const isLive = Boolean(opts && opts.live) || row.status === 'running';
+    node=_thinkingActivityNode(text, isLive, row.row_id||row.local_id||'anchor-thinking');
   }else if(row.role==='tool'){
     node=buildToolCard(_anchorSceneToolCallFromRow(row,opts));
   }else if(row.role==='lifecycle'){
@@ -20308,9 +20313,9 @@ function renderKatexBlocks(container,options){
   });
 }
 
-function _thinkingMarkup(text=''){
+function _thinkingMarkup(text='', open=false){
   const clean=_sanitizeThinkingDisplayText(text);
-  const openClass=_worklogDetailsExpandedDefault()?' open':'';
+  const openClass=(open||_worklogDetailsExpandedDefault())?' open':'';
   return (clean&&String(clean).trim())
     ? `<div class="thinking-card${openClass}"><div class="thinking-card-header" onclick="this.parentElement.classList.toggle('open')"><span class="thinking-card-icon">${li('lightbulb',14)}</span><span class="thinking-card-label">${t('thinking')}</span><span class="thinking-card-toggle">${li('chevron-right',12)}</span></div><div class="thinking-card-body"><pre>${esc(String(clean).trim())}</pre></div></div>`
     : `<div class="thinking"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>`;
@@ -20318,16 +20323,31 @@ function _thinkingMarkup(text=''){
 function _renderThinkingInto(row,text=''){
   if(!row) return;
   const clean=_sanitizeThinkingDisplayText(text);
+  const isLive = row.getAttribute('data-thinking-active')==='1' || row.getAttribute('data-live-thinking')==='1';
   if(!clean){
-    row.innerHTML=_thinkingMarkup(text);
+    row.innerHTML=_thinkingMarkup(text, isLive);
     return;
+  }
+  let card = row.querySelector('.thinking-card');
+  if(!card){
+    row.innerHTML=_thinkingMarkup(text, isLive);
+    card = row.querySelector('.thinking-card');
+  }
+  if(card && isLive){
+    card.classList.add('open');
   }
   const pre=row.querySelector('.thinking-card-body pre');
   if(pre){
     pre.textContent=clean;
+    const body=row.querySelector('.thinking-card-body');
+    if(body && isLive) body.scrollTop=body.scrollHeight;
     return;
   }
-  row.innerHTML=_thinkingMarkup(text);
+  row.innerHTML=_thinkingMarkup(text, isLive);
+  const newCard = row.querySelector('.thinking-card');
+  if(newCard && isLive){
+    newCard.classList.add('open');
+  }
 }
 function finalizeThinkingCard(){
   // Guard: only finalize thinking card if we're looking at the session that started it.
@@ -20375,6 +20395,8 @@ function finalizeThinkingCard(){
     turn.querySelectorAll('.agent-activity-thinking[data-thinking-active="1"]').forEach(active=>{
       active.removeAttribute('data-thinking-active');
       active.removeAttribute('data-live-thinking');
+      const card = active.querySelector('.thinking-card');
+      if(card && !_worklogDetailsExpandedDefault()) card.classList.remove('open');
     });
     _syncToolCallGroupSummary(group);
   }
@@ -20439,7 +20461,7 @@ function appendThinking(text='', options){
     if(isTransparentStream()){
       let row=blocks.querySelector(`.agent-activity-thinking[data-live-thinking="1"][data-live-thinking-key="${CSS.escape(thinkingKey)}"]`);
       if(!row){
-        row=_thinkingActivityNode(clean, false);
+        row=_thinkingActivityNode(clean, true);
         row.id='thinkingRow';
         row.setAttribute('data-live-thinking','1');
         row.setAttribute('data-live-thinking-key',thinkingKey);
@@ -20488,7 +20510,7 @@ function appendThinking(text='', options){
     if(list){
       let row=list.querySelector(`.agent-activity-thinking[data-live-thinking="1"][data-live-thinking-key="${CSS.escape(thinkingKey)}"]`);
       if(!row){
-        row=_thinkingActivityNode(clean, false, thinkingKey);
+        row=_thinkingActivityNode(clean, true, thinkingKey);
         row.setAttribute('data-live-thinking','1');
         row.setAttribute('data-live-thinking-key',thinkingKey);
         if(segmentSeq) row.setAttribute('data-live-segment-seq',segmentSeq);
