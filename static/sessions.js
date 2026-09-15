@@ -4166,8 +4166,19 @@ function _composerPrefillIntentFromLocation(){
     const hasQ=qs.has('q');
     const hasPrompt=qs.has('prompt');
     const hasSend=qs.has('send');
-    if(!hasQ&&!hasPrompt&&!hasSend) return empty;
-    const text=hasQ?(qs.get('q')||''):(hasPrompt?(qs.get('prompt')||''):'');
+    const hasText=qs.has('text');
+    const hasUrl=qs.has('url');
+    const hasTitle=qs.has('title');
+    if(!hasQ&&!hasPrompt&&!hasSend&&!hasText&&!hasUrl&&!hasTitle) return empty;
+    let text=hasQ?(qs.get('q')||''):(hasPrompt?(qs.get('prompt')||''):'');
+    if(!text&&(hasText||hasUrl||hasTitle)){
+      const parts=[];
+      if(qs.get('title')) parts.push(qs.get('title'));
+      if(qs.get('text')) parts.push(qs.get('text'));
+      if(qs.get('url')) parts.push(qs.get('url'));
+      text=parts.join('
+');
+    }
     return {
       hasParams:true,
       hasText:!!String(text).trim(),
@@ -4210,6 +4221,9 @@ function _consumeComposerPrefillParamsFromLocation(){
     current.searchParams.delete('q');
     current.searchParams.delete('prompt');
     current.searchParams.delete('send');
+    current.searchParams.delete('text');
+    current.searchParams.delete('url');
+    current.searchParams.delete('title');
     const after=current.searchParams.toString();
     if(after===before) return;
     const next=current.pathname+(after?`?${after}`:'')+(current.hash||'');
@@ -4234,6 +4248,9 @@ function _sessionUrlForSid(sid){
     current.searchParams.delete('q');
     current.searchParams.delete('prompt');
     current.searchParams.delete('send');
+    current.searchParams.delete('text');
+    current.searchParams.delete('url');
+    current.searchParams.delete('title');
     const retained=new URLSearchParams();
     current.searchParams.forEach((value,key)=>{
       if(key!=='action'||value!=='new-chat') retained.append(key,value);

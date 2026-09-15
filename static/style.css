@@ -112,17 +112,18 @@
   :root[data-font-size="large"] { font-size: 16px; }
   :root[data-font-size="xlarge"] { font-size: 18px; }
   /* ── Dark mode — navy-black + gold accent matching Hermes terminal ── */
+  /* ── Dark mode: Kvartal Neon Cyberpunk (AMOLED Black, Cyan, Purple) ── */
   :root.dark {
-    --bg:#0D0D1A;--sidebar:#141425;--border:#2A2A45;--border2:rgba(255,255,255,0.14);
-    --text:#FFF8DC;--muted:#C0C0C0;--accent:#FFD700;--blue:#4DD0E1;--gold:#FFBF00;--code-bg:#1A1A2E;
-    --surface:#1A1A2E;--topbar-bg:rgba(20,20,37,.98);--main-bg:rgba(13,13,26,0.5);
-    --focus-ring:rgba(255,215,0,.35);--focus-glow:rgba(255,215,0,.08);
-    --input-bg:rgba(255,255,255,.04);--hover-bg:rgba(255,255,255,.06);
-    --strong:#fff;--em:#C0C0C0;--code-text:#f0c27f;--code-inline-bg:rgba(0,0,0,.35);--pre-text:#e2e8f0;
-    --accent-hover:#FFBF00;--accent-bg:rgba(255,215,0,0.08);--accent-bg-strong:rgba(255,215,0,0.15);--accent-text:#FFD700;
-    --error:#EF5350;--success:#4CAF50;--warning:#FFA726;--info:#4DD0E1;
-    --surface-subtle:rgba(255,255,255,.025);--surface-subtle-hover:rgba(255,255,255,.045);
-    --border-subtle:rgba(255,255,255,.075);--border-muted:rgba(255,255,255,.12);
+    --bg:#050508;--sidebar:#090912;--border:rgba(0,240,255,0.22);--border2:rgba(168,85,247,0.28);
+    --text:#f0f6fc;--muted:#8b949e;--accent:#00f0ff;--blue:#00f0ff;--gold:#a855f7;--code-bg:#0a0a16;
+    --surface:#0e0e1a;--topbar-bg:rgba(9,9,18,0.96);--main-bg:#050508;
+    --focus-ring:rgba(0,240,255,0.45);--focus-glow:rgba(168,85,247,0.30);
+    --input-bg:#090912;--hover-bg:rgba(0,240,255,0.08);
+    --strong:#ffffff;--em:#c9d1d9;--code-text:#00f0ff;--code-inline-bg:rgba(0,240,255,0.12);--pre-text:#e2e8f0;
+    --accent-hover:#38bdf8;--accent-bg:rgba(0,240,255,0.12);--accent-bg-strong:rgba(0,240,255,0.22);--accent-text:#00f0ff;
+    --error:#ff4d6d;--success:#00f59b;--warning:#ffb703;--info:#00f0ff;
+    --surface-subtle:rgba(0,240,255,0.03);--surface-subtle-hover:rgba(0,240,255,0.06);
+    --border-subtle:rgba(0,240,255,0.14);--border-muted:rgba(168,85,247,0.18);
   }
   /* ── Skin: Default (gold — matches base) ── */
   /* No overrides needed — :root and .dark already use gold accent */
@@ -7323,3 +7324,42 @@ html[data-conversation-outline="enabled"] #outlineToggleBtn:not([hidden]){displa
 /* Settings field highlight (mirrors msg-question-highlight / _highlightQuestionRow pattern) */
 .settings-field-highlight { animation: settings-field-pulse 1.6s ease-out; }
 @keyframes settings-field-pulse { 0% { box-shadow: 0 0 0 0 var(--focus-ring); } 35% { box-shadow: 0 0 0 4px var(--focus-ring); } 100% { box-shadow: 0 0 0 0 rgba(0, 0, 0, 0); } }
+
+/* ── Mobile Quick Action Chips (Kvartal Neon Style) ── */
+.quick-chips-bar {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 6px 12px;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  margin-bottom: 6px;
+}
+.quick-chips-bar::-webkit-scrollbar {
+  display: none;
+}
+.quick-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(14, 14, 26, 0.85);
+  border: 1px solid rgba(0, 240, 255, 0.28);
+  color: #00f0ff;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 6px 13px;
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 0 10px rgba(0, 240, 255, 0.10);
+  user-select: none;
+  backdrop-filter: blur(8px);
+}
+.quick-chip:hover, .quick-chip:active {
+  background: rgba(0, 240, 255, 0.22);
+  border-color: #00f0ff;
+  color: #ffffff;
+  box-shadow: 0 0 16px rgba(0, 240, 255, 0.45);
+  transform: translateY(-1px);
+}

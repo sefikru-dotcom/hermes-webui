@@ -3598,6 +3598,8 @@ def _candidate_supports_reasoning(candidate: str) -> bool:
             if major >= 3:
                 return True
         return False
+    if "gemini" in token_set or normalized.startswith("gemini"):
+        return True
     if "kimi" in token_set or normalized.startswith("kimi"):
         return True
     if "minimax" in token_set or normalized.startswith("minimax"):
@@ -3818,8 +3820,10 @@ def _filter_reasoning_efforts_for_provider(
     # prior max->xhigh coercion (Gemini's adapter treats unknown 'max' as medium;
     # pre-adaptive Anthropic manual-thinking lacks a 'max' budget and falls to 8k).
     # Dropping 'max' here lets the existing downgrade ladder land on xhigh/high.
-    if provider in {"gemini", "google", "google-gemini", "google-vertex", "vertex"}:
-        return [eff for eff in normalized if eff != "max"]
+    if provider in {"gemini", "google", "google-gemini", "google-vertex", "vertex"} or "gemini" in bare or "gemini" in provider:
+        if bare.startswith("gemini-3"):
+            return [eff for eff in normalized if eff in {"low", "high"}]
+        return [eff for eff in normalized if eff in {"low", "medium", "high"}]
     # Legacy Claude is pre-adaptive whether served natively OR via Azure Foundry /
     # Bedrock / Vertex — the ceiling follows the MODEL, not just the provider name.
     _anthropic_lanes = {
@@ -4195,8 +4199,8 @@ def _configured_reasoning_effort_lists(provider_entry, model_id: str) -> list:
 
     configured_lists = []
     models = provider_entry.get("models")
+    model_key = str(model_id or "").strip().lower()
     if isinstance(models, dict):
-        model_key = str(model_id or "").strip().lower()
         model_entry = models.get(model_id)
         if not isinstance(model_entry, dict) and model_key:
             model_entry = next(
@@ -4210,6 +4214,12 @@ def _configured_reasoning_effort_lists(provider_entry, model_id: str) -> list:
             )
         if isinstance(model_entry, dict):
             configured_lists.append(model_entry.get("reasoning_efforts"))
+    elif isinstance(models, list) and model_key:
+        for m in models:
+            if isinstance(m, dict) and str(m.get("id") or "").strip().lower() == model_key:
+                if "reasoning_efforts" in m:
+                    configured_lists.append(m.get("reasoning_efforts"))
+                break
 
     configured_lists.append(provider_entry.get("reasoning_efforts"))
     return configured_lists

@@ -2,20 +2,76 @@
   "id": "./",
   "name": "Hermes",
   "short_name": "Hermes",
-  "description": "Hermes AI Agent Web UI",
+  "description": "Hermes Personal AI Agent",
   "start_url": "./?source=pwa",
   "scope": "./",
   "display": "standalone",
-  "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
-  "background_color": "#0D0D1A",
-  "theme_color": "#0D0D1A",
+  "display_override": [
+    "window-controls-overlay",
+    "standalone",
+    "minimal-ui"
+  ],
+  "background_color": "#050508",
+  "theme_color": "#050508",
   "orientation": "portrait-primary",
-  "categories": ["productivity", "utilities"],
+  "categories": [
+    "productivity",
+    "utilities"
+  ],
+  "share_target": {
+    "action": "./",
+    "method": "GET",
+    "enctype": "application/x-www-form-urlencoded",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url"
+    }
+  },
   "shortcuts": [
     {
-      "name": "New conversation",
-      "short_name": "New chat",
-      "description": "Open Hermes ready for a new chat",
+      "name": "🌤 Погода Ставрополь",
+      "short_name": "Погода",
+      "description": "Погода и прогноз в Ставрополе",
+      "url": "./?source=pwa&prompt=Какая+сейчас+погода+в+Ставрополе%3F",
+      "icons": [
+        {
+          "src": "static/favicon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "📊 Серверы & Квартал",
+      "short_name": "Серверы",
+      "description": "Проверить статус серверов и проектов",
+      "url": "./?source=pwa&prompt=Проверь+статус+всех+серверов+и+проектов",
+      "icons": [
+        {
+          "src": "static/favicon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "⚡ Заметка в память",
+      "short_name": "В память",
+      "description": "Записать факт или мысль в профиль",
+      "url": "./?source=pwa&prompt=Запомни+в+профиль:+",
+      "icons": [
+        {
+          "src": "static/favicon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "💬 Новый диалог",
+      "short_name": "Новый чат",
+      "description": "Начать новый разговор с чистого листа",
       "url": "./?source=pwa&action=new-chat",
       "icons": [
         {

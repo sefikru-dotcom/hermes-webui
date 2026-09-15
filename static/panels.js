@@ -9581,7 +9581,7 @@ async function loadSettingsPanel(){
           }
         });
       }
-      const saved=String(_speechSetting('tts_engine','hermes-tts-engine','browser')||'browser');
+      const saved=String(_speechSetting('tts_engine','hermes-tts-engine','edge')||'edge');
       if(!ttsEngineSel.querySelector('option[value="'+saved+'"]')){
         var savedOpt=document.createElement('option');
         savedOpt.value=saved; savedOpt.textContent=saved;
@@ -9609,6 +9609,10 @@ async function loadSettingsPanel(){
         ttsVoiceSel.innerHTML='<option value="">OpenAI voice (server-configured)</option>';
       } else if(engine==='edge'){
         const edgeVoices=[
+          {value:'ru-RU-SvetlanaNeural',label:'Светлана (Русский, Нейросеть)'},
+          {value:'ru-RU-DmitryNeural',label:'Дмитрий (Русский, Нейросеть)'},
+          {value:'en-US-AriaNeural',label:'Aria (English, Female)'},
+          {value:'en-US-GuyNeural',label:'Guy (English, Male)'},
           {value:'zh-CN-XiaoxiaoNeural',label:'Xiaoxiao (Chinese, Female)'},
           {value:'zh-CN-XiaoyiNeural',label:'Xiaoyi (Chinese, Female)'},
           {value:'zh-CN-YunxiNeural',label:'Yunxi (Chinese, Male)'},

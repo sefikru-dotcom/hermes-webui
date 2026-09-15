@@ -5197,13 +5197,13 @@ function _normalizeReasoningEffort(eff){
 }
 
 function _formatReasoningEffortLabel(effort){
-  if(effort==='none') return 'None';
-  if(!effort) return 'Default';
+  if(effort==='none'||effort==='off') return 'Off';
+  if(!effort||effort==='dynamic'||effort==='default') return 'Dynamic';
   if(effort==='minimal') return 'Minimal';
   if(effort==='low') return 'Low';
   if(effort==='medium') return 'Medium';
   if(effort==='high') return 'High';
-  if(effort==='xhigh') return 'XHigh';
+  if(effort==='xhigh') return 'Extra High';
   if(effort==='max') return 'Max';
   return effort.charAt(0).toUpperCase()+effort.slice(1);
 }
@@ -5462,8 +5462,9 @@ document.addEventListener('click',function(e){
         .then(function(st){
           // For Default (effort=''), the returned reasoning_effort is '' (clear)
           // — display 'Default' rather than an empty toast.
-          const display=(st&&st.reasoning_effort)||effort||'Default';
-          _applyReasoningChip((st&&st.reasoning_effort)||effort, st||{});
+          const effVal=(st&&st.reasoning_effort)||effort;
+          const display=_formatReasoningEffortLabel(effVal);
+          _applyReasoningChip(effVal, st||{});
           showToast('🧠 Reasoning effort set to '+display);
         })
         .catch(function(){showToast('🧠 Failed to set effort');});

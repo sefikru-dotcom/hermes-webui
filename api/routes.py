@@ -19881,7 +19881,7 @@ def _handle_tts(handler, parsed):
     async API at that time.
     """
     text = ""
-    voice = "zh-CN-XiaoxiaoNeural"
+    voice = "ru-RU-SvetlanaNeural"
     rate_str = ""
     pitch_str = ""
     engine = "edge"  # "edge" | "elevenlabs" | "openai" | "browser" (browser is client-side only)
@@ -20130,6 +20130,7 @@ def _handle_tts(handler, parsed):
 
     # ── Edge TTS ────────────────────────────────────────────────────────
     allowed = {
+        "ru-RU-SvetlanaNeural", "ru-RU-DmitryNeural",
         "zh-CN-XiaoxiaoNeural", "zh-CN-XiaoyiNeural", "zh-CN-YunxiNeural",
         "zh-CN-YunjianNeural", "zh-CN-YunyangNeural",
         "en-US-AriaNeural", "en-US-GuyNeural",

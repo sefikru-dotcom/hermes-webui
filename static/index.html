@@ -580,6 +580,12 @@
         <button id="queuePill" class="queue-pill" aria-label="Show queued messages" type="button"></button>
       </div>
       <div id="composerSelectionChips" class="composer-selection-chips" hidden aria-live="polite"></div>
+            <div class="quick-chips-bar" id="quickChipsBar">
+        <button type="button" class="quick-chip" onclick="quickSend('Погода в Ставрополе')">🌤 Погода</button>
+        <button type="button" class="quick-chip" onclick="quickSend('Проверь здоровье серверов и сервисов')">📊 Серверы</button>
+        <button type="button" class="quick-chip" onclick="quickSend('Проверь статус Квартала, Альпена и Квиз-Дуэли')">🎮 Квартал & Альпен</button>
+        <button type="button" class="quick-chip" onclick="quickPrompt('Найди в сети: ')">🔍 Поиск</button>
+      </div>
       <div class="composer-box" id="composerBox">
         <div class="cmd-dropdown" id="cmdDropdown"></div>
         <div class="drop-hint" id="dropHint">
@@ -599,6 +605,10 @@
             <input type="file" id="fileInput" class="file-input-visually-hidden" multiple accept="image/*,text/*,application/pdf,application/json,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.md,.py,.js,.ts,.yaml,.yml,.toml,.csv,.sh,.txt,.log,.env,.xls,.xlsx,.doc,.docx,.zip,.tar,.gz,.tgz,.bz2,.xz">
             <button type="button" class="icon-btn has-tooltip" id="btnAttach" data-tooltip="Attach files" data-i18n-title="composer_control_attach" data-i18n-aria-label="composer_control_attach" aria-label="Attach files">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+            </button>
+            <input type="file" id="cameraInput" class="file-input-visually-hidden" accept="image/*" capture="environment">
+            <button type="button" class="icon-btn has-tooltip" id="btnCamera" data-tooltip="Сделать фото (камера)" aria-label="Сделать фото">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
             </button>
             <button type="button" class="icon-btn has-tooltip" id="btnSavedPrompts" data-tooltip="Saved prompts" data-i18n-title="composer_control_saved_prompts" data-i18n-aria-label="composer_control_saved_prompts" onclick="toggleSavedPromptsPopup()" aria-haspopup="menu" aria-expanded="false" aria-controls="savedPromptsPopup" aria-label="Saved prompts">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
@@ -754,13 +764,11 @@
           </div>
           <div class="ws-dropdown ws-dropdown-footer" id="composerWsDropdown" hidden aria-hidden="true" inert></div>
           <div class="composer-reasoning-dropdown" id="composerReasoningDropdown">
-            <div class="reasoning-option" data-effort="">Default</div>
-            <div class="reasoning-option" data-effort="none">None</div>
-            <div class="reasoning-option" data-effort="minimal">Minimal</div>
+            <div class="reasoning-option" data-effort="">Dynamic</div>
+            <div class="reasoning-option" data-effort="none">Off</div>
             <div class="reasoning-option" data-effort="low">Low</div>
             <div class="reasoning-option" data-effort="medium">Medium</div>
             <div class="reasoning-option" data-effort="high">High</div>
-            <div class="reasoning-option" data-effort="xhigh">Extra High</div>
             <div class="reasoning-option" data-effort="max">Max</div>
           </div>
           <div class="composer-toolsets-dropdown" id="composerToolsetsDropdown">
@@ -1910,5 +1918,27 @@
   <div id="outlinePanel"></div>
 </div>
 <div class="profile-dropdown" id="profileDropdown"></div>
+<script>
+window.quickSend = function(text) {
+  var msg = document.getElementById('msg');
+  if (!msg) return;
+  msg.value = text;
+  msg.dispatchEvent(new Event('input', { bubbles: true }));
+  var sendBtn = document.getElementById('btnSend');
+  if (sendBtn) {
+    setTimeout(function() {
+      sendBtn.click();
+    }, 80);
+  }
+};
+window.quickPrompt = function(prefix) {
+  var msg = document.getElementById('msg');
+  if (!msg) return;
+  msg.value = prefix;
+  msg.focus();
+  msg.setSelectionRange(prefix.length, prefix.length);
+  msg.dispatchEvent(new Event('input', { bubbles: true }));
+};
+</script>
 </body>
 </html>
