@@ -7547,3 +7547,264 @@ html[data-conversation-outline="enabled"] #outlineToggleBtn:not([hidden]){displa
 
 /* Force hide obsolete empty-logo floating artifact */
 .empty-logo, .empty-logo::before { display: none !important; visibility: hidden !important; width: 0 !important; height: 0 !important; margin: 0 !important; padding: 0 !important; }
+
+
+/* ==========================================================================
+   MARS THEME: HEARTBEAT NEON PULSE & UNIFIED SIDEBARS (LEFT RAIL + RIGHT PANEL)
+   ========================================================================== */
+
+/* Human resting heart rate (approx 65-72 bpm) = 1.15s double-pulse cycle (lub-dub) */
+@keyframes mars-heartbeat-glow {
+  0% {
+    filter: drop-shadow(0 0 8px rgba(229, 57, 53, 0.40)) drop-shadow(0 0 16px rgba(183, 28, 28, 0.25));
+    opacity: 0.94;
+  }
+  14% {
+    filter: drop-shadow(0 0 20px rgba(255, 68, 68, 0.95)) drop-shadow(0 0 32px rgba(229, 57, 53, 0.70));
+    opacity: 1;
+  }
+  28% {
+    filter: drop-shadow(0 0 11px rgba(229, 57, 53, 0.45)) drop-shadow(0 0 20px rgba(183, 28, 28, 0.30));
+    opacity: 0.95;
+  }
+  42% {
+    filter: drop-shadow(0 0 24px rgba(255, 82, 82, 1.0)) drop-shadow(0 0 38px rgba(229, 57, 53, 0.75));
+    opacity: 1;
+  }
+  70% {
+    filter: drop-shadow(0 0 8px rgba(229, 57, 53, 0.40)) drop-shadow(0 0 16px rgba(183, 28, 28, 0.25));
+    opacity: 0.94;
+  }
+  100% {
+    filter: drop-shadow(0 0 8px rgba(229, 57, 53, 0.40)) drop-shadow(0 0 16px rgba(183, 28, 28, 0.25));
+    opacity: 0.94;
+  }
+}
+
+@keyframes mars-heartbeat-border {
+  0% {
+    box-shadow: 0 0 8px rgba(229, 57, 53, 0.25), inset 0 0 6px rgba(183, 28, 28, 0.15);
+    border-color: rgba(229, 57, 53, 0.35);
+  }
+  14% {
+    box-shadow: 0 0 18px rgba(255, 68, 68, 0.65), inset 0 0 12px rgba(211, 47, 47, 0.35);
+    border-color: rgba(255, 68, 68, 0.75);
+  }
+  28% {
+    box-shadow: 0 0 10px rgba(229, 57, 53, 0.30), inset 0 0 8px rgba(183, 28, 28, 0.20);
+    border-color: rgba(229, 57, 53, 0.40);
+  }
+  42% {
+    box-shadow: 0 0 22px rgba(255, 82, 82, 0.75), inset 0 0 15px rgba(229, 57, 53, 0.40);
+    border-color: rgba(255, 82, 82, 0.85);
+  }
+  70% {
+    box-shadow: 0 0 8px rgba(229, 57, 53, 0.25), inset 0 0 6px rgba(183, 28, 28, 0.15);
+    border-color: rgba(229, 57, 53, 0.35);
+  }
+  100% {
+    box-shadow: 0 0 8px rgba(229, 57, 53, 0.25), inset 0 0 6px rgba(183, 28, 28, 0.15);
+    border-color: rgba(229, 57, 53, 0.35);
+  }
+}
+
+/* Titlebar Mars Planet */
+.mars-tb-planet {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: block;
+  animation: mars-heartbeat-glow 1.15s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+}
+
+/* Quick chips heartbeat handled in refined quick-chip rule */
+
+/* Composer box on focus */
+:root.dark .composer-box:focus-within {
+  border-color: rgba(255, 68, 68, 0.6) !important;
+  box-shadow: 0 0 18px rgba(229, 57, 53, 0.35), inset 0 0 8px rgba(183, 28, 28, 0.15) !important;
+  animation: mars-heartbeat-border 1.15s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+}
+
+/* --- LEFT BAR: Rail & Sidebar --- */
+:root.dark .rail {
+  background: #08070a !important;
+  border-right: 1px solid rgba(229, 57, 53, 0.22) !important;
+  box-shadow: inset -1px 0 12px rgba(183, 28, 28, 0.08) !important;
+}
+
+:root.dark .rail-btn {
+  color: #a09aa0 !important;
+  transition: all 0.2s ease !important;
+}
+:root.dark .rail-btn:hover {
+  color: #ff8a80 !important;
+  background: rgba(229, 57, 53, 0.12) !important;
+}
+:root.dark .rail-btn.active {
+  color: #ff5252 !important;
+  background: rgba(229, 57, 53, 0.18) !important;
+  box-shadow: 0 0 14px rgba(229, 57, 53, 0.40) !important;
+  border-left: 2px solid #ff5252 !important;
+  animation: mars-heartbeat-border 1.15s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+}
+
+:root.dark .sidebar {
+  background: #08070a !important;
+  border-right: 1px solid rgba(229, 57, 53, 0.22) !important;
+  box-shadow: inset -1px 0 14px rgba(183, 28, 28, 0.08) !important;
+}
+:root.dark .sidebar-nav {
+  border-bottom: 1px solid rgba(229, 57, 53, 0.15) !important;
+}
+:root.dark .sidebar-nav .nav-tab.active {
+  color: #ff5252 !important;
+  border-bottom: 2px solid #ff5252 !important;
+  box-shadow: 0 4px 12px rgba(229, 57, 53, 0.35) !important;
+}
+
+/* New chat button */
+:root.dark .btn-new-chat,
+:root.dark #btnTitlebarNewChat {
+  border: 1px solid rgba(229, 57, 53, 0.35) !important;
+  color: #ff8a80 !important;
+  background: rgba(22, 16, 20, 0.85) !important;
+  transition: all 0.2s ease !important;
+}
+:root.dark .btn-new-chat:hover,
+:root.dark #btnTitlebarNewChat:hover {
+  border-color: #ff5252 !important;
+  box-shadow: 0 0 14px rgba(255, 68, 68, 0.50) !important;
+  color: #ffffff !important;
+  background: rgba(211, 47, 47, 0.25) !important;
+}
+
+/* Active chat session item in sidebar */
+:root.dark .session-item.active {
+  background: rgba(229, 57, 53, 0.15) !important;
+  border-left: 3px solid #ff5252 !important;
+  box-shadow: 0 0 12px rgba(229, 57, 53, 0.25) !important;
+}
+
+/* --- RIGHT BAR: Workspace Panel --- */
+:root.dark .rightpanel {
+  background: #08070a !important;
+  border-left: 1px solid rgba(229, 57, 53, 0.22) !important;
+  box-shadow: inset 1px 0 14px rgba(183, 28, 28, 0.08) !important;
+}
+:root.dark .rightpanel .panel-header {
+  border-bottom: 1px solid rgba(229, 57, 53, 0.15) !important;
+  background: rgba(12, 10, 14, 0.90) !important;
+}
+:root.dark .workspace-panel-tab {
+  color: #9e9e9e !important;
+  transition: all 0.2s ease !important;
+}
+:root.dark .workspace-panel-tab:hover {
+  color: #ff8a80 !important;
+}
+:root.dark .workspace-panel-tab.active {
+  color: #ff5252 !important;
+  border-bottom: 2px solid #ff5252 !important;
+  box-shadow: 0 2px 10px rgba(229, 57, 53, 0.35) !important;
+}
+:root.dark .workspace-panel-edge-toggle {
+  background: #110d12 !important;
+  border: 1px solid rgba(229, 57, 53, 0.35) !important;
+  color: #ff8a80 !important;
+}
+:root.dark .workspace-panel-edge-toggle:hover {
+  border-color: #ff5252 !important;
+  box-shadow: 0 0 12px rgba(255, 68, 68, 0.45) !important;
+  color: #ffffff !important;
+}
+
+/* --- TOP TITLEBAR --- */
+:root.dark .app-titlebar {
+  background: rgba(8, 7, 10, 0.95) !important;
+  border-bottom: 1px solid rgba(229, 57, 53, 0.20) !important;
+  backdrop-filter: blur(12px) !important;
+}
+
+/* Login Card Planet */
+.card .logo.mars-login-logo {
+  background: none !important;
+  box-shadow: none !important;
+  width: 56px !important;
+  height: 56px !important;
+  margin-bottom: 16px !important;
+}
+.card .logo.mars-login-logo img {
+  width: 56px !important;
+  height: 56px !important;
+  border-radius: 50% !important;
+  animation: mars-heartbeat-glow 1.15s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+}
+
+
+/* === MARS REFINED SOFT HEARTBEAT CHIPS === */
+
+/* Refined soft heartbeat pulse for quick-chips: human resting heart rate (~70 bpm) with gentle neon breathing */
+@keyframes mars-soft-heartbeat-chip {
+  0%, 100% {
+    border-color: rgba(229, 57, 53, 0.20) !important;
+    box-shadow: 0 0 6px rgba(229, 57, 53, 0.10), inset 0 0 4px rgba(183, 28, 28, 0.05) !important;
+  }
+  14% {
+    border-color: rgba(229, 57, 53, 0.36) !important;
+    box-shadow: 0 0 10px rgba(229, 57, 53, 0.20), inset 0 0 6px rgba(211, 47, 47, 0.09) !important;
+  }
+  28% {
+    border-color: rgba(229, 57, 53, 0.23) !important;
+    box-shadow: 0 0 7px rgba(229, 57, 53, 0.13), inset 0 0 5px rgba(183, 28, 28, 0.06) !important;
+  }
+  42% {
+    border-color: rgba(255, 82, 82, 0.40) !important;
+    box-shadow: 0 0 12px rgba(229, 57, 53, 0.24), inset 0 0 7px rgba(229, 57, 53, 0.10) !important;
+  }
+  70% {
+    border-color: rgba(229, 57, 53, 0.20) !important;
+    box-shadow: 0 0 6px rgba(229, 57, 53, 0.10), inset 0 0 4px rgba(183, 28, 28, 0.05) !important;
+  }
+}
+
+
+/* Unified translucent glassmorphic quick-chips with soft pulsating neon */
+.quick-chips-bar {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 6px 12px;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  margin-bottom: 6px;
+}
+.quick-chips-bar::-webkit-scrollbar {
+  display: none;
+}
+.quick-chip {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  background: rgba(14, 11, 16, 0.58) !important;
+  border: 1px solid rgba(229, 57, 53, 0.22) !important;
+  color: rgba(255, 195, 195, 0.90) !important;
+  font-size: 12px !important;
+  font-weight: 450 !important;
+  padding: 6px 14px !important;
+  border-radius: 999px !important;
+  cursor: pointer !important;
+  white-space: nowrap !important;
+  user-select: none !important;
+  backdrop-filter: blur(12px) !important;
+  -webkit-backdrop-filter: blur(12px) !important;
+  animation: mars-soft-heartbeat-chip 1.25s ease-in-out infinite !important;
+  transition: background 0.25s ease, border-color 0.25s ease, color 0.25s ease, transform 0.2s ease, box-shadow 0.25s ease !important;
+}
+.quick-chip:hover, .quick-chip:active {
+  background: rgba(229, 57, 53, 0.20) !important;
+  border-color: rgba(255, 82, 82, 0.55) !important;
+  color: #ffffff !important;
+  box-shadow: 0 0 14px rgba(229, 57, 53, 0.35) !important;
+  transform: translateY(-1px) !important;
+}
