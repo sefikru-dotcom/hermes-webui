@@ -10455,42 +10455,9 @@ function _renderUpdateWhatsNewLinks(data){
   _appendUpdateDiffLinks(container,targets,"What's new: ");
 }
 function _showUpdateBanner(data){
-  const parts=[];
-  const webuiPart=_formatUpdateTargetStatus('WebUI',data.webui);
-  const agentPart=_formatUpdateTargetStatus('Agent',data.agent);
-  if(webuiPart) parts.push(webuiPart);
-  if(agentPart) parts.push(agentPart);
-  window._updateData=data;
-  const btnApply=$('btnApplyUpdate');
-  if(btnApply){
-    const webuiManual=!!(data&&data.webui&&data.webui.manual_update&&data.webui.behind>0);
-    const webuiUpdatable=!!(data&&data.webui&&data.webui.behind>0&&!webuiManual);
-    const agentUpdatable=!!(data&&data.agent&&data.agent.behind>0);
-    const hasApplyTargets=webuiUpdatable||agentUpdatable;
-    btnApply.disabled=!hasApplyTargets;
-    btnApply.style.display=hasApplyTargets?'':'none';
-    if(webuiManual){
-      const forceBtn=$('btnForceUpdate');
-      if(forceBtn){forceBtn.disabled=true;forceBtn.style.display='none';forceBtn.dataset.target='';}
-      const clearLockBtn=$('btnClearUpdateLock');
-      if(clearLockBtn){clearLockBtn.disabled=true;clearLockBtn.style.display='none';clearLockBtn.dataset.target='';}
-    }
-  }
-  if(!parts.length){
-    _renderUpdateWhatsNewLinks(data);
-    const staleBanner=$('updateBanner');
-    if(staleBanner) staleBanner.classList.remove('visible');
-    return;
-  }
-  const msg=$('updateMsg');
-  if(msg){
-    const manualInstruction=_formatManualUpdateInstruction(data&&data.webui);
-    msg.textContent='\u2B06 '+parts.join(', ')+' available'+(manualInstruction?' · '+manualInstruction:'');
-  }
-  const banner=$('updateBanner');
-  if(banner) banner.classList.add('visible');
-  const summaryMode=window._whatsNewSummaryEnabled===true?'summary':'diff';
-  _renderUpdateWhatsNewLinks(data,{mode:summaryMode});
+  const staleBanner=$('updateBanner');
+  if(staleBanner) staleBanner.classList.remove('visible');
+  return;
 }
 function _i18nUpdateText(key, fallback){
   if(typeof t==='function'){
@@ -10516,69 +10483,8 @@ function _formatUpdateApplyExceptionMessage(error){
   return _i18nUpdateText('update_failed_prefix','Update failed: ')+message;
 }
 async function applyUpdates(){
-  if(window._updateApplyInFlight) return;
-  window._updateApplyInFlight=true;
-  const updateText=(key,fallback)=>(typeof _i18nUpdateText==='function'?_i18nUpdateText(key,fallback):fallback);
-  const btn=$('btnApplyUpdate');
-  const resetApplyButton=(delayMs)=>{
-    const reset=()=>{
-      window._updateApplyInFlight=false;
-      if(btn){btn.disabled=false;btn.textContent=updateText('update_now','Update Now');}
-    };
-    if(delayMs>0) setTimeout(reset,delayMs);
-    else reset();
-  };
-  if(btn){btn.disabled=true;btn.textContent=updateText('update_updating','Updating\u2026');}
-  const errEl=$('updateError');
-  if(errEl){errEl.style.display='none';errEl.textContent='';}
-  // Hide any leftover force-update button from a prior conflict so a fresh
-  // retry starts clean (otherwise stale state points at the wrong target).
-  const forceBtnReset=$('btnForceUpdate');
-  if(forceBtnReset){forceBtnReset.style.display='none';forceBtnReset.dataset.target='';}
-  const targets=[];
-  if(window._updateData?.agent?.behind>0) targets.push('agent');
-  if(window._updateData?.webui?.behind>0&&!window._updateData?.webui?.manual_update) targets.push('webui');
-  if(!targets.length){
-    const msg=updateText('update_no_target','No update target selected. Refresh update status and retry.');
-    if(errEl){errEl.textContent=msg;errEl.style.display='block';}
-    else showToast(msg,5000,'error');
-    resetApplyButton(0);
-    return;
-  }
-  try{
-    const stashConflictMessages=[];
-    const baselineServerIdentity = await _readHealthServerIdentity();
-    for(const target of targets){
-      // Send the channel the CHECK reported for this target (what was actually
-      // offered in the banner), not a fresh settings read — otherwise a channel
-      // switch whose debounced autosave hasn't landed yet races apply, which
-      // would then read the OLD saved channel (Codex gate). webui carries the
-      // channel; agent is channel-neutral server-side so omitting it is fine.
-      const _applyBody={target};
-      const _ch=window._updateData?.[target]?.channel;
-      if(_ch==='stable'||_ch==='experimental') _applyBody.channel=_ch;
-      const res=await api('/api/updates/apply',{method:'POST',body:JSON.stringify(_applyBody),timeoutMs:120000});
-      if(!res.ok){
-        _showUpdateError(target,res);
-        resetApplyButton(0);
-        return;
-      }
-      if(res.stash_conflict){
-        stashConflictMessages.push('Update applied ('+target+'): '+(res.message||'Local changes were preserved in git stash.'));
-        if(errEl){errEl.textContent=stashConflictMessages.join('\n\n');errEl.style.display='block';}
-      }
-    }
-    const stashConflictMessage=stashConflictMessages.join('\n\n');
-    showToast(stashConflictMessage||'Update applied — restarting…',stashConflictMessages.length?10000:undefined,stashConflictMessages.length?'warning':undefined);
-    sessionStorage.removeItem('hermes-update-checked');
-    sessionStorage.removeItem('hermes-update-dismissed');
-    _waitForServerThenReload({baselineServerIdentity});
-  }catch(e){
-    const msg=_formatUpdateApplyExceptionMessage(e);
-    if(errEl){errEl.textContent=msg;errEl.style.display='block';}
-    else showToast(msg);
-    resetApplyButton(_isUpdateApplyNetworkError(e)?5000:0);
-  }
+  if(typeof showToast==='function') showToast('Обновления отключены в проекте «Марс».', 3000, 'warning');
+  return;
 }
 function _showUpdateError(target,res){
   const errEl=$('updateError');

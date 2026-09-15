@@ -1363,30 +1363,15 @@ def cached_update_status(*, include_agent=True, channel=None):
 
 
 def check_for_updates(force=False, *, include_agent=True, channel=None):
-    """Return cached update status for webui and agent repos."""
-    global _check_in_progress
-    include_agent = bool(include_agent)
-    if channel is None:
-        channel = _read_update_channel()
-    channel = _normalize_channel(channel)
-    with _cache_lock:
-        # Cache is only valid when BOTH the channel AND include_agent match —
-        # a channel switch must not serve the previous channel's answer, and an
-        # in-progress check for the other channel must not short-circuit this one
-        # with a stale cross-channel payload (Codex SILENT #5).
-        cache_matches = (
-            _update_cache.get('include_agent') == include_agent
-            and _update_cache.get('channel') == channel
-        )
-        if (
-            not force
-            and cache_matches
-            and time.time() - _update_cache['checked_at'] < CACHE_TTL
-        ):
-            return dict(_update_cache)
-        if _check_in_progress and cache_matches:
-            return dict(_update_cache)  # another thread is already checking this channel
-        _check_in_progress = True
+    """Марс: обновления отключены, изолированная кастомная сборка."""
+    return {
+        'webui': {'name': 'webui', 'behind': 0, 'up_to_date': True, 'current': 'mars-custom', 'latest': 'mars-custom'},
+        'agent': {'name': 'agent', 'behind': 0, 'up_to_date': True, 'current': 'mars-custom', 'latest': 'mars-custom'},
+        'checked_at': time.time(),
+        'include_agent': False,
+        'channel': 'stable',
+        'disabled': True,
+    }
 
     try:
         # Run checks outside the lock (network I/O)
@@ -1929,32 +1914,7 @@ def _discard_local_changes(path: Path, reset_ref: str) -> bool:
 
 
 def apply_force_update(target: str, channel=None) -> dict:
-    """Discard local changes for the requested update target.
-
-    Unlike apply_update() which requires a clean working tree and refuses
-    merge conflicts, this discards all local modifications (checkout .) and
-    resets to the selected update ref. A dirty stable WebUI checkout with no
-    promoted ref resets to its symbolic HEAD so the commit itself is unchanged.
-
-    The endpoint is called after the user has confirmed they want to discard
-    local changes, including the stable no-ref dirty-checkout recovery path.
-
-    CHANNEL SAFETY (rewind guard): ``reset --hard`` is destructive. When the
-    selected channel resolves to a ref that is an ANCESTOR of HEAD (i.e. the
-    checkout is already ahead of the channel — e.g. an ex-experimental install
-    switching back to stable), resetting to it would REWIND code and on-disk
-    state. We refuse and return a clear message instead of silently downgrading.
-    A deliberate rollback would be a separate, explicit feature.
-    """
-    if channel is None:
-        channel = _read_update_channel()
-    channel = _normalize_channel(channel)
-    blocker_snapshot = _restart_blocker_snapshot()
-    if blocker_snapshot.get('restart_blocked'):
-        return _restart_blocked_response(target, blocker_snapshot)
-
-    if not _apply_lock.acquire(blocking=False):
-        return {'ok': False, 'message': 'Update already in progress'}
+    return {'ok': False, 'message': 'Автоматические обновления отключены в проекте «Марс».'}
     try:
         if target == 'webui':
             path = REPO_ROOT
@@ -2061,20 +2021,7 @@ def apply_force_update(target: str, channel=None) -> dict:
 
 
 def apply_update(target, channel=None):
-    """Stash, pull --ff-only, pop for the given target repo."""
-    if channel is None:
-        channel = _read_update_channel()
-    channel = _normalize_channel(channel)
-    blocker_snapshot = _restart_blocker_snapshot()
-    if blocker_snapshot.get('restart_blocked'):
-        return _restart_blocked_response(target, blocker_snapshot)
-
-    if not _apply_lock.acquire(blocking=False):
-        return {'ok': False, 'message': 'Update already in progress'}
-    try:
-        return _apply_update_inner(target, channel)
-    finally:
-        _apply_lock.release()
+    return {'ok': False, 'message': 'Автоматические обновления отключены в проекте «Марс».'}
 
 
 def _restore_stash_after_pull_failure(

@@ -12175,86 +12175,8 @@ function _syncUpdateChannelBadge(channel){
 }
 
 async function checkUpdatesNow(channelOverride){
-  const btn=$('btnCheckUpdatesNow');
-  const label=$('checkUpdatesLabel');
-  const spinner=$('checkUpdatesSpinner');
   const status=$('checkUpdatesStatus');
-  if(!btn||!label) return;
-  // Disable button, show spinner
-  btn.disabled=true;
-  if(spinner) spinner.style.display='';
-  if(label) label.textContent=t('settings_checking');
-  if(status) status.textContent='';
-
-  try {
-    // Pass the channel explicitly when the caller has one (e.g. the dropdown
-    // just switched) so the check cannot race the debounced settings autosave
-    // and answer for the previous channel. Omit otherwise → server uses the
-    // saved setting. (Fable UX gate.)
-    const _checkBody={force:true};
-    if(channelOverride==='stable'||channelOverride==='experimental') _checkBody.channel=channelOverride;
-    const data=await api('/api/updates/check',{method:'POST',body:JSON.stringify(_checkBody),timeoutMs:300000});
-    if(data.disabled){
-      if(status){status.textContent=t('settings_updates_disabled');status.style.color='var(--muted)';}
-    } else {
-      const errorParts=[];
-      const formatUpdateError=(typeof _formatUpdateCheckError==='function')
-        ? _formatUpdateCheckError
-        : ((label,info)=>info&&info.error?label:null);
-      const webuiError=formatUpdateError('WebUI',data.webui);
-      const agentError=formatUpdateError('Agent',data.agent);
-      if(webuiError) errorParts.push(webuiError);
-      if(agentError) errorParts.push(agentError);
-      const parts=[];
-      const formatUpdatePart=(typeof _formatUpdateTargetStatus==='function')
-        ? _formatUpdateTargetStatus
-        : ((label,info)=>info&&info.behind>0?label+': '+info.behind:null);
-      const webuiPart=formatUpdatePart('WebUI',data.webui);
-      const agentPart=formatUpdatePart('Agent',data.agent);
-      if(webuiPart) parts.push(webuiPart);
-      if(agentPart) parts.push(agentPart);
-      const manualInstruction=(typeof _formatManualUpdateInstruction==='function')
-        ? _formatManualUpdateInstruction(data.webui)
-        : null;
-      // Track non-git targets separately so a mixed deployment (one git
-      // checkout + one no-git install) never hides the "can't check" state
-      // behind an up-to-date summary (#4356).
-      const noGitParts=[];
-      if(data.webui&&data.webui.no_git&&!data.webui.manual_update) noGitParts.push('WebUI');
-      if(data.agent&&data.agent.no_git&&!data.agent.ignored) noGitParts.push('Agent');
-      if(parts.length){
-        let txt=t('settings_updates_available').replace('{count}',parts.join(', '));
-        if(manualInstruction) txt+=' · '+manualInstruction;
-        if(noGitParts.length) txt+=' · '+t('settings_update_no_git');
-        if(status){status.textContent=txt;status.style.color='var(--accent)';}
-        // Also trigger the update banner
-        if(typeof _showUpdateBanner==='function') _showUpdateBanner(data);
-      } else if(errorParts.length){
-        if(status){status.textContent=t('settings_update_check_failed')+': '+errorParts.join(', ');status.style.color='var(--error)';}
-      } else if(noGitParts.length){
-        if(status){status.textContent=t('settings_update_no_git');status.style.color='var(--muted)';}
-      } else {
-        if(status){status.textContent=t('settings_up_to_date');status.style.color='var(--success)';}
-        if(typeof _showUpdateBanner==='function') _showUpdateBanner(data);
-      }
-    }
-  } catch(e){
-    // Never expose raw e.message in UI — log to console for debugging only
-    console.warn('[checkUpdatesNow]', e);
-    // Show a generic user-facing error; if the API returned a message body use it
-    let userMsg=t('settings_update_check_failed');
-    if(e&&e.response){
-      try{
-        const body=JSON.parse(e.response);
-        if(body.error) userMsg=String(body.error).substring(0,120);
-      }catch(_){}
-    }
-    if(status){status.textContent=userMsg;status.style.color='var(--error)';}
-  } finally {
-    btn.disabled=false;
-    if(spinner) spinner.style.display='none';
-    if(label) label.textContent=t('settings_check_now');
-  }
+  if(status){status.textContent='Марс: актуальная кастомная сборка';status.style.color='var(--muted)';}
 }
 
 // ── Auxiliary Models ──────────────────────────────────────────────────────────
