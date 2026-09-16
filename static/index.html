@@ -8,18 +8,18 @@
      MUST appear before manifest/favicon links so browsers resolve relative URLs against the
      correct base when the page is served from /session/<id> routes. See #2226. -->
 <script>(function(){var path=location.pathname,marker='/session/',i=path.indexOf(marker),p;i>=0?p=(path.slice(0,i+1)||'/'):p=(path.endsWith('/')?path:(path.replace(/\/[^\/]*$/,'/')||'/'));document.write('<base href="'+location.origin+p+'">');})()</script>
-<link rel="icon" type="image/svg+xml" href="static/favicon.svg?v=mars3">
-<link rel="icon" type="image/png" sizes="32x32" href="static/favicon-32.png?v=mars3">
-<link rel="icon" type="image/png" sizes="192x192" href="static/favicon-192.png?v=mars3">
-<link rel="icon" type="image/png" sizes="512x512" href="static/favicon-512.png?v=mars3">
-<link rel="shortcut icon" href="static/favicon.ico?v=mars3">
-<link rel="manifest" href="manifest.json?v=mars3" crossorigin="use-credentials">
+<link rel="icon" type="image/svg+xml" href="static/favicon.svg?v=mars4">
+<link rel="icon" type="image/png" sizes="32x32" href="static/favicon-32.png?v=mars4">
+<link rel="icon" type="image/png" sizes="192x192" href="static/favicon-192.png?v=mars4">
+<link rel="icon" type="image/png" sizes="512x512" href="static/favicon-512.png?v=mars4">
+<link rel="shortcut icon" href="static/favicon.ico?v=mars4">
+<link rel="manifest" href="manifest.json?v=mars4" crossorigin="use-credentials">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Марс">
-<link rel="apple-touch-icon" sizes="192x192" href="static/favicon-192.png?v=mars3">
-<link rel="apple-touch-icon" sizes="512x512" href="static/favicon-512.png?v=mars3">
+<link rel="apple-touch-icon" sizes="192x192" href="static/favicon-192.png?v=mars4">
+<link rel="apple-touch-icon" sizes="512x512" href="static/favicon-512.png?v=mars4">
 <script>(function(){try{var _hadAppearance=localStorage.getItem('hermes-theme')!==null||localStorage.getItem('hermes-skin')!==null;var themes={light:1,dark:1,system:1},skins={codex:1,terracotta:1,default:1,ares:1,mono:1,graphite:1,github:1,slate:1,poseidon:1,sisyphus:1,charizard:1,sienna:1,catppuccin:1,hepburn:1,nous:1,'geist-contrast':1,neon:1,'neon-soft':1,'neon-paint':1,zeus:1,'verdigris':1},legacy={slate:['dark','slate'],solarized:['dark','poseidon'],monokai:['dark','sisyphus'],nord:['dark','slate'],oled:['dark','default']},t=(localStorage.getItem('hermes-theme')||'dark').toLowerCase(),s=(localStorage.getItem('hermes-skin')||'').toLowerCase(),m=legacy[t],theme=m?m[0]:(themes[t]?t:'dark');var pendingExt=s&&s!=='default'&&!skins[s]&&!legacy[s];var skin=skins[s]?s:(pendingExt?s:(m?m[1]:'default'));if(_hadAppearance){localStorage.setItem('hermes-theme',theme);localStorage.setItem('hermes-skin',skin);}if(theme==='system')theme=window.matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light';if(theme==='dark')document.documentElement.classList.add('dark');if(skin!=='default')document.documentElement.dataset.skin=skin;}catch(e){document.documentElement.classList.add('dark');}})()</script>
 <script>(function(){try{var fs=localStorage.getItem('hermes-font-size');if(fs&&fs!=='default')document.documentElement.dataset.fontSize=fs;}catch(e){}})()</script>
 <!-- theme-color: surfaces the active app chrome color to native status bars (Safari status bar, PWA, native WKWebView wrappers). Updated dynamically by boot.js when theme/skin changes. The light/dark default values match style.css :root --sidebar / :root.dark --sidebar. -->
@@ -133,7 +133,7 @@
   </button>
   </div>
   <div class="app-titlebar-inner">
-    <span class="app-titlebar-icon" aria-hidden="true"><img src="static/mars-logo.png?v=mars3" width="20" height="20" alt="Марс" class="mars-tb-planet"></span>
+    <span class="app-titlebar-icon" aria-hidden="true"><img src="static/mars-logo.png?v=mars4" width="20" height="20" alt="Марс" class="mars-tb-planet"></span>
     <span class="app-titlebar-title" id="appTitlebarTitle">Марс</span>
     <span class="app-titlebar-sub" id="appTitlebarSub" hidden></span>
   </div>

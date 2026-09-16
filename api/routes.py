@@ -10953,7 +10953,7 @@ button:hover{background:rgba(124,185,255,.25)}
 .err{color:#e94560;font-size:12px;margin-top:10px;display:none}
 </style></head><body>
 <div class="card">
-  <div class="logo mars-login-logo"><img src="static/mars-logo.png?v=mars3" width="56" height="56" alt="Марс"></div>
+  <div class="logo mars-login-logo"><img src="static/mars-logo.png?v=mars4" width="56" height="56" alt="Марс"></div>
   <h1>{{BOT_NAME}}</h1>
   <p class="sub">{{LOGIN_SUBTITLE}}</p>
   <form id="login-form" data-invalid-pw="{{LOGIN_INVALID_PW}}" data-conn-failed="{{LOGIN_CONN_FAILED}}">
