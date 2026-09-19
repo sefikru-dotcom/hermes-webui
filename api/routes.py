@@ -14634,6 +14634,9 @@ def handle_get(handler, parsed) -> bool:
             handler,
             {
                 "name": active_profile_name,
+                "display_name": profiles_api._profile_display_name(
+                    profiles_api.get_active_hermes_home()
+                ),
                 "path": str(profiles_api.get_active_hermes_home()),
                 "is_default": profiles_api._is_root_profile(active_profile_name),
                 "default_workspace": _profile_default_workspace,
@@ -18868,6 +18871,11 @@ def _handle_sse_stream(handler, parsed):
                 stream.unsubscribe(subscriber)
             except Exception:
                 pass
+        try:
+            import gc
+            gc.collect(1)
+        except Exception:
+            pass
     return True
 
 

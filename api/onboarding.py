@@ -823,6 +823,29 @@ def _status_from_runtime(cfg: dict, imports_ok: bool) -> dict:
     }
 
 
+def _profile_isolation_active() -> bool:
+    """True when this WebUI instance serves one isolated profile.
+
+    Mirrors ``api.profiles._is_isolated_profile_mode`` without importing it at
+    module scope (that module reaches back into config/settings at import
+    time). The same two gates apply: the explicit operator opt-in env var AND a
+    profile-shaped HERMES_HOME. Used to keep the first-run wizard enabled for
+    per-user deployments so the new user sets their own password.
+    """
+    opt_in = os.getenv("HERMES_WEBUI_ISOLATED_PROFILE", "").strip().lower()
+    if opt_in not in {"1", "true", "yes", "on"}:
+        return False
+    try:
+        from api.profiles import _is_isolated_profile_mode
+
+        return bool(_is_isolated_profile_mode())
+    except Exception:
+        # Fail closed on the runtime flag alone: a real deployment sets both,
+        # and treating an import hiccup as "not isolated" would silently open
+        # the chat without a password.
+        return True
+
+
 def _build_setup_catalog(cfg: dict) -> dict:
     current_provider = _extract_current_provider(cfg) or "openrouter"
     current_model = _extract_current_model(cfg)
@@ -932,6 +955,15 @@ def get_onboarding_status() -> dict:
         bool(runtime.get("chat_ready"))
         or (_is_non_wizard_provider and bool(runtime.get("provider_configured")))
     )
+
+    # Isolated multi-user deployments (one profile per person) MUST run the
+    # first-run wizard even when the agent is already configured: the wizard is
+    # what lets the new user set their own password on first entry. Auto-
+    # completing onboarding here would leave the profile passwordless and the
+    # chat open to anyone who has the URL. Only the explicit operator opt-out
+    # (HERMES_WEBUI_SKIP_ONBOARDING) can still bypass the wizard.
+    if _profile_isolation_active():
+        config_auto_completed = False
 
     # Persist the flag so it survives future transient import failures (e.g. after
     # a git branch switch in the hermes-agent repo).  Without this, a CLI-configured

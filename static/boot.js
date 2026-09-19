@@ -1004,20 +1004,21 @@ function _micToastKeyForRecognitionError(error){
       _micRestartCount=0;
       let interim='';
       let final=_finalText;
-      for(let i=event.resultIndex;i<event.results.length;i++){
-        const t=event.results[i][0].transcript;
-        if(event.results[i].isFinal){ final+=t; _finalText=final; }
-        else{ interim+=t; }
+      for(let i=0;i<event.results.length;i++){
+        const t=(event.results[i]&&event.results[i][0]&&event.results[i][0].transcript)||'';
+        if(event.results[i].isFinal){ final=_sttMerge(final,t); }
+        else{ interim=_sttMerge(interim,t); }
       }
-      ta.value=_prefix+(final||interim);
+      _finalText=final;
+      ta.value=_prefix+(final+(interim?(final?' ':'')+interim:''));
       autoResize();
     };
 
     sr.onend=()=>{
       const committed=_finalText
         ? (_prefix&&!_prefix.endsWith(' ')&&!_prefix.endsWith('\n')
-            ? _prefix+' '+_finalText.trimStart()
-            : _prefix+_finalText)
+            ? _sttMerge(_prefix,_finalText.trimStart())
+            : _sttMerge(_prefix,_finalText))
         : ta.value;
       ta.value=committed;
       autoResize();
@@ -1659,12 +1660,16 @@ window.renderTranscript=function(container, messages, opts){
       clearTimeout(_silenceTimer);
       let interim='';
       let final=_finalText;
-      for(let i=event.resultIndex;i<event.results.length;i++){
-        const txt=event.results[i][0].transcript;
-        if(event.results[i].isFinal){ final+=txt; _finalText=final; }
-        else{ interim+=txt; }
+      // Rebuild from result 0 instead of resultIndex: Chrome/Android re-emits the
+      // whole accumulated phrase with resultIndex=0, so incremental "+=" appended
+      // the same text again ("1" -> "11 2" -> "111 21 2 3").
+      for(let i=0;i<event.results.length;i++){
+        const txt=(event.results[i]&&event.results[i][0]&&event.results[i][0].transcript)||'';
+        if(event.results[i].isFinal){ final=_sttMerge(final,txt); }
+        else{ interim=_sttMerge(interim,txt); }
       }
-      ta.value=final||interim;
+      _finalText=final;
+      ta.value=final+(interim?(final?' ':'')+interim:'');
       autoResize();
 
       // Auto-send on silence after final result
@@ -1758,12 +1763,15 @@ window.renderTranscript=function(container, messages, opts){
     if(typeof _stripForTTS==='function') clean=_stripForTTS(rawText);
     else{
       // Basic strip: remove code blocks, images, links
-      clean=clean.replace(/```[\s\S]*?```/g,' code block ')
+      clean=clean.replace(/```[\s\S]*?```/g,' ')
         .replace(/`([^`]*)`/g,'$1')
         .replace(/!\[([^\]]*)\]\([^)]*\)/g,'$1')
         .replace(/\[([^\]]*)\]\([^)]*\)/g,'$1')
         .replace(/#{1,6}\s/g,'')
         .replace(/[*_~]+/g,'')
+        .replace(/["'«»„“‟”`]/g,'')
+        .replace(/[~#*_|\\/]/g,' ')
+        .replace(/\s+[-—–]\s+/g,', ')
         .replace(/\n{2,}/g,'. ')
         .replace(/\n/g,' ')
         .trim();
@@ -3323,6 +3331,26 @@ window._mirrorSpeechSettingsFromServer=_mirrorSpeechSettingsFromServer;
         ? s.worklog_details_expanded_default
         : s.activity_feed_expanded_default
     );
+    // Mars chat UX: reasoning visibility has three states instead of the old
+    // binary show/hide, so thinking can be folded (kept in the DOM, one row per
+    // turn, click to expand) rather than deleted outright.
+    window._thinkingModeSetting=(typeof s.thinking_mode==='string'&&['auto','expanded','collapsed','hidden'].includes(s.thinking_mode))
+      ? s.thinking_mode
+      : 'auto';
+    // 'auto' (unset / other profiles) keeps the pre-existing behaviour: live
+    // reasoning is rendered expanded, exactly as before this option existed.
+    window._thinkingMode=(window._thinkingModeSetting==='collapsed'||window._thinkingModeSetting==='hidden'||window._thinkingModeSetting==='expanded')
+      ? window._thinkingModeSetting
+      : 'expanded';
+    window._showThinking=window._thinkingMode!=='hidden';
+    window._showToolCalls=s.show_tool_calls!==false;
+    window._autoCollapsePreviousTurns=(s.auto_collapse_previous_turns!==false);
+    try{
+      document.documentElement.classList.toggle('mars-thinking-collapsed',window._thinkingMode==='collapsed');
+      document.documentElement.classList.toggle('mars-hide-tools',!window._showToolCalls);
+      document.documentElement.classList.toggle('mars-autocollapse-turns',window._autoCollapsePreviousTurns);
+      document.documentElement.classList.toggle('mars-transparent-stream',window._chatActivityDisplayMode==='transparent_stream');
+    }catch(_){}
     window._workspaceTodosTab=!!s.workspace_todos_tab;
     if(typeof _applyWorkspaceTodosTabVisibility==='function') _applyWorkspaceTodosTabVisibility();
     window._sidebarDensity=(s.sidebar_density==='detailed'?'detailed':'compact');
@@ -3586,6 +3614,7 @@ window._mirrorSpeechSettingsFromServer=_mirrorSpeechSettingsFromServer;
       if (p && typeof p === 'object' && typeof p.name === 'string') {
         _bootActiveProfileUnauthRedirectBudget.clearAttempted(markerStorage);
         if (p.default_workspace) S._profileDefaultWorkspace = p.default_workspace;
+        _rememberProfileDisplayNames([{name: p.name, display_name: p.display_name}]);
         return {status: 'resolved', profile: p.name || 'default', isDefault: !!p.is_default};
       }
       if (p === undefined && !alreadyAttempted) {
@@ -3616,11 +3645,12 @@ window._mirrorSpeechSettingsFromServer=_mirrorSpeechSettingsFromServer;
   S.activeProfile = activeProfileState.profile;
   S.activeProfileIsDefault = activeProfileState.isDefault;
   applyBotName();
+  if(typeof window.renderQuickChips==='function') window.renderQuickChips(S.activeProfile);
   // Update profile chip label immediately
   const profileLabel=$('profileChipLabel');
-  if(profileLabel) profileLabel.textContent=S.activeProfile||'default';
+  if(profileLabel) profileLabel.textContent=profileDisplayLabel(S.activeProfile);
   const titleLabel=$('titlebarProfileLabel');
-  if(titleLabel) titleLabel.textContent=S.activeProfile||'default';
+  if(titleLabel) titleLabel.textContent=profileDisplayLabel(S.activeProfile);
   const profileIntent=(typeof _profileQueryIntentFromLocation==='function')?_profileQueryIntentFromLocation():null;
   const _savedLocalBeforeProfileSwitch=localStorage.getItem('hermes-webui-session');
   const _profileSwitchProfileBefore=S.activeProfile||'default';
@@ -3938,3 +3968,29 @@ function _showServerStopped() {
   var stoppedMsg = (typeof t === 'function' ? t('settings_shutdown_stopped_message') : 'Server stopped. You can close this tab.');
   document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;color:var(--muted);font-family:var(--font-ui);font-size:14px"><p>' + stoppedMsg + '</p></div>';
 }
+
+
+// --- Mars: dictation de-duplication -----------------------------------------
+// Browser speech engines (notably Chrome on Android) frequently re-emit the whole
+// accumulated transcript of a run starting at resultIndex 0. Appending chunks with
+// "+=" duplicated everything ("1" -> "11 2" -> "111 21 2 3 41 2 3 4 5"). Records
+// are merged additively but collapse cumulative prefixes and exact tail repeats.
+function _sttMerge(acc,chunk){
+  const norm=(v)=>String(v==null?'':v).replace(/\s+/g,' ').trim();
+  const a=norm(acc);
+  const b=norm(chunk);
+  if(!b) return a;
+  if(!a) return b;
+  if(b.startsWith(a+' ')) return b;   // cumulative re-emission: chunk already holds all we had
+  if(a.startsWith(b+' ')) return a;   // shorter duplicate arrived: keep the longer one
+  const aw=a.split(' ');
+  const bw=b.split(' ');
+  const max=Math.min(aw.length,bw.length);
+  for(let k=max;k>0;k--){              // word-level overlap: tail of a == head of b
+    if(aw.slice(aw.length-k).join(' ')===bw.slice(0,k).join(' ')){
+      return aw.slice(0,aw.length-k).concat(bw).join(' ');
+    }
+  }
+  return a+' '+b;
+}
+

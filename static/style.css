@@ -4985,6 +4985,33 @@ main.main > #mainPlugin{display:none;}
 .panel-head-btn:hover{background:var(--accent-bg);color:var(--accent-text);}
 .panel-head-btn:disabled,.panel-head-btn[aria-busy="true"]{opacity:.5;cursor:wait;}
 .panel-head-btn:disabled:hover,.panel-head-btn[aria-busy="true"]:hover{background:transparent;color:var(--muted);}
+/* Titlebar activity-display mode switch (cycle button) */
+.app-titlebar-activity-mode{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 9px;background:none;border:none;color:var(--muted);border-radius:8px;cursor:pointer;font-size:11px;font-weight:600;flex-shrink:0;-webkit-tap-highlight-color:transparent;transition:background-color .15s,color .15s;}
+.app-titlebar-activity-mode:hover{background:var(--hover-bg);color:var(--text);}
+.app-titlebar-activity-mode .activity-mode-ico{display:inline-flex;align-items:center;justify-content:center;line-height:1;}
+.app-titlebar-activity-mode svg{width:16px;height:16px;display:block;flex:0 0 auto;}
+.app-titlebar-activity-mode .am-ico{display:none;}
+.app-titlebar-activity-mode[data-mode="compact_worklog"] .am-ico-compact{display:block;}
+.app-titlebar-activity-mode[data-mode="transparent_stream"] .am-ico-transparent{display:block;}
+.app-titlebar-activity-mode[data-mode="hide_all_activity"] .am-ico-hide{display:block;}
+.app-titlebar-activity-mode .activity-mode-text{white-space:nowrap;}
+@media (max-width: 768px){
+  .app-titlebar-activity-mode{height:44px;}
+}
+@media (max-width: 560px){
+  .app-titlebar-activity-mode{width:44px;height:44px;justify-content:center;padding:0;}
+  .app-titlebar-activity-mode .activity-mode-text{display:none;}
+}
+/* Мини-карточка с пояснением режима (появляется под кнопкой в шапке) */
+.activity-mode-card{position:fixed;z-index:130;max-width:min(304px,calc(100vw - 20px));background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:12px;padding:10px 12px;font-size:12px;line-height:1.45;box-shadow:0 12px 32px rgba(0,0,0,.30);opacity:0;transform:translateY(-6px);transition:opacity .18s ease,transform .18s ease;pointer-events:none;}
+.activity-mode-card.show{opacity:1;transform:translateY(0);pointer-events:auto;cursor:pointer;}
+.activity-mode-card .amc-head{display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600;letter-spacing:.01em;}
+.activity-mode-card .amc-head svg{width:15px;height:15px;flex:0 0 auto;color:var(--accent);}
+.activity-mode-card .amc-desc{margin-top:4px;color:var(--muted);}
+.activity-mode-card .amc-saved{margin-top:6px;font-size:11px;color:var(--muted);opacity:.85;}
+@media (max-width: 560px){
+  .activity-mode-card{max-width:calc(100vw - 16px);}
+}
 .app-titlebar-new-chat:disabled,.app-titlebar-new-chat[aria-busy="true"]{opacity:.5;cursor:wait;}
 .app-titlebar-new-chat:disabled:hover,.app-titlebar-new-chat[aria-busy="true"]:hover{background:transparent;color:var(--muted);}
 .panel-head-btn svg{width:14px;height:14px;display:block;}
@@ -7808,3 +7835,84 @@ html[data-conversation-outline="enabled"] #outlineToggleBtn:not([hidden]){displa
   box-shadow: 0 0 14px rgba(229, 57, 53, 0.35) !important;
   transform: translateY(-1px) !important;
 }
+
+
+/* ── Mars chat UX: folded reasoning (thinking_mode = collapsed) ───────────
+   Reasoning keeps streaming but stays folded: the card shows the tail of the
+   stream as a one-line preview, a click expands it, nothing is dropped. */
+.thinking-card.thinking-card-collapsed .thinking-card-preview{
+  flex:1 1 auto;min-width:0;margin-left:8px;
+  font-size:11.5px;font-style:italic;letter-spacing:.1px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  color:var(--muted,var(--text));opacity:.62;
+}
+.thinking-card.thinking-card-collapsed.open .thinking-card-preview{display:none;}
+.thinking-card:not(.thinking-card-collapsed) .thinking-card-preview{display:none;}
+/* The upstream live-card rules force .thinking-card-body open for
+   [data-thinking-active="1"] rows; !important keeps the folded mode folded
+   while still letting a manual click expand one card. */
+html.mars-thinking-collapsed .thinking-card.thinking-card-collapsed:not(.open) .thinking-card-body{
+  display:none!important;max-height:0!important;padding:0!important;opacity:0!important;
+}
+html.mars-thinking-collapsed .thinking-card.thinking-card-collapsed.open .thinking-card-body{
+  display:block!important;max-height:280px;overflow-y:auto;padding:8px 12px;opacity:1;
+}
+
+/* Folded Worklog reasoning rows (.wl-reason) clip to a few lines and expand on
+   click instead of disappearing. */
+html.mars-thinking-collapsed .wl-reason:not(.mars-th-open){
+  max-height:3.1em;overflow:hidden;cursor:pointer;opacity:.8;
+  -webkit-mask-image:linear-gradient(to bottom,#000 45%,rgba(0,0,0,.15) 100%);
+  mask-image:linear-gradient(to bottom,#000 45%,rgba(0,0,0,.15) 100%);
+  transition:opacity .15s ease;
+}
+html.mars-thinking-collapsed .wl-reason:not(.mars-th-open):hover{opacity:1;}
+html.mars-thinking-collapsed .wl-reason.mars-th-open{
+  max-height:none;opacity:1;cursor:default;
+  -webkit-mask-image:none;mask-image:none;
+}
+
+/* Optional: hide tool-call rows entirely (show_tool_calls = false). */
+html.mars-hide-tools .tool-card-row,
+html.mars-hide-tools .tool-call-group,
+html.mars-hide-tools .transparent-event-row[data-event-type="tool"]{display:none!important;}
+
+/* Thinking mode: hidden (hide reasoning completely) */
+html.mars-thinking-hidden .agent-activity-thinking,
+html.mars-thinking-hidden .wl-reason,
+html.mars-thinking-hidden .thinking-card,
+html.mars-thinking-hidden .transparent-event-row[data-event-type="thinking"]{display:none!important;}
+
+/* Thinking mode: expanded (ensure full expansion on switch) */
+html.mars-thinking-expanded .thinking-card .thinking-card-body{
+  display:block!important;max-height:none!important;opacity:1!important;
+}
+html.mars-thinking-expanded .wl-reason{
+  max-height:none!important;opacity:1!important;cursor:default!important;
+  -webkit-mask-image:none!important;mask-image:none!important;
+}
+
+/* Activity mode: hide_all_activity (Final answer only) */
+html.mars-hide-activity .tool-card-row,
+html.mars-hide-activity .tool-call-group,
+html.mars-hide-activity .tool-worklog-group,
+html.mars-hide-activity .agent-activity-thinking,
+html.mars-hide-activity .wl-reason,
+html.mars-hide-activity .thinking-card,
+html.mars-hide-activity .transparent-event-row,
+html.mars-hide-activity .assistant-segment-worklog-source{display:none!important;}
+
+/* ── Mars chat UX: transcript-wide fold button ────────────────────────────
+   The upstream pills only fold one turn; this folds the whole transcript. */
+#marsTurnFoldBtn{
+  position:absolute;bottom:106px;right:20px;z-index:12;
+  width:38px;height:38px;border-radius:50%;
+  background:var(--surface);border:1px solid var(--border2);
+  color:var(--text);cursor:pointer;
+  display:none;align-items:center;justify-content:center;
+  box-shadow:0 2px 8px rgba(0,0,0,.18);
+  font-size:16px;line-height:1;
+  transition:background .15s ease,border-color .15s ease,color .15s ease;
+}
+html.mars-transparent-stream #marsTurnFoldBtn:not([hidden]){display:flex;}
+#marsTurnFoldBtn:hover{background:var(--accent-bg);border-color:var(--accent-bg-strong);color:var(--accent-text);}

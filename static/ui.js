@@ -8,8 +8,29 @@
 const S={session:null,messages:[],entries:[],busy:false,pendingFiles:[],toolCalls:[],activeStreamId:null,currentDir:'.',activeProfile:'default',activeProfileIsDefault:true,showHiddenWorkspaceFiles:false,todos:[],todoStateMeta:null,_pendingSessionToolsets:null};
 
 function assistantDisplayName(){
-  if(S.activeProfile&&S.activeProfile!=='default') return S.activeProfile.charAt(0).toUpperCase()+S.activeProfile.slice(1);
+  if(S.activeProfile&&S.activeProfile!=='default') return profileDisplayLabel(S.activeProfile);
   return window._botName||'Hermes';
+}
+
+// Human-friendly profile labels: ``display_name`` from a profile's profile.yaml,
+// sent by /api/profiles and /api/profile/active (/api/profile/switch).
+// The canonical profile id stays in S.activeProfile — it drives message routing
+// and must never be replaced by a label.
+function _rememberProfileDisplayNames(rows){
+  if(!Array.isArray(rows)) return;
+  if(!S.profileDisplayNames) S.profileDisplayNames={};
+  for(const r of rows){
+    if(!r||typeof r.name!=='string') continue;
+    const label=(typeof r.display_name==='string')?r.display_name.trim():'';
+    if(label) S.profileDisplayNames[r.name]=label;
+    else delete S.profileDisplayNames[r.name];
+  }
+}
+function profileDisplayLabel(name){
+  const n=(typeof name==='string'&&name.trim())?name.trim():'default';
+  const map=S.profileDisplayNames;
+  if(map&&map[n]) return map[n];
+  return n;
 }
 const INFLIGHT={};  // keyed by session_id while request in-flight
 const SESSION_QUEUES={};  // keyed by session_id for queued follow-up turns
@@ -9068,6 +9089,12 @@ function _stripForTTS(text){
   text=text.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{FE00}-\u{FE0F}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FA6F}\u{1FA70}-\u{1FAFF}\u{200D}]/gu,'');
   // Strip HTML tags that may leak through markdown
   text=text.replace(/<[^>]+>/g,' ');
+  // Remove quotes (Russian, ASCII, curly)
+  text=text.replace(/["'«»„“‟”`]/g,'');
+  // Remove tildes, hashes, bullet points, asterisks, underscores, pipes
+  text=text.replace(/[~#*_|\\/]/g,' ');
+  // Replace dashes/em-dashes surrounded by spaces or newlines with a short comma-pause
+  text=text.replace(/\s+[-—–]\s+/g,', ');
   // Collapse whitespace
   text=text.replace(/\s+/g,' ').trim();
   return text;
@@ -11015,9 +11042,9 @@ function syncTopbar(){
     if(typeof syncAppTitlebar==='function') syncAppTitlebar();
     // Update profile chip even when no session is active (e.g. right after profile switch)
     const _profileLabel=$('profileChipLabel');
-    if(_profileLabel) _profileLabel.textContent=S.activeProfile||'default';
+    if(_profileLabel) _profileLabel.textContent=profileDisplayLabel(S.activeProfile);
     const _titleLabel=$('titlebarProfileLabel');
-    if(_titleLabel) _titleLabel.textContent=S.activeProfile||'default';
+    if(_titleLabel) _titleLabel.textContent=profileDisplayLabel(S.activeProfile);
     return;
   }
   const sessionTitle=S.session.title||t('untitled');
@@ -11142,9 +11169,9 @@ function syncTopbar(){
   // scoping project/session operations to the session's own profile — is
   // unaffected by this line.
   const profileLabel=$('profileChipLabel');
-  if(profileLabel) profileLabel.textContent=S.activeProfile||'default';
+  if(profileLabel) profileLabel.textContent=profileDisplayLabel(S.activeProfile);
   const titleLabel=$('titlebarProfileLabel');
-  if(titleLabel) titleLabel.textContent=S.activeProfile||'default';
+  if(titleLabel) titleLabel.textContent=profileDisplayLabel(S.activeProfile);
 }
 
 function msgContent(m){
@@ -11567,9 +11594,12 @@ function _restoreWorklogDetailDisclosureState(root, state){
 function _thinkingCardHtml(text, open){
   const clean=_sanitizeThinkingDisplayText(text);
   const copyBtn=`<button class="thinking-copy-btn" onclick="event.stopPropagation();_copyThinkingText(this)" title="${t('copy')}" aria-label="${t('copy')}">${li('copy',12)}</button>`;
-  const shouldOpen=!!open||_worklogDetailsExpandedDefault();
-  const classes=`thinking-card${shouldOpen?' open':''}`;
-  return `<div class="${classes}"><div class="thinking-card-header" onclick="this.parentElement.classList.toggle('open')"><span class="thinking-card-icon">${li('lightbulb',14)}</span><span class="thinking-card-label">${t('thinking')}</span><span class="thinking-card-btn-row">${copyBtn}<span class="thinking-card-toggle">${li('chevron-right',12)}</span></span></div><div class="thinking-card-body"><pre>${esc(clean)}</pre></div></div>`;
+  const collapsed=isThinkingCollapsed();
+  const shouldOpen=!collapsed&&(!!open||_worklogDetailsExpandedDefault());
+  const classes=`thinking-card${shouldOpen?' open':''}${collapsed?' thinking-card-collapsed':''}`;
+  const preview=collapsed?_thinkingPreviewText(clean):'';
+  const previewHtml=preview?`<span class="thinking-card-preview">${esc(preview)}</span>`:'';
+  return `<div class="${classes}"><div class="thinking-card-header" onclick="this.parentElement.classList.toggle('open')"><span class="thinking-card-icon">${li('lightbulb',14)}</span><span class="thinking-card-label">${t('thinking')}</span>${previewHtml}<span class="thinking-card-btn-row">${copyBtn}<span class="thinking-card-toggle">${li('chevron-right',12)}</span></span></div><div class="thinking-card-body"><pre>${esc(clean)}</pre></div></div>`;
 }
 function isSimplifiedToolCalling(){
   return window._simplifiedToolCalling!==false;
@@ -11601,6 +11631,140 @@ function isFinalAnswerOnlyMode(){
 }
 function isCompactWorklogMode(){
   return isSimplifiedToolCalling()&&chatActivityMode()==='compact_worklog';
+}
+// Mars chat UX (#reasoning-fold): reasoning display is three-state instead of
+// the old binary show/hide. 'collapsed' keeps the reasoning in the DOM as a
+// folded card that streams in place (one row per turn, click to expand),
+// 'hidden' keeps the upstream behaviour of dropping reasoning rows entirely.
+function thinkingMode(){
+  const m=window._thinkingMode;
+  if(m==='expanded'||m==='collapsed'||m==='hidden') return m;
+  if(window._showThinking===false) return 'hidden';
+  // Unset / 'auto' means the historical behaviour: reasoning renders expanded,
+  // so other WebUI profiles on the shared static bundle see no change at all.
+  return 'expanded';
+}
+function isThinkingCollapsed(){
+  return thinkingMode()==='collapsed';
+}
+function isThinkingVisible(){
+  return thinkingMode()!=='hidden';
+}
+function _applyThinkingModeClasses(){
+  try{
+    const tm=thinkingMode();
+    const am=chatActivityMode();
+    document.documentElement.classList.toggle('mars-thinking-collapsed',tm==='collapsed');
+    document.documentElement.classList.toggle('mars-thinking-expanded',tm==='expanded');
+    document.documentElement.classList.toggle('mars-thinking-hidden',tm==='hidden');
+    document.documentElement.classList.toggle('mars-hide-tools',window._showToolCalls===false);
+    document.documentElement.classList.toggle('mars-autocollapse-turns',window._autoCollapsePreviousTurns!==false);
+    document.documentElement.classList.toggle('mars-transparent-stream',am==='transparent_stream');
+    document.documentElement.classList.toggle('mars-hide-activity',am==='hide_all_activity');
+  }catch(_){}
+}
+if(typeof window!=='undefined'){
+  window.thinkingMode=thinkingMode;
+  window.isThinkingCollapsed=isThinkingCollapsed;
+  window.isThinkingVisible=isThinkingVisible;
+  window._applyThinkingModeClasses=_applyThinkingModeClasses;
+}
+// Folded reasoning still has to communicate that it is thinking: the collapsed
+// card carries the tail of the stream as a one-line preview that updates live.
+function _thinkingPreviewText(clean,max){
+  let src='';
+  try{ src=String(clean||'').replace(/\s+/g,' ').trim(); }catch(_){ src=''; }
+  if(!src) return '';
+  const limit=max||140;
+  return src.length>limit?('…'+src.slice(-limit).trim()):src;
+}
+// ── Transcript-wide fold control (Mars chat UX) ───────────────────────────
+// The upstream expand/collapse pills only act inside one .assistant-turn, so a
+// long session still looks like a wall of rows. These helpers fold every turn
+// at once, and let each new turn fold the older ones automatically.
+function _marsTurnIsCollapsed(turn){
+  return !!turn&&turn.getAttribute('data-transparent-turn-collapsed')==='1';
+}
+function _marsSetTurnCollapsed(turn,collapsed,manual){
+  if(!turn) return;
+  turn.setAttribute('data-transparent-turn-collapsed',collapsed?'1':'0');
+  const role=turn.querySelector('.msg-role.assistant');
+  if(role) role.setAttribute('aria-expanded',collapsed?'false':'true');
+  if(manual) turn.setAttribute('data-mars-turn-manual','1');
+}
+function _marsTranscriptTurns(){
+  const inner=document.getElementById('msgInner')||document.getElementById('messages');
+  if(!inner) return [];
+  return Array.from(inner.querySelectorAll('.assistant-turn'));
+}
+function _marsSyncTurnFoldButton(){
+  const btn=document.getElementById('marsTurnFoldBtn');
+  if(!btn) return;
+  const turns=_marsTranscriptTurns();
+  if(!turns.length){ btn.hidden=true; return; }
+  btn.hidden=false;
+  const anyExpanded=turns.some(t=>!_marsTurnIsCollapsed(t));
+  btn.dataset.state=anyExpanded?'expanded':'collapsed';
+  const label=anyExpanded?t('activity_fold_all'):t('activity_unfold_all');
+  btn.setAttribute('aria-label',label);
+  btn.title=label;
+  const icon=btn.querySelector('.mars-turn-fold-icon');
+  if(icon) icon.textContent=anyExpanded?'⌃':'⌄';
+}
+function marsToggleAllTurns(){
+  const turns=_marsTranscriptTurns();
+  if(!turns.length) return;
+  const anyExpanded=turns.some(t=>!_marsTurnIsCollapsed(t));
+  const sid=S.session?S.session.session_id:null;
+  turns.forEach(t=>{
+    _marsSetTurnCollapsed(t,anyExpanded,true);
+    const seg=t.querySelector('.assistant-segment');
+    const mi=seg&&seg.getAttribute('data-msg-idx');
+    if(mi!=null&&sid) _transparentTurnCollapsedStates[`${sid}:${mi}`]=anyExpanded;
+  });
+  _marsSyncTurnFoldButton();
+}
+function _marsAutoCollapsePreviousTurns(){
+  if(window._autoCollapsePreviousTurns===false) return;
+  if(!isTransparentStream()) return;
+  const turns=_marsTranscriptTurns();
+  if(turns.length<2) return;
+  const sid=S.session?S.session.session_id:null;
+  turns.forEach(t=>{
+    if(t.id==='liveAssistantTurn') return;
+    if(t.getAttribute('data-mars-turn-manual')==='1') return;
+    if(_marsTurnIsCollapsed(t)) return;
+    _marsSetTurnCollapsed(t,true,false);
+    const seg=t.querySelector('.assistant-segment');
+    const mi=seg&&seg.getAttribute('data-msg-idx');
+    if(mi!=null&&sid) _transparentTurnCollapsedStates[`${sid}:${mi}`]=true;
+  });
+  _marsSyncTurnFoldButton();
+}
+if(typeof window!=='undefined'){
+  window.marsToggleAllTurns=marsToggleAllTurns;
+  window._marsSyncTurnFoldButton=_marsSyncTurnFoldButton;
+  window._marsAutoCollapsePreviousTurns=_marsAutoCollapsePreviousTurns;
+  window._marsSetTurnCollapsed=_marsSetTurnCollapsed;
+}
+// Folded reasoning rows (Worklog/compact mode) expand on click instead of being
+// dropped, so the stream stays available without filling the transcript.
+function _marsInstallThinkingRowClick(){
+  if(window._marsThinkingRowClickBound) return;
+  window._marsThinkingRowClickBound=true;
+  document.addEventListener('click',function(ev){
+    const target=ev.target;
+    if(!target||!target.closest) return;
+    const row=target.closest('.wl-reason');
+    if(row&&document.documentElement.classList.contains('mars-thinking-collapsed')&&!row.classList.contains('mars-th-open')){
+      row.classList.add('mars-th-open');
+    }
+  },true);
+}
+if(document.readyState==='loading'){
+  document.addEventListener('DOMContentLoaded',_marsInstallThinkingRowClick);
+}else{
+  _marsInstallThinkingRowClick();
 }
 if(typeof window!=='undefined'){
   window.chatActivityMode=chatActivityMode;
@@ -12430,6 +12594,9 @@ function _wireTransparentTurnToggle(turn){
     const collapsed=turn.getAttribute('data-transparent-turn-collapsed')==='1';
     turn.setAttribute('data-transparent-turn-collapsed',collapsed?'0':'1');
     role.setAttribute('aria-expanded',collapsed?'true':'false');
+    // Manual choice wins over the automatic folding of finished turns.
+    turn.setAttribute('data-mars-turn-manual','1');
+    if(typeof _marsSyncTurnFoldButton==='function') _marsSyncTurnFoldButton();
     // Persist state across DOM rebuilds.
     if(S.session){
       const seg=turn.querySelector('.assistant-segment');
@@ -14731,6 +14898,8 @@ function placeLiveRunStatusHost(){
     if(S.session) turn.dataset.sessionId=S.session.session_id;
     const inner=$('msgInner');
     if(inner) inner.appendChild(turn);
+    // A new turn starts: fold the finished ones so the answer stays in focus.
+    if(typeof _marsAutoCollapsePreviousTurns==='function') _marsAutoCollapsePreviousTurns();
   }
   const blocks=_assistantTurnBlocks(turn);
   if(blocks&&el.parentElement!==blocks) blocks.appendChild(el);
@@ -17810,7 +17979,9 @@ function renderMessages(options){
       if(Number.isFinite(burstA)&&Number.isFinite(burstB)&&burstA!==burstB) return burstA-burstB;
       return a.aIdx-b.aIdx;
     });
-    if(!isTransparentStream()){
+    if(isFinalAnswerOnlyMode()){
+      // hide_all_activity: skip building worklogs and transparent rows
+    }else if(!isTransparentStream()){
       for(const entry of activityOrder){
         const {aIdx,segmentSeq,burstId,cards,thinkingIdx,includeAnchorReason}=entry;
         if(aIdx<assistantIdxs[0]) continue;
@@ -18051,6 +18222,11 @@ function renderMessages(options){
       if(!blocks) continue;
       const hasTransparentRows=blocks.querySelector(':scope > .transparent-event-row');
       _wireTransparentTurnToggle(turn);
+      // Keep the transcript-wide fold button in sync with what's rendered.
+      if(typeof window._marsSyncTurnFoldButton==='function'){
+        if(window._marsFoldBtnSyncTimer) clearTimeout(window._marsFoldBtnSyncTimer);
+        window._marsFoldBtnSyncTimer=setTimeout(window._marsSyncTurnFoldButton,60);
+      }
       // Restore collapse state from the map (survives DOM rebuild).
       const seg=turn.querySelector('.assistant-segment');
       if(seg&&sid){
@@ -20221,10 +20397,38 @@ function renderKatexBlocks(container,options){
 
 function _thinkingMarkup(text='', open=false){
   const clean=_sanitizeThinkingDisplayText(text);
-  const openClass=(open||_worklogDetailsExpandedDefault())?' open':'';
+  const collapsed=isThinkingCollapsed();
+  const openClass=(!collapsed&&(open||_worklogDetailsExpandedDefault()))?' open':'';
+  const preview=collapsed?_thinkingPreviewText(clean):'';
+  const previewHtml=preview?`<span class="thinking-card-preview">${esc(preview)}</span>`:'';
   return (clean&&String(clean).trim())
-    ? `<div class="thinking-card${openClass}"><div class="thinking-card-header" onclick="this.parentElement.classList.toggle('open')"><span class="thinking-card-icon">${li('lightbulb',14)}</span><span class="thinking-card-label">${t('thinking')}</span><span class="thinking-card-toggle">${li('chevron-right',12)}</span></div><div class="thinking-card-body"><pre>${esc(String(clean).trim())}</pre></div></div>`
+    ? `<div class="thinking-card${openClass}${collapsed?' thinking-card-collapsed':''}"><div class="thinking-card-header" onclick="this.parentElement.classList.toggle('open')"><span class="thinking-card-icon">${li('lightbulb',14)}</span><span class="thinking-card-label">${t('thinking')}</span>${previewHtml}<span class="thinking-card-toggle">${li('chevron-right',12)}</span></div><div class="thinking-card-body"><pre>${esc(String(clean).trim())}</pre></div></div>`
     : `<div class="thinking"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>`;
+}
+// Keep the folded reasoning preview in sync while the stream updates the card.
+function _syncThinkingCardPreview(row,clean){
+  if(!row) return;
+  const card=row.querySelector('.thinking-card');
+  if(!card) return;
+  const collapsed=card.classList.contains('thinking-card-collapsed');
+  let preview=card.querySelector('.thinking-card-preview');
+  if(!collapsed){
+    if(preview) preview.remove();
+    return;
+  }
+  const text=_thinkingPreviewText(clean);
+  if(!text){
+    if(preview) preview.remove();
+    return;
+  }
+  if(!preview){
+    preview=document.createElement('span');
+    preview.className='thinking-card-preview';
+    const label=card.querySelector('.thinking-card-label');
+    if(label&&label.parentElement) label.parentElement.insertBefore(preview,label.nextSibling);
+    else card.querySelector('.thinking-card-header')?.appendChild(preview);
+  }
+  preview.textContent=text;
 }
 function _renderThinkingInto(row,text=''){
   if(!row) return;
@@ -20239,19 +20443,20 @@ function _renderThinkingInto(row,text=''){
     row.innerHTML=_thinkingMarkup(text, isLive);
     card = row.querySelector('.thinking-card');
   }
-  if(card && isLive){
+  if(card && isLive && !isThinkingCollapsed()){
     card.classList.add('open');
   }
   const pre=row.querySelector('.thinking-card-body pre');
   if(pre){
     pre.textContent=clean;
+    _syncThinkingCardPreview(row, clean);
     const body=row.querySelector('.thinking-card-body');
-    if(body && isLive) body.scrollTop=body.scrollHeight;
+    if(body && isLive && !isThinkingCollapsed()) body.scrollTop=body.scrollHeight;
     return;
   }
   row.innerHTML=_thinkingMarkup(text, isLive);
   const newCard = row.querySelector('.thinking-card');
-  if(newCard && isLive){
+  if(newCard && isLive && !isThinkingCollapsed()){
     newCard.classList.add('open');
   }
 }
@@ -20352,6 +20557,8 @@ function appendThinking(text='', options){
     if(S.session) turn.dataset.sessionId=S.session.session_id;
     const inner=$('msgInner');
     if(inner) inner.appendChild(turn);
+    // A new turn starts: fold the finished ones so the answer stays in focus.
+    if(typeof _marsAutoCollapsePreviousTurns==='function') _marsAutoCollapsePreviousTurns();
   }
   const blocks=_assistantTurnBlocks(turn);
   if(!blocks) return;
@@ -20359,7 +20566,8 @@ function appendThinking(text='', options){
   if(clean&&window._showThinking!==false){
     const segmentSeq=options.segmentSeq!==undefined&&options.segmentSeq!==null?String(options.segmentSeq):'';
     const burstId=options.burstId!==undefined&&options.burstId!==null?String(options.burstId):'';
-    const thinkingKey=String(options.thinkingKey||(
+    const collapseLive=isThinkingCollapsed();
+    const thinkingKey=collapseLive?'live-turn':String(options.thinkingKey||(
       segmentSeq?`segment:${segmentSeq}`:
       burstId?`burst:${burstId}`:
       'turn'
@@ -20367,7 +20575,7 @@ function appendThinking(text='', options){
     if(isTransparentStream()){
       let row=blocks.querySelector(`.agent-activity-thinking[data-live-thinking="1"][data-live-thinking-key="${CSS.escape(thinkingKey)}"]`);
       if(!row){
-        row=_thinkingActivityNode(clean, true);
+        row=_thinkingActivityNode(clean, !collapseLive);
         row.id='thinkingRow';
         row.setAttribute('data-live-thinking','1');
         row.setAttribute('data-live-thinking-key',thinkingKey);
@@ -20375,6 +20583,10 @@ function appendThinking(text='', options){
         if(burstId) row.setAttribute('data-activity-burst-id',burstId);
         blocks.querySelectorAll('.agent-activity-thinking[data-thinking-active="1"]').forEach(el=>{
           if(el!==row){
+            if(collapseLive){
+              el.remove();
+              return;
+            }
             el.removeAttribute('id');
             el.removeAttribute('data-thinking-active');
             el.removeAttribute('data-live-thinking');
@@ -20416,13 +20628,17 @@ function appendThinking(text='', options){
     if(list){
       let row=list.querySelector(`.agent-activity-thinking[data-live-thinking="1"][data-live-thinking-key="${CSS.escape(thinkingKey)}"]`);
       if(!row){
-        row=_thinkingActivityNode(clean, true, thinkingKey);
+        row=_thinkingActivityNode(clean, !collapseLive, thinkingKey);
         row.setAttribute('data-live-thinking','1');
         row.setAttribute('data-live-thinking-key',thinkingKey);
         if(segmentSeq) row.setAttribute('data-live-segment-seq',segmentSeq);
         if(burstId) row.setAttribute('data-activity-burst-id',burstId);
         list.querySelectorAll('.agent-activity-thinking[data-thinking-active="1"]').forEach(el=>{
           if(el!==row){
+            if(collapseLive){
+              el.remove();
+              return;
+            }
             el.removeAttribute('data-thinking-active');
             el.removeAttribute('data-live-thinking');
           }

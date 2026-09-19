@@ -1746,6 +1746,7 @@ def switch_profile(name: str, *, process_wide: bool = True) -> dict:
     return {
         'profiles': list_profiles_api(),
         'active': name,
+        'display_name': _profile_display_name(get_hermes_home_for_profile(name)),
         'is_default': _is_root_profile(name),
         'default_model': default_model,
         'default_model_provider': default_model_provider,
@@ -2002,6 +2003,7 @@ def _build_profile_rows_fast() -> list | None:
         enabled_count, total_count = _get_profile_skills_stats(home)
         return {
             'name': name,
+            'display_name': _profile_display_name(home),
             'path': str(home),
             'is_default': is_default,
             'is_active': False,  # filled in by caller (cheap, varies per request)
@@ -2070,6 +2072,7 @@ def list_profiles_api() -> list:
                     enabled_count, total_count = _get_profile_skills_stats(p.path)
                     return [{
                         'name': p.name,
+                        'display_name': _profile_display_name(p.path),
                         'path': str(p.path),
                         'is_default': p.is_default,
                         'is_active': True,  # Always true in isolated mode
@@ -2088,6 +2091,7 @@ def list_profiles_api() -> list:
         enabled_count, total_count = _get_profile_skills_stats(hermes_home)
         return [{
             'name': active,
+            'display_name': _profile_display_name(hermes_home),
             'path': str(hermes_home),
             'is_default': active == 'default',
             'is_active': True,
@@ -2135,6 +2139,7 @@ def list_profiles_api() -> list:
             enabled_count, total_count = _get_profile_skills_stats(p.path)
             result.append({
                 'name': p.name,
+                'display_name': _profile_display_name(p.path),
                 'path': str(p.path),
                 'is_default': p.is_default,
                 'is_active': p.name == active,
@@ -2151,6 +2156,24 @@ def list_profiles_api() -> list:
 
     active = get_active_profile_name()
     return [{**p, 'is_active': p['name'] == active} for p in rows]
+
+
+def _profile_display_name(profile_path) -> str:
+    """Return the human-friendly ``display_name`` from a profile's profile.yaml.
+
+    Empty string when unset/missing — the UI falls back to the canonical profile id.
+    Never raises: malformed metadata must not break the profile list.
+    """
+    try:
+        meta_path = Path(profile_path) / 'profile.yaml'
+        if not meta_path.exists():
+            return ''
+        data = yaml.safe_load(meta_path.read_text(encoding='utf-8'))
+    except Exception:
+        return ''
+    if not isinstance(data, dict):
+        return ''
+    return str(data.get('display_name') or '').strip()
 
 
 def _profile_visible_from_meta(profile_path: Path) -> bool:
@@ -2173,6 +2196,7 @@ def _default_profile_dict() -> dict:
     enabled_count, compatible_count = _get_profile_skills_stats(_DEFAULT_HERMES_HOME)
     return {
         'name': 'default',
+        'display_name': _profile_display_name(_DEFAULT_HERMES_HOME),
         'path': str(_DEFAULT_HERMES_HOME),
         'is_default': True,
         'is_active': True,

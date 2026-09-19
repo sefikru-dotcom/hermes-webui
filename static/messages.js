@@ -5980,7 +5980,11 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
       _applyToAnchor('approval',d,e);
       showApprovalForSession(activeSid, d, d.pending_count || 1);
       playAttentionSound(_attentionSoundKey(activeSid,'approval',1));
-      sendBrowserNotification('Approval required',d.description||'Tool approval needed',{sid:activeSid});
+      sendBrowserNotification(
+        (typeof t === "function") ? t("notify_approval_title") : 'Approval required',
+        (typeof marsLocalizeApprovalDesc === "function" ? marsLocalizeApprovalDesc(d.description||"") : (d.description||""))
+          || ((typeof t === "function") ? t("notify_approval_body") : 'Tool approval needed'),
+        {sid:activeSid});
     });
 
     source.addEventListener('clarify',e=>{
@@ -5988,7 +5992,10 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
       _applyToAnchor('clarify',d,e);
       showClarifyForSession(activeSid, d);
       playAttentionSound(_attentionSoundKey(activeSid,'clarify',1));
-      sendBrowserNotification('Clarification needed',d.question||'Tool clarification needed',{sid:activeSid});
+      sendBrowserNotification(
+        (typeof t === "function") ? t("notify_clarify_title") : 'Clarification needed',
+        d.question||((typeof t === "function") ? t("notify_clarify_body") : 'Tool clarification needed'),
+        {sid:activeSid});
     });
 
     source.addEventListener('state_saved',e=>{
@@ -6418,7 +6425,10 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
           sessionId:completedSid,
           liveDisplayText:typeof _streamDisplay==='function'?_streamDisplay():assistantText,
         });
-        sendBrowserNotification('Response complete',_completionPreview||'Task finished',{forceHidden:_wasEverBackgrounded,sid:activeSid});
+        sendBrowserNotification(
+          (typeof t === "function") ? t("notify_done_title") : 'Response complete',
+          _completionPreview||((typeof t === "function") ? t("notify_done_body") : 'Task finished'),
+          {forceHidden:_wasEverBackgrounded,sid:activeSid});
       };
       if(_shouldUseLiveProseFade()&&assistantBody){
         _cancelAnimationFramePendingStreamRender();
@@ -7629,7 +7639,11 @@ function showApprovalCard(pending, pendingCount) {
   if (pending && pending.approval_id && _isApprovalDismissed(sid, pending.approval_id)) return;
   _approvalClearedOwner = null;
   const keys = pending.pattern_keys || (pending.pattern_key ? [pending.pattern_key] : []);
-  const desc = (pending.description || "") + (keys.length ? " [" + keys.join(", ") + "]" : "");
+  const desc = ((typeof marsLocalizeApprovalDesc === "function")
+    ? marsLocalizeApprovalDesc(pending.description || "")
+    : (pending.description || "")) + (keys.length
+      ? " [" + keys.map(k => (typeof marsLocalizeApprovalDesc === "function") ? marsLocalizeApprovalDesc(k) : k).join(", ") + "]"
+      : "");
   const cmd = pending.command || "";
   const sig = JSON.stringify({
     desc,
@@ -7698,7 +7712,9 @@ function _syncApprovalCollapseButton(card) {
   // Icon swap: chevron-down when expanded (click to collapse), chevron-up when collapsed (click to expand)
   const polyline = collapse.querySelector("svg polyline");
   if (polyline) polyline.setAttribute("points", collapsed ? "18 15 12 9 6 15" : "6 9 12 15 18 9");
-  const label = collapsed ? "Expand approval" : "Collapse approval";
+  const label = (typeof t === "function")
+    ? (collapsed ? t("approval_expand_label") : t("approval_collapse_label"))
+    : (collapsed ? "Развернуть подтверждение" : "Свернуть подтверждение");
   collapse.setAttribute("aria-label", label);
   collapse.title = label;
 }
@@ -7873,6 +7889,7 @@ function _startApprovalFallbackPoll(sid) {
   // shows its card instantly (the removed SSE 'initial' event used to do this);
   // then poll on the 1500ms cadence. (#3913 SHOULD-FIX)
   const _tick = async () => {
+    if (typeof document !== 'undefined' && document.hidden) return;
     if (_approvalPollingSessionMissingOrMismatched(sid)) {
       stopApprovalPolling(); _hideApprovalCardIfOwner(sid, true); return;
     }

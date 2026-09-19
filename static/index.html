@@ -29,8 +29,8 @@
 <script>(function(){try{var t=localStorage.getItem('hermes-theme')||'dark';if(t==='system')t=window.matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light';var c=t==='dark'?'#141425':'#FAF7F0';document.querySelectorAll('meta[name="theme-color"]').forEach(function(m){m.setAttribute('content',c);m.removeAttribute('media');});}catch(e){}})()</script>
 <script>(function(){try{document.documentElement.dataset.workspacePanel=localStorage.getItem('hermes-webui-workspace-panel')==='open'?'open':'closed';}catch(e){document.documentElement.dataset.workspacePanel='closed';}})()</script>
 <script>(function(){try{if(localStorage.getItem('hermes-webui-sidebar-collapsed')==='1')document.documentElement.dataset.sidebarCollapsed='1';}catch(e){}})()</script>
-<link rel="preload" href="static/pwa-startup.js?v=__WEBUI_VERSION__" as="script">
-<script src="static/pwa-startup.js?v=__WEBUI_VERSION__"></script>
+<link rel="preload" href="static/pwa-startup.js?v=__WEBUI_VERSION__-am3" as="script">
+<script src="static/pwa-startup.js?v=__WEBUI_VERSION__-am3"></script>
 <script>window.__HERMES_CONFIG__={maxUploadBytes:__MAX_UPLOAD_BYTES__,csrfToken:__CSRF_TOKEN_JSON__};</script>
 <script>window.__HERMES_WEBUI_BUNDLE_VERSION__='__WEBUI_VERSION__';</script>
 <script>(function(){
@@ -72,7 +72,7 @@
     };
   }
 })()</script>
-<link rel="stylesheet" href="static/style.css?v=__WEBUI_VERSION__">
+<link rel="stylesheet" href="static/style.css?v=__WEBUI_VERSION__-am3">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" integrity="sha384-LJcOxlx9IMbNXDqJ2axpfEQKkAYbFjJfhXexLfiRJhjDU81mzgkiQq8rkV0j6dVh" crossorigin="anonymous">
   <!-- KaTeX math rendering CSS (loaded eagerly from vendored assets to prevent font CSP noise) -->
   <link rel="stylesheet" href="static/vendor/katex/0.16.22/katex.min.css">
@@ -101,7 +101,7 @@
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function() {
-        navigator.serviceWorker.register('sw.js?v=__WEBUI_VERSION__').catch(function(err) {
+        navigator.serviceWorker.register('sw.js?v=__WEBUI_VERSION__-am3').catch(function(err) {
           console.warn('[pwa] Service worker registration failed:', err);
         });
       });
@@ -144,6 +144,14 @@
       <line x1="5" y1="12" x2="19" y2="12"/>
     </svg>
   </button>
+  <button class="app-titlebar-activity-mode" id="btnTitlebarActivityMode" onclick="if(typeof _cycleChatActivityDisplayMode==='function'){_cycleChatActivityDisplayMode();}else if(typeof window._marsFallbackActivityCycle==='function'){window._marsFallbackActivityCycle(this);}" type="button" data-mode="compact_worklog" aria-label="Activity display" title="Activity display">
+    <span class="activity-mode-ico" aria-hidden="true">
+      <svg class="am-ico am-ico-compact" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><path d="M12 2 2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+      <svg class="am-ico am-ico-transparent" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/></svg>
+      <svg class="am-ico am-ico-hide" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+    </span>
+    <span class="activity-mode-text" id="btnTitlebarActivityModeLabel">Компакт</span>
+  </button>
   <button class="app-titlebar-reload" id="btnReload" onclick="window.location.reload()" type="button" aria-label="Reload" title="Reload page">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" width="16" height="16">
       <polyline points="23 4 23 10 17 10"/>
@@ -151,6 +159,30 @@
     </svg>
   </button>
 </header>
+<script>
+/* Кнопка режима активности в шапке: страховка на случай, если panels.js ещё отдаётся
+   из кеша браузера (ассеты immutable). Сохраняет режим на сервере и перезагружает
+   страницу, чтобы настройка применилась. */
+window._marsFallbackActivityCycle=function(btn){
+  try{
+    var order=['compact_worklog','transparent_stream','hide_all_activity'];
+    var cur=(window._chatActivityDisplayMode==='transparent_stream'||window._chatActivityDisplayMode==='hide_all_activity')?window._chatActivityDisplayMode:'compact_worklog';
+    var next=order[(order.indexOf(cur)+1)%order.length];
+    if(btn){
+      btn.setAttribute('data-mode',next);
+      var label=btn.querySelector('.activity-mode-text');
+      if(label){
+        var keys={compact_worklog:'activity_mode_short_compact',transparent_stream:'activity_mode_short_transparent',hide_all_activity:'activity_mode_short_final'};
+        label.textContent=(typeof t==='function')?t(keys[next]):next;
+      }
+    }
+    var payload={chat_activity_display_mode:next};
+    fetch('api/settings',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
+      .catch(function(){})
+      .then(function(){window.location.reload();});
+  }catch(e){window.location.reload();}
+};
+</script>
 <div class="layout">
   <nav class="rail" aria-label="Primary navigation">
     <button class="rail-btn nav-tab active has-tooltip" data-panel="chat" onclick="switchPanel('chat',{fromRailClick:true})" data-tooltip="Chat" data-i18n-title="tab_chat" aria-label="Chat"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></button>
@@ -438,6 +470,12 @@
         title="Conversation outline"
         aria-label="Toggle conversation outline"
         aria-controls="outlinePanelWrapper">&#9776;</button>
+      <button id="marsTurnFoldBtn" type="button" hidden
+        onclick="marsToggleAllTurns()"
+        title="Fold all turns"
+        aria-label="Fold all turns">
+        <span class="mars-turn-fold-icon" aria-hidden="true">&#8963;</span>
+      </button>
     <div class="messages" id="messages">
       <div class="empty-state" id="emptyState">
         <h2 data-i18n="empty_title">What can I help with?</h2>
@@ -491,8 +529,8 @@
           <div class="approval-header">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
             <span id="approvalHeading" data-i18n="approval_heading">Approval required</span>
-            <button type="button" class="approval-collapse" id="approvalCollapse" aria-expanded="true" aria-label="Collapse approval" aria-controls="approvalDesc approvalCmd approvalCounter approvalBtns" onclick="toggleApprovalCardCollapsed()" title="Collapse approval"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg></button>
-            <button type="button" class="approval-dismiss" onclick="dismissApprovalCard()" aria-label="Dismiss approval" title="Dismiss approval"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+            <button type="button" class="approval-collapse" id="approvalCollapse" aria-expanded="true" aria-label="Collapse approval" aria-controls="approvalDesc approvalCmd approvalCounter approvalBtns" onclick="toggleApprovalCardCollapsed()" title="Collapse approval" data-i18n-aria-label="approval_collapse_label" data-i18n-title="approval_collapse_label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg></button>
+            <button type="button" class="approval-dismiss" onclick="dismissApprovalCard()" aria-label="Dismiss approval" title="Dismiss approval" data-i18n-aria-label="approval_dismiss_label" data-i18n-title="approval_dismiss_label"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
           </div>
           <div class="approval-desc" id="approvalDesc"></div>
           <div class="approval-cmd" id="approvalCmd"></div>
@@ -503,15 +541,15 @@
               <span class="approval-btn-label" data-i18n="approval_btn_once">Allow once</span>
               <kbd class="approval-kbd">↵</kbd>
             </button>
-            <button class="approval-btn session" id="approvalBtnSession" onclick="respondApproval('session')" title="Allow for this session">
+            <button class="approval-btn session" id="approvalBtnSession" onclick="respondApproval('session')" title="Allow for this session" data-i18n-title="approval_btn_session_title">
               <span class="approval-btn-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span>
               <span class="approval-btn-label" data-i18n="approval_btn_session">Allow session</span>
             </button>
-            <button class="approval-btn always" id="approvalBtnAlways" onclick="respondApproval('always')" title="Always allow this command pattern">
+            <button class="approval-btn always" id="approvalBtnAlways" onclick="respondApproval('always')" title="Always allow this command pattern" data-i18n-title="approval_btn_always_title">
               <span class="approval-btn-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg></span>
               <span class="approval-btn-label" data-i18n="approval_btn_always">Always allow</span>
             </button>
-            <button class="approval-btn deny" id="approvalBtnDeny" onclick="respondApproval('deny')" title="Deny — do not run this command">
+            <button class="approval-btn deny" id="approvalBtnDeny" onclick="respondApproval('deny')" title="Deny — do not run this command" data-i18n-title="approval_btn_deny_title">
               <span class="approval-btn-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></span>
               <span class="approval-btn-label" data-i18n="approval_btn_deny">Deny</span>
             </button>
@@ -528,7 +566,7 @@
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 17h.01"/><path d="M9.09 9a3 3 0 1 1 5.82 1c0 2-3 2-3 4"/><circle cx="12" cy="12" r="10"/></svg>
             <span id="clarifyHeading" data-i18n="clarify_heading">Clarification needed</span>
             <span class="clarify-countdown" id="clarifyCountdown"></span>
-            <button type="button" class="clarify-collapse" id="clarifyCollapse" aria-expanded="true" aria-label="Collapse clarification" aria-controls="clarifyQuestion clarifyChoices clarifyInput clarifyHint" onclick="toggleClarifyCardCollapsed()" title="Collapse clarification"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg></button>
+            <button type="button" class="clarify-collapse" id="clarifyCollapse" aria-expanded="true" aria-label="Collapse clarification" aria-controls="clarifyQuestion clarifyChoices clarifyInput clarifyHint" onclick="toggleClarifyCardCollapsed()" title="Collapse clarification" data-i18n-aria-label="clarify_collapse_label" data-i18n-title="clarify_collapse_label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg></button>
           </div>
           <div class="clarify-question" id="clarifyQuestion"></div>
           <div class="clarify-choices" id="clarifyChoices"></div>
@@ -580,10 +618,12 @@
         <button id="queuePill" class="queue-pill" aria-label="Show queued messages" type="button"></button>
       </div>
       <div id="composerSelectionChips" class="composer-selection-chips" hidden aria-live="polite"></div>
-                  <div class="quick-chips-bar" id="quickChipsBar">
-        <button type="button" class="quick-chip" onclick="quickSend('Погода в Ставрополе')">🌤 Погода</button>
-        <button type="button" class="quick-chip" onclick="quickSend('Проверь здоровье серверов и сервисов')">📊 Серверы</button>
-        <button type="button" class="quick-chip" onclick="quickSend('Проверь статус Квартала, Альпена и Квиз-Дуэли')">🎮 Квартал & Альпен</button>
+      <div class="quick-chips-bar" id="quickChipsBar">
+        <button type="button" class="quick-chip" onclick="quickSend('Ок, принимаю предложенный план, реализуй')">✓ Ок</button>
+        <button type="button" class="quick-chip" onclick="quickSend('Продолжай')">▶ Продолжай</button>
+        <button type="button" class="quick-chip" onclick="quickSend('Откати последние изменения назад')">↩ Откат</button>
+        <button type="button" class="quick-chip" onclick="quickSend('Поясни')">❓ Поясни</button>
+        <button type="button" class="quick-chip" onclick="quickSend('Ок, закрываю чат')">🏁 Финиш</button>
       </div>
       <div class="composer-box" id="composerBox">
         <div class="cmd-dropdown" id="cmdDropdown"></div>
@@ -1129,6 +1169,29 @@
                 <span data-i18n="settings_label_worklog_details_expanded_default">Open Worklog details automatically</span>
               </label>
               <div style="font-size:11px;color:var(--muted);margin-top:4px" data-i18n="settings_desc_worklog_details_expanded_default">When enabled, new Worklog details start expanded so tool, thinking, and progress cards are visible without an extra click. When off, Worklog details stay folded by default; per-turn manual collapse/expand choices still win.</div>
+            </div>
+            <div class="settings-field" style="margin-top:8px">
+              <label for="settingsThinkingMode" data-i18n="settings_label_thinking_mode">Reasoning display</label>
+              <select id="settingsThinkingMode" style="width:100%;padding:8px;background:var(--code-bg);color:var(--text);border:1px solid var(--border2);border-radius:6px">
+                <option value="expanded" data-i18n="settings_option_thinking_expanded">Expanded</option>
+                <option value="collapsed" data-i18n="settings_option_thinking_collapsed">Folded (click to expand)</option>
+                <option value="hidden" data-i18n="settings_option_thinking_hidden">Hidden</option>
+              </select>
+              <div style="font-size:11px;color:var(--muted);margin-top:4px" data-i18n="settings_desc_thinking_mode">Folded keeps the reasoning stream in the transcript as a single folded card per turn (with a live preview line) that expands on click. Expanded shows it fully, Hidden drops reasoning rows entirely.</div>
+            </div>
+            <div class="settings-field" style="margin-top:8px">
+              <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+                <input type="checkbox" id="settingsShowToolCalls" style="width:15px;height:15px;accent-color:var(--accent)">
+                <span data-i18n="settings_label_show_tool_calls">Show tool calls in chat</span>
+              </label>
+              <div style="font-size:11px;color:var(--muted);margin-top:4px" data-i18n="settings_desc_show_tool_calls">When off, tool-call rows are hidden in the transcript while reasoning and answers stay visible.</div>
+            </div>
+            <div class="settings-field" style="margin-top:8px">
+              <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+                <input type="checkbox" id="settingsAutoCollapsePreviousTurns" style="width:15px;height:15px;accent-color:var(--accent)">
+                <span data-i18n="settings_label_auto_collapse_previous_turns">Fold finished turns automatically</span>
+              </label>
+              <div style="font-size:11px;color:var(--muted);margin-top:4px" data-i18n="settings_desc_auto_collapse_previous_turns">When a new turn starts, earlier turns fold their activity rows so the current answer stays in focus. A turn you expanded by hand stays open.</div>
             </div>
             <div class="settings-field">
               <label id="tabVisibilityLabel" data-i18n="settings_label_tab_visibility">Sidebar tabs</label>
@@ -1773,20 +1836,21 @@
   </div>
 </div>
 <div class="toast" id="toast"></div>
-<script src="static/i18n.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/icons.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/assistant_turn_anchors.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/ui.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/workspace.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/terminal.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/sessions.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/commands.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/messages.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/extension_settings.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/panels.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/onboarding.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/boot.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/outline.js?v=__WEBUI_VERSION__" defer></script>
+<script src="static/i18n.js?v=__WEBUI_VERSION__-am3" defer></script>
+<script src="static/approval_i18n.js?v=__WEBUI_VERSION__-am3" defer></script>
+<script src="static/icons.js?v=__WEBUI_VERSION__-am2" defer></script>
+<script src="static/assistant_turn_anchors.js?v=__WEBUI_VERSION__-am2" defer></script>
+<script src="static/ui.js?v=__WEBUI_VERSION__-am3" defer></script>
+<script src="static/workspace.js?v=__WEBUI_VERSION__-am2" defer></script>
+<script src="static/terminal.js?v=__WEBUI_VERSION__-am2" defer></script>
+<script src="static/sessions.js?v=__WEBUI_VERSION__-am2" defer></script>
+<script src="static/commands.js?v=__WEBUI_VERSION__-am2" defer></script>
+<script src="static/messages.js?v=__WEBUI_VERSION__-am3" defer></script>
+<script src="static/extension_settings.js?v=__WEBUI_VERSION__-am2" defer></script>
+<script src="static/panels.js?v=__WEBUI_VERSION__-am3" defer></script>
+<script src="static/onboarding.js?v=__WEBUI_VERSION__-am2" defer></script>
+<script src="static/boot.js?v=__WEBUI_VERSION__-am3" defer></script>
+<script src="static/outline.js?v=__WEBUI_VERSION__-am2" defer></script>
 
 <!-- Kanban: create/rename board modal — used for both flows. -->
 <div class="kanban-modal-overlay" id="kanbanBoardModal" hidden onclick="if(event.target===this)closeKanbanBoardModal()">
@@ -1942,6 +2006,50 @@ window.quickPrompt = function(prefix) {
   msg.setSelectionRange(prefix.length, prefix.length);
   msg.dispatchEvent(new Event('input', { bubbles: true }));
 };
+
+var MARS_PROFILE_QUICK_CHIPS = {
+  default: [
+    { label: '✓ Ок', text: 'Ок, принимаю предложенный план, реализуй' },
+    { label: '▶ Продолжай', text: 'Продолжай' },
+    { label: '↩ Откат', text: 'Откати последние изменения назад' },
+    { label: '❓ Поясни', text: 'Поясни подробнее, что изменилось и почему' },
+    { label: '🏁 Финиш', text: 'Ок, закрываю чат' }
+  ],
+  natali: [
+    { label: '🌤 Погода', text: 'Какая погода в Ставрополе на сегодня и что лучше надеть?' },
+    { label: '🍳 Идея блюда', text: 'Подскажи вкусный и несложный рецепт на сегодня' },
+    { label: '✨ Совет дня', text: 'Поделись полезным лайфхаком или интересной идеей на день' },
+    { label: '🧘 Релакс', text: 'Помоги отвлечься и отдохнуть после насыщенного дня' },
+    { label: '🎬 Кино на вечер', text: 'Посоветуй хороший фильм или интересный лёгкий сериал на вечер' }
+  ],
+  sergey: [
+    { label: '🌤 Погода', text: 'Какая сегодня погода в Ставрополе?' },
+    { label: '🌐 Связь/VPN', text: 'Что проверить, если интернет или VPN работает медленно?' },
+    { label: '🛠 Совет по делу', text: 'Помоги с практическим советом по быту или технике' },
+    { label: '📝 Список дел', text: 'Помоги составить простой и четкий список задач' },
+    { label: '🚗 Авто/Гараж', text: 'Подскажи по обслуживанию или диагностике авто' }
+  ]
+};
+
+window.renderQuickChips = function(profile) {
+  var bar = document.getElementById('quickChipsBar');
+  if (!bar) return;
+  var prof = (profile || (window.S && window.S.activeProfile) || 'default').toLowerCase();
+  var chips = MARS_PROFILE_QUICK_CHIPS[prof] || MARS_PROFILE_QUICK_CHIPS['default'];
+  var html = '';
+  for (var i = 0; i < chips.length; i++) {
+    var c = chips[i];
+    var safeText = c.text.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    html += '<button type="button" class="quick-chip" onclick="quickSend(\'' + safeText + '\')">' + c.label + '</button>';
+  }
+  bar.innerHTML = html;
+};
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', function() { window.renderQuickChips(); });
+} else {
+  window.renderQuickChips();
+}
 </script>
 </body>
 </html>

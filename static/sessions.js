@@ -36,7 +36,7 @@ let _pendingCarryForwardSnapshot = null;
 
 // Debounced save — prevents hammering the server on every keystroke.
 let _draftSaveTimer = null;
-const _DRAFT_SAVE_DELAY_MS = 400;
+const _DRAFT_SAVE_DELAY_MS = 2000;
 const NEW_CHAT_DRAFT_SESSION_KEY = 'hermes-new-chat-draft-session';
 const _composerDraftKnownPayloadSessions = new Set();
 const _composerDraftRestoreSuppressedUntilBySid = new Map();

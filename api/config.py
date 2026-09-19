@@ -9958,6 +9958,9 @@ _SETTINGS_DEFAULTS = {
     "transparent_stream_event_timestamps": True,  # show per-event timestamp chips inside Transparent Stream
     "auto_scroll_follow": True,  # follow new output to the bottom while streaming (Codex/Claude-Code-style sticky bottom); the user scrolling up unpins and is respected
     "worklog_details_expanded_default": False,  # opt-in: expand Worklog details by default; default remains folded
+    "thinking_mode": "auto",  # reasoning display: auto | expanded | collapsed | hidden (auto = expanded when worklog_details_expanded_default, else collapsed)
+    "show_tool_calls": True,  # show tool-call rows in the transcript
+    "auto_collapse_previous_turns": True,  # fold earlier assistant turns once a new turn starts
     "hide_composer_attach": False,  # hide attach button in composer footer
     "hide_composer_saved_prompts": False,  # hide saved prompts button in composer footer
     "hide_composer_mic": False,  # hide dictation mic button in composer footer
@@ -10287,6 +10290,8 @@ _SETTINGS_BOOL_KEYS = {
     "rtl",
     "notifications_enabled",
     "show_thinking",
+    "show_tool_calls",
+    "auto_collapse_previous_turns",
     "terminal_auto_expand_on_output",
     "workspace_todos_tab",
     "api_redact_enabled",
@@ -10519,6 +10524,11 @@ def save_settings(settings: dict) -> dict:
                 if budget is None:
                     continue
                 current[k] = budget
+                continue
+            if k == "thinking_mode":
+                if not isinstance(v, str) or v.strip().lower() not in {"auto", "expanded", "collapsed", "hidden"}:
+                    continue
+                current[k] = v.strip().lower()
                 continue
             # Coerce bool keys
             if k in _SETTINGS_BOOL_KEYS:

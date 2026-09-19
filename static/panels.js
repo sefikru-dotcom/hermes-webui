@@ -6649,6 +6649,7 @@ async function loadProfilesPanel() {
     if (newProfileBtn) {
       newProfileBtn.style.display = data.single_profile_mode ? 'none' : '';
     }
+    _rememberProfileDisplayNames(data.profiles);
 
     // In single profile mode, don't show the explanatory card
     if (!data.single_profile_mode) {
@@ -6694,7 +6695,7 @@ async function loadProfilesPanel() {
       card.innerHTML = `
         <div class="profile-card-header">
           <div style="min-width:0;flex:1">
-            <div class="profile-card-name${isActive ? ' is-active' : ''}">${gwDot}${esc(p.name)}${defaultBadge}${activeBadge}${hiddenBadge}</div>
+            <div class="profile-card-name${isActive ? ' is-active' : ''}">${gwDot}${esc(p.display_name || p.name)}${defaultBadge}${activeBadge}${hiddenBadge}</div>
             ${meta.length ? `<div class="profile-card-meta">${esc(meta.join(' \u00b7 '))}</div>` : `<div class="profile-card-meta">${esc(t('profile_no_configuration'))}</div>`}
           </div>
         </div>`;
@@ -6742,7 +6743,7 @@ function _renderProfileDetail(p, activeName){
   const body = $('profileDetailBody');
   const empty = $('profileDetailEmpty');
   if (!title || !body) return;
-  title.textContent = p.name;
+  title.textContent = p.display_name || p.name;
   const isActive = p.name === activeName;
   const isDefault = !!p.is_default;
   const statusBadge = isActive
@@ -6754,6 +6755,7 @@ function _renderProfileDetail(p, activeName){
     : `<span class="detail-badge">${esc(t('profile_gateway_stopped'))}</span>`;
   const rows = [];
   rows.push(`<div class="detail-row"><div class="detail-row-label">Status</div><div class="detail-row-value">${statusBadge}${defaultBadge}</div></div>`);
+  rows.push(`<div class="detail-row"><div class="detail-row-label">ID</div><div class="detail-row-value"><code>${esc(p.name)}</code></div></div>`);
   rows.push(`<div class="detail-row"><div class="detail-row-label">Gateway</div><div class="detail-row-value">${gwBadge}</div></div>`);
   if (p.model) rows.push(`<div class="detail-row"><div class="detail-row-label">Model</div><div class="detail-row-value"><code>${esc(p.model)}</code></div></div>`);
   if (p.provider) rows.push(`<div class="detail-row"><div class="detail-row-label">Provider</div><div class="detail-row-value">${esc(p.provider)}</div></div>`);
@@ -6853,6 +6855,7 @@ function renderProfileDropdown(data) {
   if (!dd) return;
   dd.innerHTML = '';
   const allProfiles = (Array.isArray(data.profiles) ? data.profiles : []).filter(p => p && typeof p.name === 'string');
+  _rememberProfileDisplayNames(allProfiles);
   const active = (S.activeProfile && allProfiles.some(p => p.name === S.activeProfile))
     ? S.activeProfile
     : (data.active || 'default');
@@ -6866,7 +6869,7 @@ function renderProfileDropdown(data) {
     const gwDot = `<span class="profile-opt-badge ${p.gateway_running ? 'running' : 'stopped'}"></span>`;
     const checkmark = p.name === active ? ' <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--link)" stroke-width="3" style="vertical-align:-1px"><polyline points="20 6 9 17 4 12"/></svg>' : '';
     const defaultBadge = p.is_default ? ` <span style="opacity:.5;font-weight:400">${esc(t('profile_default_label'))}</span>` : '';
-    opt.innerHTML = `<div class="profile-opt-name">${gwDot}${esc(p.name)}${defaultBadge}${checkmark}</div>` +
+    opt.innerHTML = `<div class="profile-opt-name">${gwDot}${esc(p.display_name || p.name)}${defaultBadge}${checkmark}</div>` +
       (meta.length ? `<div class="profile-opt-meta">${esc(meta.join(' \u00b7 '))}</div>` : '');
     opt.onclick = async () => {
       closeProfileDropdown();
@@ -7002,8 +7005,8 @@ async function switchToProfile(name) {
   if (_chip) { _chip.classList.add('switching'); _chip.disabled = true; }
   if (_titlebarBtn) { _titlebarBtn.classList.add('switching'); _titlebarBtn.disabled = true; }
   // Optimistic name update — shows the target name right away
-  if (_chipLabel) _chipLabel.textContent = name;
-  if (_titlebarLabel) _titlebarLabel.textContent = name;
+  if (_chipLabel) _chipLabel.textContent = profileDisplayLabel(name);
+  if (_titlebarLabel) _titlebarLabel.textContent = profileDisplayLabel(name);
 
   // ── Clear stale content + show loading skeletons immediately (#4662) ───────
   // The conversation list and workspace tree still show the PREVIOUS profile's
@@ -7094,6 +7097,7 @@ async function switchToProfile(name) {
     // Update composer placeholder and title bar while the core profile-switch
     // state is still close to the profile API response.
     if (typeof applyBotName === 'function') applyBotName();
+    if (typeof window.renderQuickChips === 'function') window.renderQuickChips(S.activeProfile);
 
     // ── Model + Workspace ──────────────────────────────────────────────────
     // Apply the profile defaults returned by /api/profile/switch immediately.
@@ -8467,6 +8471,31 @@ function _syncStructuredCodeLinesEnabled(){
   linesField.style.opacity=isAuto?'':'0.5';
 }
 
+// Mars chat UX: reasoning visibility is a three-state control (expanded /
+// folded / hidden) instead of the old binary show_thinking flag.
+function _thinkingModeFromUi(){
+  const sel=$('settingsThinkingMode');
+  const v=sel&&sel.value;
+  return (v==='expanded'||v==='collapsed'||v==='hidden')?v:'auto';
+}
+function _marsApplyChatUxSettings(options){
+  const mode=_thinkingModeFromUi();
+  window._thinkingModeSetting=mode;
+  window._thinkingMode=(mode==='expanded'||mode==='collapsed'||mode==='hidden')?mode:'expanded';
+  window._showThinking=window._thinkingMode!=='hidden';
+  const toolsCb=$('settingsShowToolCalls');
+  if(toolsCb) window._showToolCalls=toolsCb.checked!==false;
+  const autoCb=$('settingsAutoCollapsePreviousTurns');
+  if(autoCb) window._autoCollapsePreviousTurns=autoCb.checked!==false;
+  if(typeof _applyThinkingModeClasses==='function') _applyThinkingModeClasses();
+  if(typeof window._marsSyncTurnFoldButton==='function') window._marsSyncTurnFoldButton();
+  if(options&&options.rerender){
+    if(typeof clearMessageRenderCache==='function') clearMessageRenderCache();
+    if(typeof renderMessages==='function') renderMessages({preserveScroll:true});
+  }
+}
+if(typeof window!=='undefined') window._marsApplyChatUxSettings=_marsApplyChatUxSettings;
+
 function _appearancePayloadFromUi(){
   const worklogDetailsExpanded=!!($('settingsWorklogDetailsExpandedDefault')||{}).checked;
   const chatActivityModeSel=$('settingsChatActivityDisplayMode');
@@ -8489,12 +8518,109 @@ function _appearancePayloadFromUi(){
     show_titlebar_profile: !!($('settingsShowTitlebarProfile')||{}).checked,
     worklog_details_expanded_default: worklogDetailsExpanded,
     activity_feed_expanded_default: worklogDetailsExpanded,
+    thinking_mode: _thinkingModeFromUi(),
+    show_tool_calls: (($('settingsShowToolCalls')||{}).checked!==false),
+    auto_collapse_previous_turns: (($('settingsAutoCollapsePreviousTurns')||{}).checked!==false),
     ..._composerControlVisibilityPayload(),
     composer_control_order: _getComposerControlOrder(),
     hidden_tabs: _getHiddenTabs(),
     tab_order: _getTabOrder(),
   };
 }
+
+const _ACTIVITY_MODE_CYCLE_ORDER=['compact_worklog','transparent_stream','hide_all_activity'];
+const _ACTIVITY_MODE_LABEL_KEY={compact_worklog:'activity_mode_short_compact',transparent_stream:'activity_mode_short_transparent',hide_all_activity:'activity_mode_short_final'};
+const _ACTIVITY_MODE_FULL_KEY={compact_worklog:'settings_option_compact_worklog',transparent_stream:'settings_option_transparent_stream',hide_all_activity:'settings_option_final_answer_only'};
+
+function _syncTitlebarActivityModeButton(mode){
+  const btn=$('btnTitlebarActivityMode');
+  if(!btn) return;
+  const next=(mode==='transparent_stream'||mode==='hide_all_activity')?mode:'compact_worklog';
+  btn.setAttribute('data-mode',next);
+  const label=$('btnTitlebarActivityModeLabel');
+  const shortText=(typeof t==='function') ? t(_ACTIVITY_MODE_LABEL_KEY[next]) : next;
+  const fullText=(typeof t==='function') ? t(_ACTIVITY_MODE_FULL_KEY[next]) : next;
+  const hint=(typeof t==='function') ? t('activity_mode_titlebar_hint') : '';
+  const title=hint ? (fullText+' — '+hint) : fullText;
+  if(label) label.textContent=shortText;
+  btn.setAttribute('title',title);
+  btn.setAttribute('aria-label',title);
+}
+
+function _cycleChatActivityDisplayMode(){
+  const cur=(window._chatActivityDisplayMode==='transparent_stream'||window._chatActivityDisplayMode==='hide_all_activity')?window._chatActivityDisplayMode:'compact_worklog';
+  const idx=_ACTIVITY_MODE_CYCLE_ORDER.indexOf(cur);
+  const next=_ACTIVITY_MODE_CYCLE_ORDER[(idx+1)%_ACTIVITY_MODE_CYCLE_ORDER.length];
+  _pickChatActivityDisplayMode(next);
+  _showActivityModeCard(next);
+}
+
+// Мини-карточка под кнопкой: коротко объясняет, что делает выбранный режим.
+const _ACTIVITY_MODE_CARD_ICON={
+  compact_worklog:'<path d="M12 2 2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>',
+  transparent_stream:'<line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/>',
+  hide_all_activity:'<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>'
+};
+const _ACTIVITY_MODE_CARD_DESC_KEY={
+  compact_worklog:'activity_mode_card_compact_desc',
+  transparent_stream:'activity_mode_card_transparent_desc',
+  hide_all_activity:'activity_mode_card_final_desc'
+};
+const _ACTIVITY_MODE_CARD_MS=3400;
+let _activityModeCardTimer=null;
+
+function _escapeActivityCardText(value){
+  const div=document.createElement('div');
+  div.textContent=String(value==null?'':value);
+  return div.innerHTML;
+}
+
+function _hideActivityModeCard(){
+  if(_activityModeCardTimer){clearTimeout(_activityModeCardTimer);_activityModeCardTimer=null;}
+  const card=$('activityModeCard');
+  if(card) card.classList.remove('show');
+}
+
+function _showActivityModeCard(mode){
+  const btn=$('btnTitlebarActivityMode');
+  if(!btn||!document.body) return;
+  const next=(mode==='transparent_stream'||mode==='hide_all_activity')?mode:'compact_worklog';
+  let card=$('activityModeCard');
+  if(!card){
+    card=document.createElement('div');
+    card.id='activityModeCard';
+    card.className='activity-mode-card';
+    card.setAttribute('role','status');
+    card.setAttribute('aria-live','polite');
+    card.addEventListener('click',_hideActivityModeCard);
+    document.body.appendChild(card);
+  }
+  const tr=(key,fallback)=>{ if(typeof t!=='function') return fallback; const v=t(key); return (v&&v!==key)?v:fallback; };
+  const title=tr(_ACTIVITY_MODE_FULL_KEY[next],next);
+  const desc=tr(_ACTIVITY_MODE_CARD_DESC_KEY[next],'');
+  const saved=tr('activity_mode_card_saved','');
+  card.innerHTML='<div class="amc-head"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+(_ACTIVITY_MODE_CARD_ICON[next]||'')+'</svg><span>'+_escapeActivityCardText(title)+'</span></div>'+(desc?'<div class="amc-desc">'+_escapeActivityCardText(desc)+'</div>':'')+(saved?'<div class="amc-saved">'+_escapeActivityCardText(saved)+'</div>':'');
+  const r=btn.getBoundingClientRect();
+  card.style.top=Math.round(r.bottom+8)+'px';
+  card.style.right=Math.round(Math.max(8,window.innerWidth-r.right))+'px';
+  card.classList.add('show');
+  if(_activityModeCardTimer) clearTimeout(_activityModeCardTimer);
+  _activityModeCardTimer=setTimeout(()=>{card.classList.remove('show');_activityModeCardTimer=null;},_ACTIVITY_MODE_CARD_MS);
+}
+// boot.js writes window._chatActivityDisplayMode from the embedded settings on
+// startup without going through _syncChatActivityDisplayModeControl, so the
+// titlebar button has to be synced after that happens (deferred + on load).
+function _refreshTitlebarActivityModeButton(){
+  if(typeof _syncTitlebarActivityModeButton!=='function') return;
+  _syncTitlebarActivityModeButton(window._chatActivityDisplayMode);
+}
+function _scheduleTitlebarActivityModeSync(){
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',()=>setTimeout(_refreshTitlebarActivityModeButton,0));
+  else setTimeout(_refreshTitlebarActivityModeButton,0);
+  window.addEventListener('load',()=>{_refreshTitlebarActivityModeButton();setTimeout(_refreshTitlebarActivityModeButton,800);});
+}
+if(typeof window!=='undefined'){window._cycleChatActivityDisplayMode=_cycleChatActivityDisplayMode;window._syncTitlebarActivityModeButton=_syncTitlebarActivityModeButton;window._refreshTitlebarActivityModeButton=_refreshTitlebarActivityModeButton;window._showActivityModeCard=_showActivityModeCard;window._hideActivityModeCard=_hideActivityModeCard;}
+_scheduleTitlebarActivityModeSync();
 
 function _syncChatActivityDisplayModeControl(mode){
   const next=mode==='transparent_stream'||mode==='hide_all_activity' ? mode : 'compact_worklog';
@@ -8507,6 +8633,7 @@ function _syncChatActivityDisplayModeControl(mode){
   });
   window._chatActivityDisplayMode=next;
   window._transparentStream=next==='transparent_stream';
+  if(typeof _syncTitlebarActivityModeButton==='function') _syncTitlebarActivityModeButton(next);
   if(typeof _syncTransparentEventTimestampsControl==='function') _syncTransparentEventTimestampsControl(window._transparentEventTimestamps,next);
   if(next==='hide_all_activity'&&typeof window._hideLiveActivityForFinalAnswerOnly==='function') window._hideLiveActivityForFinalAnswerOnly();
 }
@@ -8525,6 +8652,9 @@ function _syncTransparentEventTimestampsControl(enabled, mode){
 
 function _pickChatActivityDisplayMode(mode){
   _syncChatActivityDisplayModeControl(mode);
+  // Keep the html-level mode classes (folded reasoning, fold-all button) in
+  // sync when the activity mode changes without a reload.
+  if(typeof _applyThinkingModeClasses==='function') _applyThinkingModeClasses();
   if(typeof clearMessageRenderCache==='function') clearMessageRenderCache();
   if(typeof renderMessages==='function') renderMessages({preserveScroll:true});
   _scheduleAppearanceAutosave();
@@ -9153,9 +9283,44 @@ async function loadSettingsPanel(){
       worklogDetailsExpandedCb.onchange=function(){
         window._worklogDetailsExpandedByDefault=this.checked;
         if(typeof _applyWorklogDetailsExpandedDefault==='function') _applyWorklogDetailsExpandedDefault();
+        if(typeof _marsApplyChatUxSettings==='function') _marsApplyChatUxSettings();
         _scheduleAppearanceAutosave();
       };
     }
+    // Mars chat UX controls: reasoning display state, tool-call visibility and
+    // automatic folding of finished turns.
+    const thinkingModeSel=$('settingsThinkingMode');
+    if(thinkingModeSel){
+      const stored=typeof settings.thinking_mode==='string'?settings.thinking_mode:'auto';
+      thinkingModeSel.value=(stored==='expanded'||stored==='collapsed'||stored==='hidden')
+        ? stored
+        : 'expanded';
+      thinkingModeSel.onchange=function(){
+        _marsApplyChatUxSettings({rerender:true});
+        _scheduleAppearanceAutosave();
+      };
+    }
+    const showToolCallsCb=$('settingsShowToolCalls');
+    if(showToolCallsCb){
+      showToolCallsCb.checked=settings.show_tool_calls!==false;
+      window._showToolCalls=showToolCallsCb.checked;
+      showToolCallsCb.onchange=function(){
+        window._showToolCalls=this.checked;
+        _marsApplyChatUxSettings({rerender:true});
+        _scheduleAppearanceAutosave();
+      };
+    }
+    const autoCollapseCb=$('settingsAutoCollapsePreviousTurns');
+    if(autoCollapseCb){
+      autoCollapseCb.checked=settings.auto_collapse_previous_turns!==false;
+      window._autoCollapsePreviousTurns=autoCollapseCb.checked;
+      autoCollapseCb.onchange=function(){
+        window._autoCollapsePreviousTurns=this.checked;
+        _marsApplyChatUxSettings({rerender:true});
+        _scheduleAppearanceAutosave();
+      };
+    }
+    if(typeof _marsApplyChatUxSettings==='function') _marsApplyChatUxSettings();
     const renderUserMarkdownCb=$('settingsRenderUserMarkdown');
     if(renderUserMarkdownCb){
       renderUserMarkdownCb.checked=!!settings.render_user_markdown;
