@@ -15215,7 +15215,15 @@ def handle_post(handler, parsed) -> bool:
         try:
             workspace = _resolve_new_session_workspace(body, workspace_prev_session_id)
         except (TypeError, ValueError) as e:
-            return bad(handler, str(e))
+            logger.warning("Failed to resolve new session workspace %r: %s; falling back to profile default", body.get("workspace"), e)
+            try:
+                from api.workspace import get_profile_default_workspace
+                workspace = str(resolve_trusted_workspace(get_profile_default_workspace()))
+            except Exception:
+                try:
+                    workspace = str(resolve_trusted_workspace(None))
+                except Exception:
+                    return bad(handler, str(e))
         worktree_info = None
         worktree_skipped = None
         # Three-value worktree model (#6022): an explicit body value always
