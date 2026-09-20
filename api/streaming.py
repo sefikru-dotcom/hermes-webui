@@ -11977,12 +11977,20 @@ def _run_agent_streaming(
                                         _preview = str(_m.get("content") or "").strip()
                                         break
                                 _preview = " ".join(_preview.split())[:200]
-                                _send_push(
+                                _push_res = _send_push(
                                     "Марс: ответ готов",
                                     _preview or "Задача завершена.",
                                     url=f"session/{_sid}",
                                     tag=f"hermes-{_sid}",
                                 )
+                                # Keep a trace: without it a silently-undelivered
+                                # push (dead endpoint, bad VAPID key) is invisible.
+                                if _push_res.get("total"):
+                                    logger.info(
+                                        "push: turn-complete sent=%s pruned=%s total=%s errors=%s",
+                                        _push_res.get("sent"), _push_res.get("pruned"),
+                                        _push_res.get("total"), _push_res.get("errors"),
+                                    )
                             except Exception:
                                 logger.debug("push notify skipped", exc_info=True)
 
