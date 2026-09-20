@@ -8504,9 +8504,9 @@ function _appearancePayloadFromUi(){
     theme: ($('settingsTheme')||{}).value || localStorage.getItem('hermes-theme') || 'dark',
     skin: ($('settingsSkin')||{}).value || localStorage.getItem('hermes-skin') || 'default',
     font_size: ($('settingsFontSize')||{}).value || localStorage.getItem('hermes-font-size') || 'default',
-    chat_activity_display_mode: chatActivityModeSel&&(chatActivityModeSel.value==='transparent_stream'||chatActivityModeSel.value==='hide_all_activity')
-      ? chatActivityModeSel.value
-      : 'compact_worklog',
+    chat_activity_display_mode: chatActivityModeSel
+      ? _canonicalActivityMode(chatActivityModeSel.value)
+      : 'stream_window',
     transparent_stream_event_timestamps: transparentEventTimestamps ? transparentEventTimestamps.checked : true,
     session_jump_buttons: !!($('settingsSessionJumpButtons')||{}).checked,
     session_endless_scroll: !!($('settingsSessionEndlessScroll')||{}).checked,
@@ -8528,14 +8528,35 @@ function _appearancePayloadFromUi(){
   };
 }
 
-const _ACTIVITY_MODE_CYCLE_ORDER=['compact_worklog','transparent_stream','hide_all_activity'];
-const _ACTIVITY_MODE_LABEL_KEY={compact_worklog:'activity_mode_short_compact',transparent_stream:'activity_mode_short_transparent',hide_all_activity:'activity_mode_short_final'};
-const _ACTIVITY_MODE_FULL_KEY={compact_worklog:'settings_option_compact_worklog',transparent_stream:'settings_option_transparent_stream',hide_all_activity:'settings_option_final_answer_only'};
+const _ACTIVITY_MODE_CYCLE_ORDER=['stream_full','stream_window','stream_quiet'];
+const _ACTIVITY_MODE_LABEL_KEY={
+  stream_full:'activity_mode_short_stream_full',
+  stream_window:'activity_mode_short_stream_window',
+  stream_quiet:'activity_mode_short_stream_quiet',
+  transparent_stream:'activity_mode_short_stream_full',
+  compact_worklog:'activity_mode_short_stream_window',
+  hide_all_activity:'activity_mode_short_stream_quiet'
+};
+const _ACTIVITY_MODE_FULL_KEY={
+  stream_full:'settings_option_stream_full',
+  stream_window:'settings_option_stream_window',
+  stream_quiet:'settings_option_stream_quiet',
+  transparent_stream:'settings_option_stream_full',
+  compact_worklog:'settings_option_stream_window',
+  hide_all_activity:'settings_option_stream_quiet'
+};
+
+function _canonicalActivityMode(mode){
+  if(mode==='stream_full'||mode==='stream_window'||mode==='stream_quiet') return mode;
+  if(mode==='transparent_stream') return 'stream_full';
+  if(mode==='hide_all_activity') return 'stream_quiet';
+  return 'stream_window';
+}
 
 function _syncTitlebarActivityModeButton(mode){
   const btn=$('btnTitlebarActivityMode');
   if(!btn) return;
-  const next=(mode==='transparent_stream'||mode==='hide_all_activity')?mode:'compact_worklog';
+  const next=_canonicalActivityMode(mode);
   btn.setAttribute('data-mode',next);
   const label=$('btnTitlebarActivityModeLabel');
   const shortText=(typeof t==='function') ? t(_ACTIVITY_MODE_LABEL_KEY[next]) : next;
@@ -8548,7 +8569,7 @@ function _syncTitlebarActivityModeButton(mode){
 }
 
 function _cycleChatActivityDisplayMode(){
-  const cur=(window._chatActivityDisplayMode==='transparent_stream'||window._chatActivityDisplayMode==='hide_all_activity')?window._chatActivityDisplayMode:'compact_worklog';
+  const cur=_canonicalActivityMode(window._chatActivityDisplayMode);
   const idx=_ACTIVITY_MODE_CYCLE_ORDER.indexOf(cur);
   const next=_ACTIVITY_MODE_CYCLE_ORDER[(idx+1)%_ACTIVITY_MODE_CYCLE_ORDER.length];
   _pickChatActivityDisplayMode(next);
@@ -8557,14 +8578,20 @@ function _cycleChatActivityDisplayMode(){
 
 // Мини-карточка под кнопкой: коротко объясняет, что делает выбранный режим.
 const _ACTIVITY_MODE_CARD_ICON={
-  compact_worklog:'<path d="M12 2 2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>',
+  stream_full:'<line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/>',
+  stream_window:'<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/>',
+  stream_quiet:'<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
   transparent_stream:'<line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/>',
+  compact_worklog:'<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/>',
   hide_all_activity:'<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>'
 };
 const _ACTIVITY_MODE_CARD_DESC_KEY={
-  compact_worklog:'activity_mode_card_compact_desc',
-  transparent_stream:'activity_mode_card_transparent_desc',
-  hide_all_activity:'activity_mode_card_final_desc'
+  stream_full:'activity_mode_card_stream_full_desc',
+  stream_window:'activity_mode_card_stream_window_desc',
+  stream_quiet:'activity_mode_card_stream_quiet_desc',
+  transparent_stream:'activity_mode_card_stream_full_desc',
+  compact_worklog:'activity_mode_card_stream_window_desc',
+  hide_all_activity:'activity_mode_card_stream_quiet_desc'
 };
 const _ACTIVITY_MODE_CARD_MS=3400;
 let _activityModeCardTimer=null;
@@ -8584,7 +8611,7 @@ function _hideActivityModeCard(){
 function _showActivityModeCard(mode){
   const btn=$('btnTitlebarActivityMode');
   if(!btn||!document.body) return;
-  const next=(mode==='transparent_stream'||mode==='hide_all_activity')?mode:'compact_worklog';
+  const next=_canonicalActivityMode(mode);
   let card=$('activityModeCard');
   if(!card){
     card=document.createElement('div');
@@ -8623,29 +8650,30 @@ if(typeof window!=='undefined'){window._cycleChatActivityDisplayMode=_cycleChatA
 _scheduleTitlebarActivityModeSync();
 
 function _syncChatActivityDisplayModeControl(mode){
-  const next=mode==='transparent_stream'||mode==='hide_all_activity' ? mode : 'compact_worklog';
+  const next=_canonicalActivityMode(mode);
   const select=$('settingsChatActivityDisplayMode');
   if(select) select.value=next;
   document.querySelectorAll('[data-chat-activity-mode]').forEach(btn=>{
-    const active=btn.getAttribute('data-chat-activity-mode')===next;
+    const btnMode=_canonicalActivityMode(btn.getAttribute('data-chat-activity-mode'));
+    const active=btnMode===next;
     btn.classList.toggle('active',active);
     btn.setAttribute('aria-pressed',active?'true':'false');
   });
   window._chatActivityDisplayMode=next;
-  window._transparentStream=next==='transparent_stream';
+  window._transparentStream=next==='stream_full';
   if(typeof _syncTitlebarActivityModeButton==='function') _syncTitlebarActivityModeButton(next);
   if(typeof _syncTransparentEventTimestampsControl==='function') _syncTransparentEventTimestampsControl(window._transparentEventTimestamps,next);
-  if(next==='hide_all_activity'&&typeof window._hideLiveActivityForFinalAnswerOnly==='function') window._hideLiveActivityForFinalAnswerOnly();
+  if(next==='stream_quiet'&&typeof window._hideLiveActivityForFinalAnswerOnly==='function') window._hideLiveActivityForFinalAnswerOnly();
 }
 
 function _syncTransparentEventTimestampsControl(enabled, mode){
   const next=enabled!==false;
-  const activeMode=mode==='transparent_stream'||mode==='hide_all_activity' ? mode : (window._chatActivityDisplayMode||'compact_worklog');
+  const activeMode=_canonicalActivityMode(mode||window._chatActivityDisplayMode);
   const checkbox=$('settingsTransparentEventTimestamps');
   if(checkbox){
     checkbox.checked=next;
-    checkbox.disabled=activeMode!=='transparent_stream';
-    checkbox.style.opacity=activeMode==='transparent_stream'?'':'0.5';
+    checkbox.disabled=activeMode!=='stream_full';
+    checkbox.style.opacity=activeMode==='stream_full'?'':'0.5';
   }
   window._transparentEventTimestamps=next;
 }
@@ -12875,10 +12903,7 @@ async function saveSettings(andClose){
   body.font_size=fontSize;
   body.session_jump_buttons=!!($('settingsSessionJumpButtons')||{}).checked;
   body.session_endless_scroll=!!($('settingsSessionEndlessScroll')||{}).checked;
-  body.chat_activity_display_mode=((($('settingsChatActivityDisplayMode')||{}).value==='transparent_stream')
-    ||(($('settingsChatActivityDisplayMode')||{}).value==='hide_all_activity'))
-    ? ($('settingsChatActivityDisplayMode')||{}).value
-    : 'compact_worklog';
+  body.chat_activity_display_mode=_canonicalActivityMode(($('settingsChatActivityDisplayMode')||{}).value);
   body.transparent_stream_event_timestamps=(($('settingsTransparentEventTimestamps')||{}).checked)!==false;
   body.auto_scroll_follow=!!($('settingsAutoScrollFollow')||{}).checked;
   body.render_user_markdown=!!($('settingsRenderUserMarkdown')||{}).checked;

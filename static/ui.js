@@ -8478,6 +8478,8 @@ function setBusy(v){
   S.busy=v;
   updateSendBtn();
   if(!v){
+    if(typeof _marsSetCurrentStage==='function') _marsSetCurrentStage('');
+    if(typeof _marsCollapseSettledLiveTurnWindows==='function') _marsCollapseSettledLiveTurnWindows();
     if(typeof _clearActivityElapsedTimer==='function') _clearActivityElapsedTimer();
     setStatus('');
     setComposerStatus('');
@@ -11618,19 +11620,25 @@ function _thinkingActivityNode(text, open, disclosureKey){
   return row;
 }
 function chatActivityMode(){
-  if(typeof window==='undefined') return 'compact_worklog';
+  if(typeof window==='undefined') return 'stream_window';
   const mode=window._chatActivityDisplayMode;
-  if(mode==='compact_worklog'||mode==='transparent_stream'||mode==='hide_all_activity') return mode;
-  return window._transparentStream ? 'transparent_stream' : 'compact_worklog';
+  if(mode==='stream_window'||mode==='stream_full'||mode==='stream_quiet') return mode;
+  if(mode==='transparent_stream') return 'stream_full';
+  if(mode==='hide_all_activity') return 'stream_quiet';
+  if(mode==='compact_worklog') return 'stream_window';
+  return window._transparentStream ? 'stream_full' : 'stream_window';
 }
 function isTransparentStream(){
-  return chatActivityMode()==='transparent_stream';
+  return chatActivityMode()==='stream_full';
 }
 function isFinalAnswerOnlyMode(){
-  return chatActivityMode()==='hide_all_activity';
+  return chatActivityMode()==='stream_quiet';
+}
+function isStreamWindowMode(){
+  return chatActivityMode()==='stream_window';
 }
 function isCompactWorklogMode(){
-  return isSimplifiedToolCalling()&&chatActivityMode()==='compact_worklog';
+  return isSimplifiedToolCalling()&&chatActivityMode()==='stream_window';
 }
 // Mars chat UX (#reasoning-fold): reasoning display is three-state instead of
 // the old binary show/hide. 'collapsed' keeps the reasoning in the DOM as a
@@ -11659,14 +11667,18 @@ function _applyThinkingModeClasses(){
     document.documentElement.classList.toggle('mars-thinking-hidden',tm==='hidden');
     document.documentElement.classList.toggle('mars-hide-tools',window._showToolCalls===false);
     document.documentElement.classList.toggle('mars-autocollapse-turns',window._autoCollapsePreviousTurns!==false);
-    document.documentElement.classList.toggle('mars-transparent-stream',am==='transparent_stream');
-    document.documentElement.classList.toggle('mars-hide-activity',am==='hide_all_activity');
+    document.documentElement.classList.toggle('mars-transparent-stream',am==='stream_full');
+    document.documentElement.classList.toggle('mars-mode-full',am==='stream_full');
+    document.documentElement.classList.toggle('mars-mode-window',am==='stream_window');
+    document.documentElement.classList.toggle('mars-mode-quiet',am==='stream_quiet');
+    document.documentElement.classList.toggle('mars-hide-activity',am==='stream_quiet');
   }catch(_){}
 }
 if(typeof window!=='undefined'){
   window.thinkingMode=thinkingMode;
   window.isThinkingCollapsed=isThinkingCollapsed;
   window.isThinkingVisible=isThinkingVisible;
+  window.isStreamWindowMode=isStreamWindowMode;
   window._applyThinkingModeClasses=_applyThinkingModeClasses;
 }
 // Folded reasoning still has to communicate that it is thinking: the collapsed
@@ -11724,6 +11736,20 @@ function marsToggleAllTurns(){
   });
   _marsSyncTurnFoldButton();
 }
+function _marsCollapseSettledLiveTurnWindows(){
+  if(chatActivityMode()!=='stream_window') return;
+  try{
+    const groups=document.querySelectorAll('.live-worklog, .tool-worklog-group');
+    groups.forEach(g=>{
+      g.classList.add('tool-call-group-collapsed');
+      g.classList.remove('open');
+      const summary=g.querySelector('.tool-worklog-summary,.tool-call-group-summary');
+      if(summary) summary.setAttribute('aria-expanded','false');
+    });
+  }catch(_){}
+}
+window._marsCollapseSettledLiveTurnWindows=_marsCollapseSettledLiveTurnWindows;
+
 function _marsAutoCollapsePreviousTurns(){
   if(window._autoCollapsePreviousTurns===false) return;
   if(!isTransparentStream()) return;
@@ -12850,7 +12876,8 @@ function _toggleToolWorklogGroup(summary){
 }
 function _finalizeLiveActivityDisclosureGroup(group){
   if(!group) return;
-  const keepOpen=!!(
+  const isWindowMode=chatActivityMode()==='stream_window';
+  const keepOpen=isWindowMode ? false : !!(
     group.querySelector&&group.querySelector('.tool-card.open,.thinking-card.open,.tool-group.open,.tool-worklog-tool-group.open')
   );
   const disclosureKey=group.getAttribute('data-activity-disclosure-key')||group.getAttribute('data-tool-worklog-key')||'';
@@ -14907,7 +14934,7 @@ function placeLiveRunStatusHost(){
   return _moveLiveRunStatusToTurnEnd(el);
 }
 function showLiveRunStatus(sid,opts){
-  if(typeof isCompactWorklogMode==='function'&&isCompactWorklogMode()){
+  if(chatActivityMode()==='stream_window'){
     _liveRunStatusSessionId=sid;
     _liveRunStatusTokens=opts&&opts.tokens||null;
     const el=$('liveRunStatus');
@@ -14929,6 +14956,13 @@ function _renderLiveRunStatusContent(el,startedAt){
   const elapsed=startedAt?Math.max(0,now-startedAt):0;
   const timeStr=_formatRunElapsed(elapsed);
   const tokens=_liveRunStatusTokens;
+  const quietText=window._marsCurrentStageText||'Работает...';
+  if(chatActivityMode()==='stream_quiet'){
+    el.innerHTML=`<span class="mars-quiet-status-spinner"></span><span class="mars-quiet-status-text">${esc(quietText)}</span><span class="lf-sep">·</span><span class="lf-time">${timeStr}</span>${tokens?`<span class="lf-sep">·</span><span class="lf-tokens">${_fmtTokens(tokens)} tok</span>`:''}`;
+    el.className='live-run-status mars-quiet-status-line';
+    return;
+  }
+  el.className='live-run-status live-footer';
   el.innerHTML=`<span class="live-run-status-dot tool-card-running-dot"></span><span class="live-run-status-text lf-time">${timeStr}</span>${tokens?`<span class="lf-sep">·</span><span class="lf-tokens">${_fmtTokens(tokens)} tokens</span>`:''}<span class="lf-sep">·</span><span class="lf-status">Running</span>`;
 }
 function updateLiveRunStatus(opts){
@@ -14947,7 +14981,7 @@ function _syncLiveRunStatusAfterRender(){
   if(!sid||!S.activeStreamId||!S.busy) return;
   const timer=_liveRunStatusTimers[sid];
   const startedAt=(timer&&timer.startedAt)||((S.session&&S.session.pending_started_at)||Date.now()/1000);
-  if(typeof isCompactWorklogMode==='function'&&isCompactWorklogMode()){
+  if(chatActivityMode()==='stream_window'){
     const el=$('liveRunStatus');
     if(el){el.hidden=true;el.innerHTML='';}
     return;
@@ -14982,6 +15016,18 @@ function _clearLiveRunStatusTimer(sid){
   const t=_liveRunStatusTimers[sid];
   if(t){clearInterval(t.interval);delete _liveRunStatusTimers[sid];}
 }
+function _marsSetCurrentStage(text){
+  window._marsCurrentStageText=text||'';
+  const el=$('liveRunStatus');
+  if(el&&!el.hidden&&chatActivityMode()==='stream_quiet'){
+    const sid=S.session&&S.session.session_id;
+    const timer=sid&&_liveRunStatusTimers[sid];
+    const startedAt=timer&&timer.startedAt||null;
+    _renderLiveRunStatusContent(el,startedAt);
+  }
+}
+window._marsSetCurrentStage=_marsSetCurrentStage;
+
 function ensureRunActivityForCurrentTurn(){
   // Phase C: disabled — top live run Activity card removed
   return null;
@@ -19122,6 +19168,14 @@ function _toggleToolDiff(btn){
 function _syncToolCallGroupSummary(group){
   if(!group) return;
   if(group.getAttribute('data-tool-worklog-group')==='1') _syncToolWorklogToolGroup(group);
+  if(chatActivityMode()==='stream_window'){
+    try{
+      const list=_toolWorklogListEl(group);
+      if(list&&list.lastElementChild){
+        group.scrollTop=group.scrollHeight;
+      }
+    }catch(_){}
+  }
   const cards=Array.from((_toolWorklogListEl(group)||group).querySelectorAll('.tool-card-row .tool-card,.tool-card-row.tl'));
   const toolCount=cards.length;
   const label=group.querySelector('.tool-worklog-label') || group.querySelector('.tool-call-group-label');
@@ -19250,6 +19304,8 @@ function _activityLiveProgressLabel(group){
 // message column eliminates the visible "jump" users saw when renderMessages
 // fired on the done event.
 function appendLiveToolCard(tc){
+  const toolName=tc&&tc.name?`Выполняет ${tc.name}...`:'Выполняет действие...';
+  _marsSetCurrentStage(toolName);
   // Guard: ignore if session was switched. Prevents stale tool events from
   // a previous session's SSE stream from manipulating the new session's DOM.
   if(!S.session||!S.activeStreamId) return;
@@ -20513,6 +20569,7 @@ function finalizeThinkingCard(){
   }
 }
 function appendThinking(text='', options){
+  _marsSetCurrentStage('Думает...');
   // Guard: ignore if session was switched during an async SSE stream.
   // The old stream's reasoning events can still fire after switch;
   // without this check they would pollute the new session's DOM.

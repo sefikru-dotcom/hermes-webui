@@ -179,9 +179,11 @@
   }
 
   function _activityDisplayMode(value){
-    return value==='transparent_stream'||value==='compact_worklog'||value==='hide_all_activity'
-      ? value
-      : 'compact_worklog';
+    if(value==='transparent_stream'||value==='compact_worklog'||value==='hide_all_activity') return value;
+    if(value==='stream_full') return 'transparent_stream';
+    if(value==='stream_quiet') return 'hide_all_activity';
+    if(value==='stream_window') return 'compact_worklog';
+    return 'compact_worklog';
   }
 
   function _terminalStateKey(value){

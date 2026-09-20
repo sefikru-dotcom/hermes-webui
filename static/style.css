@@ -4991,9 +4991,12 @@ main.main > #mainPlugin{display:none;}
 .app-titlebar-activity-mode .activity-mode-ico{display:inline-flex;align-items:center;justify-content:center;line-height:1;}
 .app-titlebar-activity-mode svg{width:16px;height:16px;display:block;flex:0 0 auto;}
 .app-titlebar-activity-mode .am-ico{display:none;}
-.app-titlebar-activity-mode[data-mode="compact_worklog"] .am-ico-compact{display:block;}
-.app-titlebar-activity-mode[data-mode="transparent_stream"] .am-ico-transparent{display:block;}
-.app-titlebar-activity-mode[data-mode="hide_all_activity"] .am-ico-hide{display:block;}
+.app-titlebar-activity-mode[data-mode="compact_worklog"] .am-ico-compact,
+.app-titlebar-activity-mode[data-mode="stream_window"] .am-ico-window{display:block;}
+.app-titlebar-activity-mode[data-mode="transparent_stream"] .am-ico-transparent,
+.app-titlebar-activity-mode[data-mode="stream_full"] .am-ico-full{display:block;}
+.app-titlebar-activity-mode[data-mode="hide_all_activity"] .am-ico-hide,
+.app-titlebar-activity-mode[data-mode="stream_quiet"] .am-ico-quiet{display:block;}
 .app-titlebar-activity-mode .activity-mode-text{white-space:nowrap;}
 @media (max-width: 768px){
   .app-titlebar-activity-mode{height:44px;}
@@ -7890,6 +7893,152 @@ html.mars-thinking-expanded .thinking-card .thinking-card-body{
 html.mars-thinking-expanded .wl-reason{
   max-height:none!important;opacity:1!important;cursor:default!important;
   -webkit-mask-image:none!important;mask-image:none!important;
+}
+
+/* Mars Modes: Full stream, Process window, Quiet */
+.mars-process-window{
+  position:relative;
+  border:1px solid var(--border2);
+  background:color-mix(in srgb,var(--surface) 92%,var(--bg));
+  border-radius:10px;
+  margin:8px 0 14px;
+  overflow:hidden;
+  transition:all .2s ease;
+  max-width:var(--msg-max);
+}
+.mars-process-window-header{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:6px 10px;
+  background:color-mix(in srgb,var(--surface) 80%,transparent);
+  border-bottom:1px solid color-mix(in srgb,var(--border-subtle) 70%,transparent);
+  font-size:12px;
+  color:var(--muted);
+  user-select:none;
+}
+.mars-process-window-title{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  font-weight:600;
+  font-family:var(--font-mono);
+}
+.mars-process-window-actions{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+}
+.mars-process-window-btn{
+  background:transparent;
+  border:1px solid transparent;
+  color:var(--muted);
+  cursor:pointer;
+  padding:2px 6px;
+  border-radius:5px;
+  font-size:11px;
+}
+.mars-process-window-btn:hover{
+  background:var(--accent-bg);
+  color:var(--accent-text);
+  border-color:var(--accent-bg-strong);
+}
+.mars-process-window-stream{
+  max-height:220px;
+  overflow-y:auto;
+  overflow-x:hidden;
+  padding:8px 10px;
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+  scroll-behavior:smooth;
+}
+.mars-process-window.is-collapsed .mars-process-window-stream{
+  display:none;
+}
+.mars-process-window.is-collapsed{
+  margin:4px 0 10px;
+}
+.mars-process-window.is-collapsed .mars-process-window-header{
+  border-bottom:0;
+  cursor:pointer;
+}
+
+/* Quiet mode live status line */
+.mars-quiet-status-line{
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  padding:6px 12px;
+  margin:6px 0 10px;
+  border-radius:20px;
+  background:color-mix(in srgb,var(--surface) 88%,var(--bg));
+  border:1px solid var(--border-subtle);
+  font-size:12px;
+  color:var(--muted);
+  max-width:fit-content;
+}
+.mars-quiet-status-spinner{
+  width:12px;
+  height:12px;
+  border:2px solid color-mix(in srgb,var(--accent) 30%,transparent);
+  border-top-color:var(--accent);
+  border-radius:50%;
+  animation:lfspin .8s linear infinite;
+  display:inline-block;
+  flex:0 0 12px;
+}
+.mars-quiet-status-text{
+  font-family:var(--font-mono);
+  color:var(--text);
+}
+
+/* Mode-specific overrides */
+html.mars-mode-quiet .tool-card-row,
+html.mars-mode-quiet .tool-call-group,
+html.mars-mode-quiet .tool-worklog-group,
+html.mars-mode-quiet .agent-activity-thinking,
+html.mars-mode-quiet .wl-reason,
+html.mars-mode-quiet .thinking-card,
+html.mars-mode-quiet .transparent-event-row,
+html.mars-mode-quiet .assistant-segment-worklog-source,
+html.mars-mode-quiet .mars-process-window{
+  display:none!important;
+}
+
+html.mars-mode-window .live-worklog{
+  max-height:240px;
+  overflow-y:auto;
+  padding:8px 10px;
+  border:1px solid var(--border2);
+  border-radius:8px;
+  background:color-mix(in srgb,var(--surface) 90%,var(--bg));
+  box-shadow:inset 0 1px 3px rgba(0,0,0,.15);
+}
+html.mars-mode-window .live-worklog.tool-call-group-collapsed{
+  max-height:none;
+  overflow:visible;
+  border:0;
+  background:transparent;
+  box-shadow:none;
+  padding:0;
+}
+
+/* Full mode: display everything explicitly */
+html.mars-mode-full .tool-call-group.tool-call-group-collapsed .tool-call-group-body,
+html.mars-mode-full .tool-worklog-group.tool-call-group-collapsed .tool-worklog-body{
+  display:block!important;
+}
+html.mars-mode-full .thinking-card.thinking-card-collapsed .thinking-card-body{
+  display:block!important;
+  max-height:none!important;
+  opacity:1!important;
+}
+html.mars-mode-full .wl-reason{
+  max-height:none!important;
+  opacity:1!important;
+  -webkit-mask-image:none!important;
+  mask-image:none!important;
 }
 
 /* Activity mode: hide_all_activity (Final answer only) */

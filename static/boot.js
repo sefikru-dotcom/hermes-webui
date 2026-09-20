@@ -3320,10 +3320,17 @@ window._mirrorSpeechSettingsFromServer=_mirrorSpeechSettingsFromServer;
     window._whatsNewSummaryEnabled=!!s.whats_new_summary_enabled;
     window._showThinking=s.show_thinking!==false;
     window._simplifiedToolCalling=true;
-    window._chatActivityDisplayMode=s.chat_activity_display_mode==='transparent_stream'||s.chat_activity_display_mode==='hide_all_activity'
-      ? s.chat_activity_display_mode
-      : 'compact_worklog';
-    window._transparentStream=window._chatActivityDisplayMode==='transparent_stream';
+    const rawMode = s.chat_activity_display_mode;
+    if (rawMode === 'stream_full' || rawMode === 'stream_window' || rawMode === 'stream_quiet') {
+      window._chatActivityDisplayMode = rawMode;
+    } else if (rawMode === 'transparent_stream') {
+      window._chatActivityDisplayMode = 'stream_full';
+    } else if (rawMode === 'hide_all_activity') {
+      window._chatActivityDisplayMode = 'stream_quiet';
+    } else {
+      window._chatActivityDisplayMode = 'stream_window';
+    }
+    window._transparentStream = window._chatActivityDisplayMode === 'stream_full';
     window._transparentEventTimestamps=s.transparent_stream_event_timestamps!==false;
     window._terminalAutoExpandOnOutput=!!s.terminal_auto_expand_on_output;
     window._worklogDetailsExpandedByDefault=!!(
@@ -3349,7 +3356,7 @@ window._mirrorSpeechSettingsFromServer=_mirrorSpeechSettingsFromServer;
       document.documentElement.classList.toggle('mars-thinking-collapsed',window._thinkingMode==='collapsed');
       document.documentElement.classList.toggle('mars-hide-tools',!window._showToolCalls);
       document.documentElement.classList.toggle('mars-autocollapse-turns',window._autoCollapsePreviousTurns);
-      document.documentElement.classList.toggle('mars-transparent-stream',window._chatActivityDisplayMode==='transparent_stream');
+      document.documentElement.classList.toggle('mars-transparent-stream',window._chatActivityDisplayMode==='transparent_stream'||window._chatActivityDisplayMode==='stream_full');
     }catch(_){}
     window._workspaceTodosTab=!!s.workspace_todos_tab;
     if(typeof _applyWorkspaceTodosTabVisibility==='function') _applyWorkspaceTodosTabVisibility();
@@ -3497,7 +3504,7 @@ window._mirrorSpeechSettingsFromServer=_mirrorSpeechSettingsFromServer;
     window._whatsNewSummaryEnabled=false;
     window._showThinking=true;
     window._simplifiedToolCalling=true;
-    window._chatActivityDisplayMode='compact_worklog';
+    window._chatActivityDisplayMode='stream_window';
     window._transparentStream=false;
     window._transparentEventTimestamps=true;
     window._terminalAutoExpandOnOutput=false;

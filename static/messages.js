@@ -2887,7 +2887,13 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
     return Number.isFinite(seq)&&seq>0?seq:1;
   }
   function _anchorSceneActiveMode(){
-    const normalize=value=>value==='transparent_stream'||value==='compact_worklog'||value==='hide_all_activity'?value:'';
+    const normalize=value=>{
+      if(value==='transparent_stream'||value==='compact_worklog'||value==='hide_all_activity') return value;
+      if(value==='stream_full') return 'transparent_stream';
+      if(value==='stream_quiet') return 'hide_all_activity';
+      if(value==='stream_window') return 'compact_worklog';
+      return '';
+    };
     if(typeof window!=='undefined'){
       if(typeof window.chatActivityMode==='function'){
         try{
@@ -5732,6 +5738,7 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
 
     source.addEventListener('token',e=>{
       if(_terminalStateReached||_streamFinalized) return;
+      if(typeof _marsSetCurrentStage==='function') _marsSetCurrentStage('Отвечает...');
       const d=JSON.parse(e.data);
       assistantText+=d.text;
       syncInflightAssistantMessage();
