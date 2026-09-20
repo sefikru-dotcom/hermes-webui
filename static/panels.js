@@ -13630,4 +13630,13 @@ function updateNotificationPermissionStatus(){
     btn.setAttribute('aria-disabled', granted?'true':'false');
   }
   if(btnWrap) btnWrap.title=label;
+  // Push-подписка: сколько устройств уже получают уведомления при закрытом
+  // приложении (обновляется кнопкой «Тест push» и при включении уведомлений).
+  if(perm==='granted'&&typeof api==='function'){
+    api('/api/push/status').then(st=>{
+      if(!st) return;
+      const n=(typeof st.subscriptions==='number')?st.subscriptions:0;
+      el.textContent=label+(n>0?` · push: ${n}`:'');
+    }).catch(()=>{});
+  }
 }

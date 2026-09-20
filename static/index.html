@@ -1356,6 +1356,7 @@ window._marsFallbackActivityCycle=function(btn){
                   <button type="button" class="sm-btn" id="notificationPermissionButton" onclick="requestNotificationPermission()" style="padding:5px 10px;font-size:12px" data-i18n="notifications_enable_btn">Enable notifications</button>
                 </span>
                 <button type="button" class="sm-btn" onclick="sendBrowserNotification('Марс тест','Notifications are ready.',{force:true});" style="padding:5px 10px;font-size:12px" data-i18n="notifications_test_btn">Send test</button>
+                <button type="button" class="sm-btn" onclick="sendPushTest()" style="padding:5px 10px;font-size:12px" data-i18n="push_test_btn" title="Push работает при закрытом приложении (на iPhone — только для ярлыка с экрана «Домой»)">Тест push (закрытое приложение)</button>
                 <span id="notificationPermissionStatus" style="font-size:11px;color:var(--muted)"></span>
               </div>
             </div>

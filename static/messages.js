@@ -9228,9 +9228,79 @@ function requestNotificationPermission(){
   }
   return Notification.requestPermission().then(p=>{
     if(typeof showToast==='function') showToast(p==='granted'?t('notifications_enabled_toast'):t('notifications_denied'),3000,p==='granted'?undefined:'error');
+    if(p==='granted'&&typeof ensurePushSubscription==='function') ensurePushSubscription();
     if(typeof updateNotificationPermissionStatus==='function') updateNotificationPermissionStatus();
     return p;
   });
+}
+
+// ── Web Push subscription (works with the app closed) ────────────────────────
+// The in-page Notification path needs a live SSE connection, so it dies with
+// the tab. Server-side push (VAPID) is what wakes an installed PWA: Android
+// Chrome and desktop browsers via FCM/Mozilla, iOS 16.4+ Home-Screen apps via
+// APNs. iOS Safari *tabs* have no push at all — install to the Home Screen.
+function _b64urlToUint8Array(base64Url){
+  const padding='='.repeat((4-(base64Url.length%4))%4);
+  const base64=(base64Url+padding).replace(/-/g,'+').replace(/_/g,'/');
+  const raw=atob(base64);
+  const out=new Uint8Array(raw.length);
+  for(let i=0;i<raw.length;i++) out[i]=raw.charCodeAt(i);
+  return out;
+}
+
+async function ensurePushSubscription(opts={}){
+  const silent=!!(opts&&opts.silent);
+  try{
+    if(!('serviceWorker' in navigator)||!('PushManager' in window)) {
+      if(!silent&&typeof showToast==='function') showToast(t('push_unavailable'),4000,'error');
+      return null;
+    }
+    if(!('Notification' in window)||Notification.permission!=='granted') return null;
+    const reg=await Promise.race([
+      navigator.serviceWorker.getRegistration().catch(()=>null),
+      new Promise(r=>setTimeout(()=>r(null),4000)),
+    ]).then(async r=>r||(await navigator.serviceWorker.ready.catch(()=>null)));
+    if(!reg||!reg.pushManager) return null;
+    const status=await api('/api/push/status').catch(()=>null);
+    if(!status||!status.vapid_public_key) return null;
+    let sub=await reg.pushManager.getSubscription().catch(()=>null);
+    if(!sub){
+      sub=await reg.pushManager.subscribe({
+        userVisibleOnly:true,
+        applicationServerKey:_b64urlToUint8Array(status.vapid_public_key),
+      });
+    }
+    if(!sub) return null;
+    await api('/api/push/subscribe',{method:'POST',body:JSON.stringify(sub.toJSON())});
+    if(!silent&&typeof showToast==='function') showToast(t('push_subscribed'),3500);
+    if(typeof updateNotificationPermissionStatus==='function') updateNotificationPermissionStatus();
+    return sub;
+  }catch(e){
+    if(!silent&&typeof showToast==='function') showToast(t('push_subscribe_failed')+': '+(e&&e.message?e.message:e),4000,'error');
+    return null;
+  }
+}
+
+// "Send test" for the closed-app channel: the server fans the payload out to
+// every stored subscription, so the phone must be locked/backgrounded for the
+// banner to prove anything.
+async function sendPushTest(){
+  if(!('Notification' in window)||Notification.permission!=='granted'){
+    const p=await requestNotificationPermission();
+    if(p!=='granted') return;
+  }
+  await ensurePushSubscription({silent:true});
+  try{
+    const res=await api('/api/push/test',{method:'POST',body:JSON.stringify({})});
+    const sent=(res&&typeof res.sent==='number')?res.sent:0;
+    const total=(res&&typeof res.total==='number')?res.total:0;
+    if(typeof showToast==='function'){
+      showToast(sent>0?t('push_test_sent').replace('{n}',String(sent)):t('push_test_none'),4000,sent>0?undefined:'error');
+    }
+    if(typeof updateNotificationPermissionStatus==='function') updateNotificationPermissionStatus();
+  }catch(e){
+    if(typeof showToast==='function') showToast(t('push_test_failed')+': '+(e&&e.message?e.message:e),4000,'error');
+  }
 }
 function sendBrowserNotification(title,body,options={}){
   const force=!!(options&&options.force);

@@ -3317,6 +3317,16 @@ window._mirrorSpeechSettingsFromServer=_mirrorSpeechSettingsFromServer;
     window._showPreviousMessagingSessions=!!s.show_previous_messaging_sessions;
     window._soundEnabled=!!s.sound_enabled;
     window._notificationsEnabled=!!s.notifications_enabled;
+    // Освежаем push-подписку при каждом запуске: endpoint у FCM/APNs периодически
+    // перевыпускается, а без живого endpoint уведомления при закрытом
+    // приложении не дойдут. Ошибки глушим — при открытой вкладке уведомления
+    // и так работают через SSE.
+    try{
+      if(window._notificationsEnabled && 'Notification' in window && Notification.permission==='granted'
+         && typeof ensurePushSubscription==='function'){
+        setTimeout(()=>{ ensurePushSubscription({silent:true}); }, 1500);
+      }
+    }catch(_e){}
     window._whatsNewSummaryEnabled=!!s.whats_new_summary_enabled;
     window._showThinking=s.show_thinking!==false;
     window._simplifiedToolCalling=true;

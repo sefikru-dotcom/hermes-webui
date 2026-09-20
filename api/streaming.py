@@ -11951,6 +11951,45 @@ def _run_agent_streaming(
                     _turn_duration_seconds = max(0.0, time.time() - float(_turn_started_at))
                 except Exception:
                     _turn_duration_seconds = 0.0
+                # Web Push on long turns: the only channel that reaches an
+                # installed PWA while it is closed (iOS Home-Screen apps via
+                # APNs, Android/desktop via FCM/Mozilla). Delivered from a
+                # daemon thread so a slow push service can never delay the
+                # turn's writeback. Short turns stay silent (they are answered
+                # in-page); threshold via HERMES_WEBUI_PUSH_MIN_SECONDS.
+                try:
+                    _push_min_s = float(os.getenv("HERMES_WEBUI_PUSH_MIN_SECONDS", "15") or 15)
+                except Exception:
+                    _push_min_s = 15.0
+                if _turn_duration_seconds >= _push_min_s:
+                    try:
+                        from api.config import load_settings as _load_settings_push
+                        _push_on = bool(_load_settings_push().get("push_notify_on_turn_complete", True))
+                    except Exception:
+                        _push_on = True
+                    if _push_on:
+                        def _dispatch_push_notification(_sid=s.session_id, _msgs=list(s.messages or [])):
+                            try:
+                                from api.push import send_push as _send_push
+                                _preview = ""
+                                for _m in reversed(_msgs):
+                                    if isinstance(_m, dict) and _m.get("role") == "assistant":
+                                        _preview = str(_m.get("content") or "").strip()
+                                        break
+                                _preview = " ".join(_preview.split())[:200]
+                                _send_push(
+                                    "Марс: ответ готов",
+                                    _preview or "Задача завершена.",
+                                    url=f"session/{_sid}",
+                                    tag=f"hermes-{_sid}",
+                                )
+                            except Exception:
+                                logger.debug("push notify skipped", exc_info=True)
+
+                        import threading as _threading_push
+                        _threading_push.Thread(
+                            target=_dispatch_push_notification, daemon=True
+                        ).start()
                 _turn_tps = None
                 if output_tokens and _turn_duration_seconds > 0:
                     _turn_tps = round(float(output_tokens) / _turn_duration_seconds, 1)

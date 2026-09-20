@@ -174,6 +174,40 @@ self.addEventListener('fetch', (event) => {
 });
 
 
+// Web Push: the only channel that works while the PWA is closed.
+// Firefox/Chrome desktop, Android Chrome and iOS 16.4+ Home-Screen PWAs all
+// land here; an iOS Safari *tab* never does (no push for tabs on iOS).
+self.addEventListener('push', (event) => {
+  let payload = {};
+  if (event.data) {
+    try { payload = event.data.json() || {}; } catch (_e) {
+      try { payload = { body: event.data.text() }; } catch (_e2) { payload = {}; }
+    }
+  }
+  const title = payload.title || 'Марс';
+  const body = payload.body || '';
+  const url = payload.url || './';
+  const options = {
+    body: body,
+    tag: payload.tag || 'hermes-webui',
+    renotify: true,
+    icon: 'static/favicon-192.png',
+    badge: 'static/favicon-32.png',
+    data: { url: url },
+  };
+  event.waitUntil((async () => {
+    // Skip the OS notification when the app is open and visible: the in-page
+    // path is already showing it, and a duplicate banner is noise.
+    try {
+      const clientList = await self.clients.matchAll({type: 'window', includeUncontrolled: true});
+      const visible = clientList.some((client) => client.visibilityState === 'visible');
+      if (visible) return;
+    } catch (_e) { /* clients unavailable (e.g. iOS after eviction) -> show it */ }
+    await self.registration.showNotification(title, options);
+  })());
+});
+
+
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   const rawUrl = (event.notification.data && event.notification.data.url) || './';

@@ -13881,6 +13881,13 @@ def handle_get(handler, parsed) -> bool:
             days = 7
         return j(handler, get_provider_cost_history(provider_id, days))
 
+    # ── Web Push (VAPID) ──
+    # Push is what reaches an installed PWA while it is closed; the in-page
+    # Notification path only works with a live SSE connection.
+    if parsed.path == "/api/push/status":
+        from api.push import status as push_status
+        return j(handler, push_status())
+
     if parsed.path == "/api/settings":
         settings = load_settings()
         settings["persisted_speech_keys"] = persisted_speech_settings_keys()
@@ -16692,6 +16699,32 @@ def handle_post(handler, parsed) -> bool:
             return bad(handler, _sanitize_error(e))
         except RuntimeError as e:
             return bad(handler, str(e), 409)
+
+    # ── Web Push (VAPID) ──
+    if parsed.path == "/api/push/subscribe":
+        from api.push import add_subscription
+        ua = ""
+        try:
+            ua = str(handler.headers.get("User-Agent", "") or "")[:300]
+        except Exception:
+            ua = ""
+        try:
+            return j(handler, add_subscription(body or {}, ua))
+        except ValueError as e:
+            return bad(handler, str(e), 400)
+
+    if parsed.path == "/api/push/unsubscribe":
+        from api.push import remove_subscription
+        try:
+            return j(handler, remove_subscription((body or {}).get("endpoint", "")))
+        except ValueError as e:
+            return bad(handler, str(e), 400)
+
+    if parsed.path == "/api/push/test":
+        from api.push import send_push
+        title = str((body or {}).get("title") or "Марс")[:120]
+        message = str((body or {}).get("body") or "Проверка push-уведомлений.")[:400]
+        return j(handler, send_push(title, message, tag="hermes-push-test", urgent=True))
 
     # ── Settings (POST) ──
     if parsed.path == "/api/settings":
