@@ -19109,6 +19109,7 @@ function buildToolCard(tc){
           }).join('')
         }</div>`:''}
         ${displaySnippet?`<div class="tool-card-result">
+          ${(tc.is_diff||_snippetLooksLikeDiff(displaySnippet))?`<div class="tool-card-diff-header"><span class="tool-card-diff-title">Diff</span>${_diffStatsBadge(displaySnippet)}</div>`:''}
           <pre>${tc.is_diff||_snippetLooksLikeDiff(displaySnippet)?`<code class="diff-block" data-highlighted="1">${_colorDiffLines(displaySnippet)}</code>`:esc(displaySnippet)}</pre>
           ${hasMore?`<button class="tool-card-more" data-full="${esc(tc.snippet||'').replace(/"/g,'&quot;')}" data-short="${esc(displaySnippet||'').replace(/"/g,'&quot;')}" data-is-diff="${tc.is_diff||_snippetLooksLikeDiff(displaySnippet)?1:0}" data-more-label="${esc(moreLabel)}" data-less-label="${esc(lessLabel)}" onclick="event.stopPropagation();_toggleToolDiff(this)">${esc(moreLabel)}</button>`:''}
         </div>`:''}
@@ -19126,27 +19127,60 @@ function buildToolCard(tc){
   return row;
 }
 
+function _extractDiffText(text){
+  if(typeof text !== 'string') return '';
+  const trimmed = text.trim();
+  if((trimmed.startsWith('{') || trimmed.startsWith('{"')) && trimmed.includes('"diff"')){
+    try{
+      const parsed = JSON.parse(trimmed);
+      if(parsed && typeof parsed.diff === 'string' && parsed.diff.trim()) return parsed.diff.trim();
+    }catch(_){}
+  }
+  const fenceMatch = trimmed.match(/^```(?:diff|patch)?\s*\n([\s\S]*?)\n```$/);
+  if(fenceMatch && fenceMatch[1]) return fenceMatch[1].trim();
+  return trimmed;
+}
+
+function _diffStatsBadge(text){
+  const clean = _extractDiffText(text);
+  if(!clean) return '';
+  const lines = clean.split('\n');
+  let plus = 0, minus = 0;
+  for(let i = 0; i < lines.length; i++){
+    const l = lines[i];
+    if(l.startsWith('+') && !l.startsWith('+++')) plus++;
+    else if(l.startsWith('-') && !l.startsWith('---')) minus++;
+  }
+  if(!plus && !minus) return '';
+  return `<span class="diff-stats" aria-label="+${plus} -${minus}">${plus ? `<span class="diff-stat-plus">+${plus}</span>` : ''}${minus ? `<span class="diff-stat-minus">-${minus}</span>` : ''}</span>`;
+}
+
 function _colorDiffLines(text){
-  if(typeof text !== 'string') return esc(String(text||''));
-  return esc(text).split('\n').map(line=>{
+  const clean = _extractDiffText(text);
+  if(typeof clean !== 'string') return esc(String(clean||''));
+  return esc(clean).split('\n').map(line=>{
     if(line.startsWith('@@')) return `<span class="diff-line diff-hunk">${line}</span>`;
-    if(line.startsWith('+')&&!line.startsWith('+++')) return `<span class="diff-line diff-plus">${line}</span>`;
-    if(line.startsWith('-')&&!line.startsWith('---')) return `<span class="diff-line diff-minus">${line}</span>`;
+    if(line.startsWith('---') || line.startsWith('+++')) return `<span class="diff-line diff-file-header">${line}</span>`;
+    if(line.startsWith('+')) return `<span class="diff-line diff-plus">${line}</span>`;
+    if(line.startsWith('-')) return `<span class="diff-line diff-minus">${line}</span>`;
     return `<span class="diff-line">${line}</span>`;
   }).join('\n');
 }
 
-// Detect if text looks like a unified diff (has @@ hunk headers and +/- lines).
+// Detect if text looks like a unified diff (has @@ hunk headers and +/- lines, or diff headers).
 function _snippetLooksLikeDiff(text){
-  if(typeof text!=='string'||text.length<10) return false;
-  if(!/^@@\s/.test(text)) return false;
-  const lines=text.split('\n');
-  let plusMinus=0;
-  for(let i=0;i<lines.length&&i<50;i++){
-    const l=lines[i];
-    if(l.startsWith('+')||l.startsWith('-')) plusMinus++;
+  const clean = _extractDiffText(text);
+  if(typeof clean !== 'string' || clean.length < 8) return false;
+  if(/(?:^|\n)(?:@@\s+-\d+|---\s+[ab]?\/|\+\+\+\s+[ab]?\/|diff\s+--git)/.test(clean)){
+    const lines = clean.split('\n');
+    let plusMinus = 0;
+    for(let i = 0; i < lines.length && i < 100; i++){
+      const l = lines[i];
+      if((l.startsWith('+') && !l.startsWith('+++')) || (l.startsWith('-') && !l.startsWith('---'))) plusMinus++;
+    }
+    return plusMinus >= 1;
   }
-  return plusMinus>=2;
+  return false;
 }
 
 function _toggleToolDiff(btn){

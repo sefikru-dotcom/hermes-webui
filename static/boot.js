@@ -684,12 +684,12 @@ function _micToastKeyForRecognitionError(error){
   // Persist SR failure across reloads (e.g. Tailscale/network error)
   const _micForceMediaRecorderKey='mic_force_mediarecorder';
   const _micForceMediaRecorderStored=localStorage.getItem(_micForceMediaRecorderKey);
-  // Prefer Hermes server-side STT (MediaRecorder -> /api/transcribe) only
-  // after the server confirms an STT provider is available. No stored key must
-  // keep browser SpeechRecognition as the first-click default until then; that
-  // avoids dropping the first dictation on installs without server STT.
+  // Prefer native browser SpeechRecognition (Web Speech API) whenever available
+  // for instant, zero-latency on-device streaming transcription (e.g. Chrome on Android / POCO F5).
+  // Only fall back to server STT (MediaRecorder -> /api/transcribe) if SpeechRecognition is unsupported
+  // or explicitly forced via localStorage.
   let _serverSttAvailable=false;
-  let _forceMediaRecorder=!SpeechRecognition||(_micForceMediaRecorderStored===null?(_serverSttAvailable&&_canRecordAudio):_micForceMediaRecorderStored==='1');
+  let _forceMediaRecorder=!SpeechRecognition||(_micForceMediaRecorderStored==='1');
 
   // Raw audio mode preference: send audio file instead of transcribing
   let _rawAudioMode = localStorage.getItem('hermes-raw-audio-mode') === 'true';
@@ -990,7 +990,7 @@ function _micToastKeyForRecognitionError(error){
     // devices run continuous so a natural pause doesn't end the session (#5294).
     sr.continuous=_micDictationContinuous();
     sr.interimResults=true;
-    sr.lang=(typeof _locale!=='undefined'&&_locale._speech)||'en-US';
+    sr.lang=(typeof _locale!=='undefined'&&_locale._speech)||'ru-RU';
 
     sr.onstart=()=>{ _finalText=''; };
 
@@ -1096,7 +1096,7 @@ function _micToastKeyForRecognitionError(error){
       const data=await res.json().catch(()=>({}));
       if(res.ok&&data&&data.available){
         _serverSttAvailable=true;
-        if(!window._micActive){
+        if(!SpeechRecognition && !window._micActive){
           _forceMediaRecorder=true;
           recognition=null;
         }
@@ -1113,7 +1113,7 @@ function _micToastKeyForRecognitionError(error){
   // Reads LIVE localStorage (not the init-time const) so a fallback that just
   // persisted '0' is respected and not re-flipped.
   function _applyDeferredServerSttFlip(){
-    if(_serverSttAvailable&&!_forceMediaRecorder&&!window._micActive
+    if(!SpeechRecognition&&_serverSttAvailable&&!_forceMediaRecorder&&!window._micActive
         &&localStorage.getItem(_micForceMediaRecorderKey)===null){
       _forceMediaRecorder=true;
       recognition=null;
@@ -1173,7 +1173,8 @@ function _micToastKeyForRecognitionError(error){
       // Refresh continuity gate at start so a settings/orientation change takes
       // effect for this session (desktop stays one-shot, mobile stays continuous).
       recognition.continuous=_micDictationContinuous();
-      recognition.lang=(typeof _locale!=='undefined'&&_locale._speech)||'en-US';
+      recognition.lang=(typeof _locale!=='undefined'&&_locale._speech)||'ru-RU';
+      if(navigator.vibrate) try{ navigator.vibrate(35); }catch(_){}
       recognition.start();
       void _acquireMicWakeLock();
       _setRecording(true);
@@ -3069,7 +3070,7 @@ function applyBotName(){
 const _COMPOSER_CONTROL_TOGGLE_DEFS=[
   {key:'hide_composer_attach',label:'Attach',labelKey:'composer_control_attach',selectors:['#btnAttach'],orderSelector:'#btnAttach',orderGroup:'left'},
   {key:'hide_composer_saved_prompts',label:'Saved prompts',labelKey:'composer_control_saved_prompts',selectors:['#btnSavedPrompts'],orderSelector:'#btnSavedPrompts',orderGroup:'left'},
-  {key:'hide_composer_mic',label:'Mic',labelKey:'composer_control_mic',selectors:['#btnMic'],orderSelector:'#btnMic',orderGroup:'left'},
+  {key:'hide_composer_mic',label:'Mic',labelKey:'composer_control_mic',selectors:['#btnMic'],orderSelector:'#btnMic',orderGroup:'right'},
   {key:'hide_composer_profile',label:'Profile',labelKey:'composer_control_profile',selectors:['#profileChipWrap'],orderSelector:'#profileChipWrap',orderGroup:'left'},
   {key:'hide_composer_workspace',label:'Workspace',labelKey:'composer_control_workspace',selectors:['.composer-ws-wrap','#composerMobileWorkspaceAction'],orderSelector:'.composer-ws-wrap',orderGroup:'left'},
   {key:'hide_composer_model',label:'Model',labelKey:'composer_control_model',selectors:['.composer-model-wrap','#composerMobileModelAction'],orderSelector:'.composer-model-wrap',orderGroup:'left'},
@@ -3190,10 +3191,10 @@ function _applyComposerFooterVisibilitySettings(){
   if(hidden.hide_composer_mobile_config&&typeof closeMobileComposerConfig==='function') closeMobileComposerConfig();
 
   // Hide the divider when all left-group buttons before it are hidden
-  // Stops a lone vertical separator from appearing when attach/saved-prompts/mic/voice are all hidden.
+  // Stops a lone vertical separator from appearing when attach/saved-prompts/voice are all hidden.
   const _divider=document.querySelector('.composer-divider');
   if(_divider){
-    const _leftBtnSelectors=['#btnAttach','#btnSavedPrompts','#btnMic','#btnVoiceMode'];
+    const _leftBtnSelectors=['#btnAttach','#btnSavedPrompts','#btnVoiceMode'];
     const _allLeftHidden=_leftBtnSelectors.every(sel=>{
       const el=document.querySelector(sel);
       return !el||el.classList.contains('composer-control-hidden')||el.style.display==='none';
