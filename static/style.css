@@ -7907,12 +7907,56 @@ html[data-conversation-outline="enabled"] #outlineToggleBtn:not([hidden]){displa
 }
 
 .msg-assistant blockquote {
-  border-left: 3px solid rgba(229, 57, 53, 0.65) !important;
-  background: rgba(229, 57, 53, 0.05);
-  padding: 8px 14px;
-  border-radius: 0 8px 8px 0;
-  margin: 0.8em 0;
-  color: #cbd5e1;
+  border-left: 3px solid #38bdf8 !important;
+  background: rgba(56, 189, 248, 0.04) !important;
+  padding: 10px 16px !important;
+  border-radius: 0 8px 8px 0 !important;
+  margin: 1em 0 !important;
+  color: #cbd5e1 !important;
+}
+
+/* Modern Responsive Tables with Zebra striping */
+.msg-body table {
+  display: block !important;
+  overflow-x: auto !important;
+  -webkit-overflow-scrolling: touch !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  border-collapse: separate !important;
+  border-spacing: 0 !important;
+  margin: 14px 0 !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  border-radius: 9px !important;
+  background: #0f131a !important;
+}
+.msg-body table th {
+  background: rgba(255, 255, 255, 0.06) !important;
+  color: #f1f5f9 !important;
+  font-weight: 600 !important;
+  font-size: 13px !important;
+  padding: 9px 14px !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1) !important;
+  border-right: 1px solid rgba(255, 255, 255, 0.06) !important;
+  text-align: left !important;
+}
+.msg-body table th:last-child {
+  border-right: none !important;
+}
+.msg-body table td {
+  padding: 8px 14px !important;
+  font-size: 13px !important;
+  color: #cbd5e1 !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
+  border-right: 1px solid rgba(255, 255, 255, 0.05) !important;
+}
+.msg-body table td:last-child {
+  border-right: none !important;
+}
+.msg-body table tr:last-child td {
+  border-bottom: none !important;
+}
+.msg-body table tr:nth-child(even) td {
+  background: rgba(255, 255, 255, 0.02) !important;
 }
 
 /* User Message: Elegant right-aligned bubble */
