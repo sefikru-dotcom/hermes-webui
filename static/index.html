@@ -168,18 +168,16 @@
    страницу, чтобы настройка применилась. */
 window._marsFallbackActivityCycle=function(btn){
   try{
-    var order=['stream_full','stream_window','stream_quiet'];
+    var order=['stream_window','stream_quiet'];
     var cur=window._chatActivityDisplayMode||'stream_window';
-    if(cur==='transparent_stream') cur='stream_full';
-    if(cur==='hide_all_activity') cur='stream_quiet';
-    if(cur==='compact_worklog') cur='stream_window';
-    var next=order[(order.indexOf(cur)+1)%order.length];
+    if(cur!=='stream_quiet') cur='stream_window';
+    var next=(cur==='stream_window')?'stream_quiet':'stream_window';
     if(btn){
       btn.setAttribute('data-mode',next);
       var label=btn.querySelector('.activity-mode-text');
       if(label){
-        var keys={stream_full:'activity_mode_short_stream_full',stream_window:'activity_mode_short_stream_window',stream_quiet:'activity_mode_short_stream_quiet'};
-        label.textContent=(typeof t==='function')?t(keys[next]):next;
+        var keys={stream_window:'activity_mode_short_stream_window',stream_quiet:'activity_mode_short_stream_quiet'};
+        label.textContent=(typeof t==='function')?t(keys[next]):(next==='stream_window'?'Окно':'Тишина');
       }
     }
     var payload={chat_activity_display_mode:next};
@@ -1854,7 +1852,7 @@ window._marsFallbackActivityCycle=function(btn){
 <script src="static/commands.js?v=__WEBUI_VERSION__-am2" defer></script>
 <script src="static/messages.js?v=__WEBUI_VERSION__-am4" defer></script>
 <script src="static/extension_settings.js?v=__WEBUI_VERSION__-am2" defer></script>
-<script src="static/panels.js?v=__WEBUI_VERSION__-am3" defer></script>
+<script src="static/panels.js?v=__WEBUI_VERSION__-mars-ux3" defer></script>
 <script src="static/onboarding.js?v=__WEBUI_VERSION__-am2" defer></script>
 <script src="static/boot.js?v=__WEBUI_VERSION__-am3" defer></script>
 <script src="static/outline.js?v=__WEBUI_VERSION__-am2" defer></script>

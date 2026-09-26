@@ -8528,7 +8528,7 @@ function _appearancePayloadFromUi(){
   };
 }
 
-const _ACTIVITY_MODE_CYCLE_ORDER=['stream_full','stream_window','stream_quiet'];
+const _ACTIVITY_MODE_CYCLE_ORDER=['stream_window','stream_quiet'];
 const _ACTIVITY_MODE_LABEL_KEY={
   stream_full:'activity_mode_short_stream_full',
   stream_window:'activity_mode_short_stream_window',
