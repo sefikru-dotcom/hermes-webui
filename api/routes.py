@@ -24376,6 +24376,25 @@ def _handle_chat_start(handler, body, diag=None):
             restore_err = _restore_cleared_recovery()
             if restore_err is not None:
                 return bad(handler, f"failed to restore compression recovery: {_sanitize_error(restore_err)}", 500)
+
+        stream_id = response.get("stream_id")
+        if status < 400 and stream_id:
+            try:
+                from api.background_process import get_session_channel
+                ch = get_session_channel(s.session_id)
+                if ch is not None:
+                    ch.emit(
+                        "server_turn_started",
+                        {
+                            "session_id": str(s.session_id),
+                            "stream_id": str(stream_id),
+                            "pending_started_at": getattr(s, "pending_started_at", None),
+                            "source": "webui_peer",
+                        },
+                    )
+            except Exception:
+                pass
+
         diag.stage("response_write") if diag else None
         return j(handler, response, status=status)
     finally:

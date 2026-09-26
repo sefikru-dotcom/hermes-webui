@@ -6436,6 +6436,20 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
           (typeof t === "function") ? t("notify_done_title") : 'Response complete',
           _completionPreview||((typeof t === "function") ? t("notify_done_body") : 'Task finished'),
           {forceHidden:_wasEverBackgrounded,sid:activeSid});
+
+        // Mars: auto-close session on finish marker
+        try{
+          const _fullText = (lastAsst && lastAsst.content) || assistantText || '';
+          if(_fullText.includes('MARS_SESSION_FINISH_AND_CLOSE') || _fullText.includes('<!-- MARS_SESSION_FINISH_AND_CLOSE -->')){
+            setTimeout(()=>{
+              if(typeof silentDeleteAndCloseSession==='function'){
+                silentDeleteAndCloseSession(completedSid||activeSid);
+              }
+            }, 2000);
+          }
+        }catch(_e){
+          console.warn('Mars finish hook error:', _e);
+        }
       };
       if(_shouldUseLiveProseFade()&&assistantBody){
         _cancelAnimationFramePendingStreamRender();
@@ -6643,7 +6657,7 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
           const isInterrupted=d.type==='interrupted';
           const isCompressionExhausted=d.type==='compression_exhausted';
           const isToolLimitReached=d.type==='tool_limit_reached';
-          isRecoveryControlMessage=isInterrupted && (d.recovery_control===true || _streamRecoveryControlMessageText(d.message));
+          isRecoveryControlMessage=(isInterrupted && d.recovery_control===true) || _streamRecoveryControlMessageText(d.message);
           const isNoResponse=d.type==='no_response'||d.type==='silent_failure';
           const label=isCancelled?'Task cancelled':isInterrupted?'Response interrupted':isCompressionExhausted?'Context compression exhausted':isToolLimitReached?'Tool iteration limit reached':isQuotaExhausted?'Out of credits':isRateLimit?'Rate limit reached':isGatewayAuthError?(typeof t==='function'?t('gateway_auth_label'):'Gateway authentication failed'):isAuthMismatch?(typeof t==='function'?t('provider_mismatch_label'):'Provider mismatch'):isModelNotFound?(typeof t==='function'?t('model_not_found_label'):'Model not found'):isNoResponse?'No response from provider':'Error';
           const hint=d.hint?`\n\n*${d.hint}*`:'';

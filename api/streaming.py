@@ -13240,6 +13240,24 @@ def _run_agent_streaming(
                 exc_info=True,
             )
 
+        # ── Peer tab sync: notify open tabs/devices that the turn finished ──
+        try:
+            from api.background_process import get_session_channel, persisted_message_count_for_session
+            ch = get_session_channel(session_id)
+            if ch is not None:
+                p_count = persisted_message_count_for_session(session_id)
+                ch.emit('session-updated', {
+                    'session_id': str(session_id),
+                    'message_count': p_count or 0,
+                    'source': 'turn_teardown',
+                })
+        except Exception:
+            logger.debug(
+                "turn-teardown session-updated emit failed for session %s",
+                session_id,
+                exc_info=True,
+            )
+
 # ============================================================
 # SECTION: HTTP Request Handler
 # do_GET: read-only API endpoints + SSE stream + static HTML

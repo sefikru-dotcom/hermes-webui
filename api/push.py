@@ -224,6 +224,21 @@ def add_subscription(payload: dict[str, Any], user_agent: str = "") -> dict[str,
                 )
                 _save_subscriptions(items)
                 return {"ok": True, "added": False, "total": len(items)}
+
+        # Защита от дублей: если тот же самый браузер/устройство регистрирует новый endpoint
+        if user_agent:
+            for item in items:
+                if item.get("user_agent") == user_agent:
+                    item.update(
+                        {
+                            "endpoint": endpoint,
+                            "keys": {"p256dh": p256dh, "auth": auth},
+                            "updated_at": time.time(),
+                        }
+                    )
+                    _save_subscriptions(items)
+                    return {"ok": True, "added": False, "total": len(items), "replaced_stale_endpoint": True}
+
         items.append(
             {
                 "endpoint": endpoint,
