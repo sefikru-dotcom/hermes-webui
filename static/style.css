@@ -2441,8 +2441,8 @@
     width: 7px;
     height: 7px;
     border-radius: 50%;
-    background: #38bdf8;
-    box-shadow: 0 0 6px rgba(56, 189, 248, 0.6);
+    background: #f97316;
+    box-shadow: 0 0 6px rgba(249, 115, 22, 0.6);
   }
   .msg-body .pre-header+pre{
     border-radius: 0 0 10px 10px;
@@ -6501,7 +6501,7 @@ body code[class*="language-"],body pre[class*="language-"],body pre code[class*=
 .tool-card-name {
   font-size: 12.5px;
   font-weight: 600;
-  color: #38bdf8;
+  color: #fb923c;
   font-family: var(--font-mono);
 }
 .tool-card-preview {
@@ -7647,11 +7647,11 @@ html[data-conversation-outline="enabled"] #outlineToggleBtn:not([hidden]){displa
   line-height: 1.55 !important;
 }
 
-/* Modern Claude-Style Thinking Spoiler */
+/* Modern Claude-Style Thinking Spoiler (Mars Amber Edition) */
 .thinking-card {
   background: rgba(255, 255, 255, 0.02) !important;
   border: 1px solid rgba(255, 255, 255, 0.07) !important;
-  border-left: 2px solid #8b5cf6 !important;
+  border-left: 2px solid #f59e0b !important;
   border-radius: 10px !important;
   margin: 6px 0 12px 0 !important;
   transition: all 0.2s ease !important;
@@ -7659,13 +7659,13 @@ html[data-conversation-outline="enabled"] #outlineToggleBtn:not([hidden]){displa
 .thinking-card:hover {
   background: rgba(255, 255, 255, 0.035) !important;
   border-color: rgba(255, 255, 255, 0.14) !important;
-  border-left-color: #a78bfa !important;
+  border-left-color: #fbbf24 !important;
 }
 .thinking-card-header {
   padding: 7px 12px !important;
   font-size: 12px !important;
   font-weight: 500 !important;
-  color: #94a3b8 !important;
+  color: #d1d5db !important;
   cursor: pointer !important;
   display: flex !important;
   align-items: center !important;
@@ -7675,13 +7675,13 @@ html[data-conversation-outline="enabled"] #outlineToggleBtn:not([hidden]){displa
   border-top: 1px solid rgba(255, 255, 255, 0.05) !important;
   padding: 10px 14px !important;
   font-size: 12.5px !important;
-  color: #94a3b8 !important;
+  color: #9ca3af !important;
   line-height: 1.55 !important;
   max-height: 280px !important;
   overflow-y: auto !important;
 }
 
-/* Modern Compact Tool Cards (Pill Style) */
+/* Modern Compact Tool Cards (Pill Style - Mars Amber/Copper) */
 .tool-card {
   background: rgba(255, 255, 255, 0.025) !important;
   border: 1px solid rgba(255, 255, 255, 0.08) !important;
@@ -7704,7 +7704,7 @@ html[data-conversation-outline="enabled"] #outlineToggleBtn:not([hidden]){displa
 .tool-card-name {
   font-size: 12px !important;
   font-weight: 600 !important;
-  color: #38bdf8 !important;
+  color: #fb923c !important;
 }
 .tool-card-preview {
   display: inline-block !important;
@@ -7758,7 +7758,7 @@ html[data-conversation-outline="enabled"] #outlineToggleBtn:not([hidden]){displa
   border-color: rgba(255, 255, 255, 0.3) !important;
 }
 
-/* Modern Quick Chips for POCO F5 */
+/* Modern Quick Chips for POCO F5 (Mars Terracotta/Copper Palette) */
 .quick-chips-bar {
   display: flex;
   gap: 8px;
@@ -7775,9 +7775,9 @@ html[data-conversation-outline="enabled"] #outlineToggleBtn:not([hidden]){displa
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  background: rgba(24, 30, 42, 0.88);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  color: #e2e8f0;
+  background: linear-gradient(145deg, rgba(34, 28, 30, 0.92) 0%, rgba(24, 20, 22, 0.94) 100%);
+  border: 1px solid rgba(224, 108, 83, 0.26);
+  color: #f3e8e2;
   font-size: 12.5px;
   font-weight: 500;
   padding: 7px 16px;
@@ -7786,16 +7786,16 @@ html[data-conversation-outline="enabled"] #outlineToggleBtn:not([hidden]){displa
   cursor: pointer;
   white-space: nowrap;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.22);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
   user-select: none;
   backdrop-filter: blur(8px);
   touch-action: manipulation;
 }
 .quick-chip:hover, .quick-chip:active {
-  background: rgba(59, 130, 246, 0.22);
-  border-color: rgba(96, 165, 250, 0.55);
+  background: linear-gradient(135deg, rgba(224, 108, 83, 0.28) 0%, rgba(185, 28, 28, 0.20) 100%);
+  border-color: rgba(224, 108, 83, 0.75);
   color: #ffffff;
-  box-shadow: 0 4px 14px rgba(59, 130, 246, 0.32);
+  box-shadow: 0 4px 16px rgba(224, 108, 83, 0.38);
   transform: translateY(-1px);
 }
 
@@ -7907,8 +7907,8 @@ html[data-conversation-outline="enabled"] #outlineToggleBtn:not([hidden]){displa
 }
 
 .msg-assistant blockquote {
-  border-left: 3px solid #38bdf8 !important;
-  background: rgba(56, 189, 248, 0.04) !important;
+  border-left: 3px solid #e06c53 !important;
+  background: rgba(224, 108, 83, 0.05) !important;
   padding: 10px 16px !important;
   border-radius: 0 8px 8px 0 !important;
   margin: 1em 0 !important;
@@ -8270,9 +8270,9 @@ html[data-conversation-outline="enabled"] #outlineToggleBtn:not([hidden]){displa
   display: inline-flex !important;
   align-items: center !important;
   gap: 6px !important;
-  background: rgba(26, 32, 44, 0.85) !important;
-  border: 1px solid rgba(255, 255, 255, 0.12) !important;
-  color: #f1f5f9 !important;
+  background: linear-gradient(145deg, rgba(34, 28, 30, 0.92) 0%, rgba(24, 20, 22, 0.94) 100%) !important;
+  border: 1px solid rgba(224, 108, 83, 0.32) !important;
+  color: #f3e8e2 !important;
   font-size: 13px !important;
   font-weight: 550 !important;
   padding: 8px 16px !important;
@@ -8284,15 +8284,15 @@ html[data-conversation-outline="enabled"] #outlineToggleBtn:not([hidden]){displa
   backdrop-filter: blur(12px) !important;
   -webkit-backdrop-filter: blur(12px) !important;
   animation: none !important;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25) !important;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.32) !important;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
 }
 .quick-chip:hover, .quick-chip:active {
-  background: rgba(229, 57, 53, 0.22) !important;
-  border-color: rgba(229, 57, 53, 0.7) !important;
+  background: linear-gradient(135deg, rgba(224, 108, 83, 0.32) 0%, rgba(185, 28, 28, 0.22) 100%) !important;
+  border-color: rgba(224, 108, 83, 0.85) !important;
   color: #ffffff !important;
-  box-shadow: 0 4px 16px rgba(229, 57, 53, 0.4) !important;
-  transform: translateY(-1px) !important;
+  box-shadow: 0 4px 18px rgba(224, 108, 83, 0.42) !important;
+  transform: translateY(-1px) scale(1.02) !important;
 }
 
 
