@@ -9165,44 +9165,6 @@ async function removeWorktree(session){
   }
 }
 
-async function silentDeleteAndCloseSession(sid){
-  if(!sid) return;
-  try{
-    const reflowPositions=_captureSessionReflowPositions();
-    _optimisticallyRemovedSessionIds.add(sid);
-    _pendingSessionReflowPositions=reflowPositions;
-    _optimisticallyRemoveSessionFromList(sid);
-
-    _clearHandoffStorageForSession(sid);
-    if(typeof _clearPersistedSessionQueue==='function') _clearPersistedSessionQueue(sid);
-
-    // Optimistically switch UI immediately so user never hangs
-    if(S.session&&S.session.session_id===sid){
-      S.session=null;S.messages=[];S.entries=[];
-      if(typeof _hydrateTodosFromSession==='function') _hydrateTodosFromSession(null);
-      localStorage.removeItem('hermes-webui-session');
-      if(typeof showToast==='function') showToast('Итоги зафиксированы. Чат закрыт.');
-      const el=$('msgInner'); if(el) el.innerHTML='';
-      const empty=$('emptyState'); if(empty) empty.style.display='';
-      if(typeof newSession==='function') newSession();
-    }
-
-    // Background delete with retry loop (handles brief 503 lock contention)
-    (async()=>{
-      for(let attempt=1; attempt<=6; attempt++){
-        try{
-          await api('/api/session/delete',{method:'POST',body:JSON.stringify({session_id:sid})});
-          break;
-        }catch(err){
-          if(attempt<6) await new Promise(r=>setTimeout(r, 1200));
-        }
-      }
-    })();
-  }catch(e){
-    console.warn('silentDeleteAndCloseSession error:', e);
-  }
-}
-
 async function deleteSession(sid, beforeDelete=null){
   const session=_sessionSnapshotById(sid);
   const ok=await showConfirmDialog({
