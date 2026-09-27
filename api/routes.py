@@ -15910,7 +15910,7 @@ def handle_post(handler, parsed) -> bool:
         # Serialize with recovery, but bound contention so a browser timeout
         # cannot be followed by a delayed server-side delete.
         session_lock = _get_session_agent_lock(sid)
-        if not session_lock.acquire(timeout=5):
+        if not session_lock.acquire(timeout=12):
             return bad(handler, "Session busy, try again", 503)
         try:
             with LOCK:
