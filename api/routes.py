@@ -15884,126 +15884,113 @@ def handle_post(handler, parsed) -> bool:
             logger.exception("failed to remove worktree for session %s", sid)
             return bad(handler, _sanitize_error(exc), status=500)
 
+def internal_delete_session(sid: str) -> dict:
+    """Internal helper to delete a session reliably from server side or API."""
+    if not sid or not is_safe_session_id(sid):
+        return {"ok": False, "error": "Invalid session_id", "status": 400}
+    cli_meta_for_delete = _lookup_cli_session_metadata(sid)
+    if cli_meta_for_delete.get("read_only"):
+        return {"ok": False, "error": "Read-only imported sessions cannot be deleted from WebUI", "status": 400}
+    if _session_is_subagent_view_only(sid):
+        return {"ok": False, "error": "Subagent sessions are view-only and cannot be deleted from WebUI", "status": 400}
+    is_messaging_session = _is_messaging_session_id(sid)
+    worktree_retained = _worktree_retained_payload_for_session_id(sid)
+    try:
+        event_profile = getattr(get_session(sid, metadata_only=True), "profile", None)
+    except KeyError:
+        event_profile = None
+    except Exception:
+        logger.debug("Failed to resolve profile for deleted session %s", sid, exc_info=True)
+        event_profile = None
+
+    session_lock = _get_session_agent_lock(sid)
+    if not session_lock.acquire(timeout=12):
+        return {"ok": False, "error": "Session busy, try again", "status": 503}
+    try:
+        with LOCK:
+            SESSIONS.pop(sid, None)
+        try:
+            p = (SESSION_DIR / f"{sid}.json").resolve()
+            p.relative_to(SESSION_DIR.resolve())
+        except Exception:
+            return {"ok": False, "error": "Invalid session_id", "status": 400}
+        sidecar_deleted = False
+        try:
+            p.unlink(missing_ok=True)
+        except Exception:
+            logger.debug("Failed to unlink session file %s", p)
+        sidecar_deleted = not p.exists()
+        try:
+            prune_session_from_index(sid)
+        except Exception:
+            logger.debug("Failed to prune deleted session from index: %s", sid, exc_info=True)
+        try:
+            p.with_suffix('.json.bak').unlink(missing_ok=True)
+        except Exception:
+            logger.debug("Failed to unlink session backup file %s", p.with_suffix('.json.bak'))
+        if sidecar_deleted and not is_messaging_session:
+            try:
+                _record_webui_deleted_session_tombstone(sid)
+            except Exception:
+                logger.debug("Failed to tombstone deleted WebUI session %s", sid, exc_info=True)
+    finally:
+        session_lock.release()
+
+    from api.config import _evict_session_agent
+    _evict_session_agent(sid)
+    try:
+        from api.upload import _session_attachment_dir
+        shutil.rmtree(_session_attachment_dir(sid), ignore_errors=True)
+    except Exception:
+        logger.debug("Failed to clean attachment dir for deleted session %s", sid)
+
+    try:
+        from api.turn_journal import delete_turn_journal
+        delete_turn_journal(sid)
+    except Exception:
+        logger.debug("Failed to delete turn journal for deleted session %s", sid)
+    try:
+        from api.run_journal import delete_run_journal
+        delete_run_journal(sid)
+    except Exception:
+        logger.debug("Failed to delete run journal for deleted session %s", sid)
+    try:
+        from api.background_process import forget_bg_task_completion_dedup
+        forget_bg_task_completion_dedup(sid)
+    except Exception:
+        logger.debug("Failed to prune bg-task dedup entry for deleted session %s", sid)
+    try:
+        from api.terminal import close_terminal
+        close_terminal(sid)
+    except Exception:
+        logger.debug("Failed to close workspace terminal for deleted session %s", sid)
+
+    state_db_cleanup_failed = False
+    if not is_messaging_session:
+        try:
+            from api.models import delete_cli_session
+            state_db_cleanup_failed = not delete_cli_session(sid)
+        except Exception:
+            state_db_cleanup_failed = True
+            logger.warning("Failed to delete CLI session %s", sid, exc_info=True)
+    _publish_session_list_changed("session_delete", profile=event_profile)
+    return {
+        "ok": True,
+        "state_db_cleanup_failed": state_db_cleanup_failed,
+        **worktree_retained,
+    }
+
+
     if parsed.path == "/api/session/delete":
         sid = body.get("session_id", "")
         if not sid:
             return bad(handler, "session_id is required")
         if not is_safe_session_id(sid):
             return bad(handler, "Invalid session_id", 400)
-        cli_meta_for_delete = _lookup_cli_session_metadata(sid)
-        if cli_meta_for_delete.get("read_only"):
-            return bad(handler, "Read-only imported sessions cannot be deleted from WebUI", 400)
-        # A delegated subagent child (#5307) is view-only and owned by the
-        # delegate runner. Deleting it here would call delete_cli_session() and
-        # erase the child's state.db transcript — refuse it.
-        if _session_is_subagent_view_only(sid):
-            return bad(handler, "Subagent sessions are view-only and cannot be deleted from WebUI", 400)
-        is_messaging_session = _is_messaging_session_id(sid)
-        worktree_retained = _worktree_retained_payload_for_session_id(sid)
-        try:
-            event_profile = getattr(get_session(sid, metadata_only=True), "profile", None)
-        except KeyError:
-            event_profile = None
-        except Exception:
-            logger.debug("Failed to resolve profile for deleted session %s", sid, exc_info=True)
-            event_profile = None
-        # Serialize with recovery, but bound contention so a browser timeout
-        # cannot be followed by a delayed server-side delete.
-        session_lock = _get_session_agent_lock(sid)
-        if not session_lock.acquire(timeout=12):
-            return bad(handler, "Session busy, try again", 503)
-        try:
-            with LOCK:
-                SESSIONS.pop(sid, None)
-            try:
-                p = (SESSION_DIR / f"{sid}.json").resolve()
-                p.relative_to(SESSION_DIR.resolve())
-            except Exception:
-                return bad(handler, "Invalid session_id", 400)
-            sidecar_deleted = False
-            try:
-                p.unlink(missing_ok=True)
-            except Exception:
-                logger.debug("Failed to unlink session file %s", p)
-            sidecar_deleted = not p.exists()
-            try:
-                prune_session_from_index(sid)
-            except Exception:
-                logger.debug("Failed to prune deleted session from index: %s", sid, exc_info=True)
-            try:
-                p.with_suffix('.json.bak').unlink(missing_ok=True)
-            except Exception:
-                logger.debug("Failed to unlink session backup file %s", p.with_suffix('.json.bak'))
-            if sidecar_deleted and not is_messaging_session:
-                try:
-                    _record_webui_deleted_session_tombstone(sid)
-                except Exception:
-                    logger.debug("Failed to tombstone deleted WebUI session %s", sid, exc_info=True)
-        finally:
-            session_lock.release()
-        # Evict outside the mutation lock: lifecycle commit may perform provider
-        # I/O and must not hold a per-session Session lock.
-        from api.config import _evict_session_agent
-        _evict_session_agent(sid)
-        try:
-            from api.upload import _session_attachment_dir
-
-            shutil.rmtree(_session_attachment_dir(sid), ignore_errors=True)
-        except Exception:
-            logger.debug("Failed to clean attachment dir for deleted session %s", sid)
-        # Remove the turn-journal shards and the run-journal directory so a
-        # deleted conversation is not recoverable from disk. The session JSON +
-        # state.db rows are cleared above, but these journals retain the user's
-        # messages (turn journal) and the full request/response payloads (run
-        # journal) in plaintext. (#3802)
-        try:
-            from api.turn_journal import delete_turn_journal
-
-            delete_turn_journal(sid)
-        except Exception:
-            logger.debug("Failed to delete turn journal for deleted session %s", sid)
-        try:
-            from api.run_journal import delete_run_journal
-
-            delete_run_journal(sid)
-        except Exception:
-            logger.debug("Failed to delete run journal for deleted session %s", sid)
-        # The weak lock registry releases this entry automatically after all
-        # holders and waiters drop their strong references.
-        # Prune the completion-dedup entry too. The reaper sweeps it once the
-        # completion is delivered (drained from PENDING); a session deleted
-        # while a completion is still pending would otherwise keep its entry.
-        try:
-            from api.background_process import forget_bg_task_completion_dedup
-
-            forget_bg_task_completion_dedup(sid)
-        except Exception:
-            logger.debug("Failed to prune bg-task dedup entry for deleted session %s", sid)
-        try:
-            from api.terminal import close_terminal
-            close_terminal(sid)
-        except Exception:
-            logger.debug("Failed to close workspace terminal for deleted session %s", sid)
-        # Also delete from CLI state.db for CLI sessions shown in sidebar,
-        # but never erase external messaging channel memory via WebUI delete.
-        state_db_cleanup_failed = False
-        if not is_messaging_session:
-            try:
-                from api.models import delete_cli_session
-
-                state_db_cleanup_failed = not delete_cli_session(sid)
-            except Exception:
-                state_db_cleanup_failed = True
-                logger.warning("Failed to delete CLI session %s", sid, exc_info=True)
-        _publish_session_list_changed("session_delete", profile=event_profile)
-        return j(
-            handler,
-            {
-                "ok": True,
-                "state_db_cleanup_failed": state_db_cleanup_failed,
-                **worktree_retained,
-            },
-        )
+        del_res = internal_delete_session(sid)
+        if not del_res.get("ok"):
+            return bad(handler, del_res.get("error", "Failed to delete session"), del_res.get("status", 500))
+        return j(handler, del_res)
 
     if parsed.path == "/api/session/clear":
         try:

@@ -9191,10 +9191,19 @@ async function silentDeleteAndCloseSession(sid){
     (async()=>{
       for(let attempt=1; attempt<=6; attempt++){
         try{
-          await api('/api/session/delete',{method:'POST',body:JSON.stringify({session_id:sid})});
+          if(typeof fetch==='function'){
+            await fetch('/api/session/delete',{
+              method:'POST',
+              headers:{'Content-Type':'application/json'},
+              body:JSON.stringify({session_id:sid}),
+              keepalive:true
+            });
+          }else{
+            await api('/api/session/delete',{method:'POST',body:JSON.stringify({session_id:sid})});
+          }
           break;
         }catch(err){
-          if(attempt<6) await new Promise(r=>setTimeout(r, 1200));
+          if(attempt<6) await new Promise(r=>setTimeout(r, 600));
         }
       }
     })();
