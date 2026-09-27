@@ -12639,35 +12639,6 @@ def _run_agent_streaming(
                     _done_payload['terminal_state'] = 'tool_limit_reached'
                     _done_payload['terminal_reason'] = 'max_iterations'
                 put('done', _done_payload)
-                # Mars: automatic guaranteed server-side deletion on finish marker
-                try:
-                    _mars_auto_close = False
-                    _asst_m = None
-                    if raw_session and isinstance(raw_session.get('messages'), list):
-                        for _m in reversed(raw_session['messages']):
-                            if _m and _m.get('role') == 'assistant':
-                                _asst_m = _m
-                                break
-                    if _asst_m:
-                        _c = _asst_m.get('content')
-                        _text = _c if isinstance(_c, str) else json.dumps(_c, ensure_ascii=False) if _c else ''
-                        if 'MARS_SESSION_FINISH_AND_CLOSE' in _text:
-                            _mars_auto_close = True
-                    if _mars_auto_close:
-                        target_sid = getattr(s, 'session_id', session_id)
-                        def _mars_delayed_delete(tsid):
-                            import time
-                            time.sleep(1.0)
-                            try:
-                                from api.routes import internal_delete_session
-                                del_res = internal_delete_session(tsid)
-                                logger.info("[Mars Auto-Finish] Server-side deletion of session %s completed: %s", tsid, del_res)
-                            except Exception as _del_err:
-                                logger.error("[Mars Auto-Finish] Server-side deletion of session %s failed: %s", tsid, _del_err)
-                        threading.Thread(target=_mars_delayed_delete, args=(target_sid,), name=f"mars-autoclose-{target_sid}", daemon=True).start()
-                except Exception as _m_err:
-                    logger.debug("Mars auto-finish check error: %s", _m_err)
-
                 # Emit one last metering packet for the live message-header TPS label.
                 meter_stats = meter().get_stats(stream_id)
                 meter_stats['session_id'] = session_id

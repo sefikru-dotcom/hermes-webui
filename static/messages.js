@@ -6439,13 +6439,13 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
 
         // Mars: auto-close session on finish marker
         try{
-          const _fullText = (lastAsst && typeof lastAsst.content==='string') ? lastAsst.content : (typeof assistantText==='string'?assistantText:'');
+          const _fullText = (lastAsst && lastAsst.content) || assistantText || '';
           if(_fullText.includes('MARS_SESSION_FINISH_AND_CLOSE') || _fullText.includes('<!-- MARS_SESSION_FINISH_AND_CLOSE -->')){
             setTimeout(()=>{
               if(typeof silentDeleteAndCloseSession==='function'){
                 silentDeleteAndCloseSession(completedSid||activeSid);
               }
-            }, 300);
+            }, 2000);
           }
         }catch(_e){
           console.warn('Mars finish hook error:', _e);
