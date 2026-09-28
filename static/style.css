@@ -8058,19 +8058,14 @@ html[data-conversation-outline="enabled"] #outlineToggleBtn:not([hidden]){displa
    ========================================================================== */
 
 /* ── Mars Ambient Titlebar Neon Wave & Organic Breathing ── */
-.app-titlebar-profile,
-#titlebarProfileBtn {
-  display: none !important;
-}
-
 @keyframes mars-neon-breath {
   0%, 100% {
-    filter: drop-shadow(0 0 4px rgba(239, 68, 68, 0.40)) drop-shadow(0 0 8px rgba(225, 29, 72, 0.20));
-    opacity: 0.90;
+    filter: drop-shadow(0 0 3px rgba(239, 68, 68, 0.35)) drop-shadow(0 0 6px rgba(225, 29, 72, 0.15));
+    opacity: 0.88;
     transform: scale(0.98);
   }
   50% {
-    filter: drop-shadow(0 0 10px rgba(239, 68, 68, 0.85)) drop-shadow(0 0 18px rgba(225, 29, 72, 0.45));
+    filter: drop-shadow(0 0 8px rgba(239, 68, 68, 0.70)) drop-shadow(0 0 14px rgba(225, 29, 72, 0.35));
     opacity: 1;
     transform: scale(1.02);
   }
@@ -8087,10 +8082,10 @@ html[data-conversation-outline="enabled"] #outlineToggleBtn:not([hidden]){displa
 :root.dark .app-titlebar,
 .app-titlebar {
   position: relative !important;
-  background: rgba(8, 9, 13, 0.80) !important;
-  backdrop-filter: blur(20px) !important;
-  -webkit-backdrop-filter: blur(20px) !important;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06) !important;
+  background: rgba(6, 7, 10, 0.45) !important;
+  backdrop-filter: blur(16px) !important;
+  -webkit-backdrop-filter: blur(16px) !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
   overflow: hidden !important;
 }
 
@@ -8103,9 +8098,9 @@ html[data-conversation-outline="enabled"] #outlineToggleBtn:not([hidden]){displa
   height: 1px !important;
   background: linear-gradient(90deg, 
     transparent 0%, 
-    rgba(225, 29, 72, 0.15) 15%, 
-    rgba(239, 68, 68, 0.55) 50%, 
-    rgba(225, 29, 72, 0.15) 85%, 
+    rgba(225, 29, 72, 0.10) 20%, 
+    rgba(239, 68, 68, 0.40) 50%, 
+    rgba(225, 29, 72, 0.10) 80%, 
     transparent 100%) !important;
   animation: mars-titlebar-line-wave 5.2s ease-in-out infinite !important;
   z-index: 1 !important;
@@ -8118,7 +8113,7 @@ html[data-conversation-outline="enabled"] #outlineToggleBtn:not([hidden]){displa
   bottom: 0 !important;
   left: 0 !important;
   right: 0 !important;
-  background: radial-gradient(ellipse 70% 100% at 50% 50%, rgba(225, 29, 72, 0.12) 0%, rgba(225, 29, 72, 0.03) 60%, transparent 100%) !important;
+  background: radial-gradient(ellipse 65% 100% at 50% 50%, rgba(225, 29, 72, 0.06) 0%, rgba(225, 29, 72, 0.015) 55%, transparent 100%) !important;
   pointer-events: none !important;
   animation: mars-titlebar-glow-wave 5.2s ease-in-out infinite !important;
   z-index: 0 !important;
@@ -8126,25 +8121,26 @@ html[data-conversation-outline="enabled"] #outlineToggleBtn:not([hidden]){displa
 
 @keyframes mars-titlebar-glow-wave {
   0%, 100% {
-    opacity: 0.30;
+    opacity: 0.15;
     transform: scaleX(0.85);
   }
   50% {
-    opacity: 0.85;
-    transform: scaleX(1.15);
+    opacity: 0.38;
+    transform: scaleX(1.10);
   }
 }
 
 @keyframes mars-titlebar-line-wave {
   0%, 100% {
-    opacity: 0.30;
-    box-shadow: 0 1px 6px rgba(225, 29, 72, 0.10);
+    opacity: 0.20;
+    box-shadow: 0 1px 4px rgba(225, 29, 72, 0.08);
   }
   50% {
-    opacity: 0.90;
-    box-shadow: 0 1px 16px rgba(239, 68, 68, 0.45);
+    opacity: 0.55;
+    box-shadow: 0 1px 10px rgba(239, 68, 68, 0.30);
   }
 }
+
 
 .app-titlebar-left,
 .app-titlebar-inner,
@@ -8881,7 +8877,7 @@ textarea#msg {
   color: currentColor !important;
 }
 
-/* 2. Кнопка отправки и микрофон - стандартный цвет со спокойным неоновым мерцанием */
+/* 2. Кнопка отправки и микрофон - идентичный нейтральный цвет со спокойным неоновым мерцанием */
 @keyframes mars-ctl-neon-breathe {
   0%, 100% {
     box-shadow: 0 0 4px rgba(225, 29, 72, 0.14), 0 2px 6px rgba(0, 0, 0, 0.35);
@@ -8893,9 +8889,15 @@ textarea#msg {
   }
 }
 
+/* Кнопка отправки - ВСЕГДА нейтральная, мерцает точно так же, как кнопка микрофона */
+button.send-btn,
+button.send-btn:not(:disabled),
+button.send-btn.visible,
 .send-btn,
-:root.dark .send-btn {
-  background: rgba(255, 255, 255, 0.08) !important;
+:root.dark .send-btn,
+:root[data-skin] button.send-btn,
+:root[data-skin] button.send-btn:not(:disabled) {
+  background: transparent !important;
   color: #cbd5e1 !important;
   border: 1px solid rgba(255, 255, 255, 0.08) !important;
   border-radius: 999px !important;
@@ -8906,23 +8908,30 @@ textarea#msg {
   display: inline-flex !important;
   align-items: center !important;
   justify-content: center !important;
+  box-shadow: none !important;
   animation: mars-ctl-neon-breathe 5.2s ease-in-out infinite !important;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
 }
 
-.send-btn:hover:not(:disabled) {
-  background: rgba(225, 29, 72, 0.32) !important;
-  border-color: rgba(239, 68, 68, 0.65) !important;
+button.send-btn:hover:not(:disabled),
+.send-btn:hover:not(:disabled),
+:root[data-skin] button.send-btn:not(:disabled):hover {
+  background: rgba(255, 255, 255, 0.10) !important;
+  border-color: rgba(239, 68, 68, 0.35) !important;
   color: #ffffff !important;
-  box-shadow: 0 0 16px rgba(239, 68, 68, 0.48) !important;
+  box-shadow: 0 0 12px rgba(225, 29, 72, 0.25) !important;
   transform: scale(1.05) !important;
 }
 
+button.send-btn:disabled,
 .send-btn:disabled {
   opacity: 0.35 !important;
-  animation: none !important;
-  box-shadow: none !important;
+  background: transparent !important;
+  color: #94a3b8 !important;
   border-color: rgba(255, 255, 255, 0.05) !important;
+  box-shadow: none !important;
+  animation: none !important;
+  cursor: not-allowed !important;
 }
 
 .mic-btn,
@@ -8940,6 +8949,7 @@ textarea#msg {
   background: rgba(255, 255, 255, 0.10) !important;
   color: #ffffff !important;
 }
+
 
 .mic-btn.recording,
 .composer-right .mic-btn.recording {
