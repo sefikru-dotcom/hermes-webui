@@ -24,7 +24,7 @@
 <script>(function(){try{var fs=localStorage.getItem('hermes-font-size');if(fs&&fs!=='default')document.documentElement.dataset.fontSize=fs;}catch(e){}})()</script>
 <!-- theme-color: surfaces the active app chrome color to native status bars (Safari status bar, PWA, native WKWebView wrappers). Updated dynamically by boot.js when theme/skin changes. The light/dark default values match style.css :root --sidebar / :root.dark --sidebar. -->
 <meta name="theme-color" content="#FAF7F0" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#070709" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#060709" media="(prefers-color-scheme: dark)">
 <meta name="theme-color" id="hermes-theme-color" content="#0D0D1A">
 <script>(function(){try{var t=localStorage.getItem('hermes-theme')||'dark';if(t==='system')t=window.matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light';var c=t==='dark'?'#141425':'#FAF7F0';document.querySelectorAll('meta[name="theme-color"]').forEach(function(m){m.setAttribute('content',c);m.removeAttribute('media');});}catch(e){}})()</script>
 <script>(function(){try{document.documentElement.dataset.workspacePanel=localStorage.getItem('hermes-webui-workspace-panel')==='open'?'open':'closed';}catch(e){document.documentElement.dataset.workspacePanel='closed';}})()</script>
@@ -72,7 +72,7 @@
     };
   }
 })()</script>
-<link rel="stylesheet" href="static/style.css?v=__WEBUI_VERSION__-mars-ux5">
+<link rel="stylesheet" href="static/style.css?v=__WEBUI_VERSION__-mars-depth2">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" integrity="sha384-LJcOxlx9IMbNXDqJ2axpfEQKkAYbFjJfhXexLfiRJhjDU81mzgkiQq8rkV0j6dVh" crossorigin="anonymous">
   <!-- KaTeX math rendering CSS (loaded eagerly from vendored assets to prevent font CSP noise) -->
   <link rel="stylesheet" href="static/vendor/katex/0.16.22/katex.min.css">
@@ -123,7 +123,7 @@
 <body>
 <header class="app-titlebar" role="banner">
   <div class="app-titlebar-left">
-    <button class="app-titlebar-profile" id="titlebarProfileBtn" type="button" onclick="toggleProfileDropdown(event)" aria-label="Switch profile" style="display:none">
+    <button class="app-titlebar-profile" id="titlebarProfileBtn" type="button" onclick="toggleProfileDropdown(event)" aria-label="Switch profile">
       <span class="app-titlebar-profile-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span>
       <span class="app-titlebar-profile-label" id="titlebarProfileLabel">default</span>
       <span class="app-titlebar-profile-chevron" aria-hidden="true"><svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></span>
@@ -168,16 +168,16 @@
    страницу, чтобы настройка применилась. */
 window._marsFallbackActivityCycle=function(btn){
   try{
-    var order=['stream_window','stream_quiet'];
-    var cur=window._chatActivityDisplayMode||'stream_window';
-    if(cur!=='stream_quiet') cur='stream_window';
-    var next=(cur==='stream_window')?'stream_quiet':'stream_window';
+    var order=['stream_full','stream_window','stream_quiet'];
+    var cur=window._chatActivityDisplayMode||'stream_full';
+    var idx=order.indexOf(cur);
+    var next=order[(idx+1)%order.length];
     if(btn){
       btn.setAttribute('data-mode',next);
       var label=btn.querySelector('.activity-mode-text');
       if(label){
-        var keys={stream_window:'activity_mode_short_stream_window',stream_quiet:'activity_mode_short_stream_quiet'};
-        label.textContent=(typeof t==='function')?t(keys[next]):(next==='stream_window'?'Окно':'Тишина');
+        var keys={stream_full:'activity_mode_short_stream_full',stream_window:'activity_mode_short_stream_window',stream_quiet:'activity_mode_short_stream_quiet'};
+        label.textContent=(typeof t==='function')?t(keys[next]):(next==='stream_full'?'Открыто всё':(next==='stream_window'?'Окно':'Тишина'));
       }
     }
     var payload={chat_activity_display_mode:next};
@@ -468,7 +468,7 @@ window._marsFallbackActivityCycle=function(btn){
     <div id="mainChat" class="main-view">
     <div class="messages-shell">
       <button id="jumpToSessionStartBtn" class="session-jump-btn session-jump-btn--start" aria-label="Jump to beginning of session" data-i18n-aria-label="session_jump_start_label" data-i18n-title="session_jump_start_label" onclick="jumpToSessionStart()" style="display:none"><span aria-hidden="true">↑</span><span data-i18n="session_jump_start">Start</span></button>
-      <button id="scrollToBottomBtn" class="scroll-to-bottom-btn" style="display:none" onclick="scrollToBottom()" aria-label="Scroll to bottom" data-i18n-aria-label="session_jump_end_label" data-i18n-title="session_jump_end_label"><span aria-hidden="true">↓</span><span class="session-jump-btn__text" data-i18n="session_jump_end">End</span></button>
+      <button id="scrollToBottomBtn" class="scroll-to-bottom-btn" style="display:none" onclick="toggleAutoScrollFollow(event)" aria-label="Слежение за текстом" title="Слежение за текстом"><span aria-hidden="true">↓</span><span class="session-jump-btn__text">Вниз</span></button>
       <button id="outlineToggleBtn" type="button" hidden
         onclick="toggleOutlinePanel()"
         title="Conversation outline"
@@ -1845,14 +1845,14 @@ window._marsFallbackActivityCycle=function(btn){
 <script src="static/approval_i18n.js?v=__WEBUI_VERSION__-am3" defer></script>
 <script src="static/icons.js?v=__WEBUI_VERSION__-am2" defer></script>
 <script src="static/assistant_turn_anchors.js?v=__WEBUI_VERSION__-am2" defer></script>
-<script src="static/ui.js?v=__WEBUI_VERSION__-am3" defer></script>
+<script src="static/ui.js?v=__WEBUI_VERSION__-mars-follow2" defer></script>
 <script src="static/workspace.js?v=__WEBUI_VERSION__-am2" defer></script>
 <script src="static/terminal.js?v=__WEBUI_VERSION__-am2" defer></script>
 <script src="static/sessions.js?v=__WEBUI_VERSION__-am4" defer></script>
 <script src="static/commands.js?v=__WEBUI_VERSION__-am2" defer></script>
-<script src="static/messages.js?v=__WEBUI_VERSION__-am4" defer></script>
+<script src="static/messages.js?v=__WEBUI_VERSION__-mars-fadeoff1" defer></script>
 <script src="static/extension_settings.js?v=__WEBUI_VERSION__-am2" defer></script>
-<script src="static/panels.js?v=__WEBUI_VERSION__-mars-ux3" defer></script>
+<script src="static/panels.js?v=__WEBUI_VERSION__-mars-ux4" defer></script>
 <script src="static/onboarding.js?v=__WEBUI_VERSION__-am2" defer></script>
 <script src="static/boot.js?v=__WEBUI_VERSION__-am3" defer></script>
 <script src="static/outline.js?v=__WEBUI_VERSION__-am2" defer></script>

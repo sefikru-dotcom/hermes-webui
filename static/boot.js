@@ -9,6 +9,12 @@
     var _stopChan = new BroadcastChannel('hermes-webui-shutdown');
     _stopChan.onmessage = function() { _showServerStopped(); };
   } catch(_) {}
+  // Sergey profile isolation: hide model and reasoning picker everywhere
+  if(location.pathname.startsWith('/sergey') || location.port === '8788' || document.cookie.includes('hermes_profile_sergey')){
+    document.documentElement.classList.add('profile-sergey');
+    if(document.body) document.body.classList.add('profile-sergey');
+    else document.addEventListener('DOMContentLoaded', function(){ if(document.body) document.body.classList.add('profile-sergey'); });
+  }
 })();
 
 // cancelStream: stop the active chat stream.
@@ -851,7 +857,12 @@ function _micToastKeyForRecognitionError(error){
   }
 
   async function _transcribeBlob(blob, prefixSnapshot){
-    const ext=(blob.type&&blob.type.includes('ogg'))?'ogg':'webm';
+    let ext = 'webm';
+    if(blob.type){
+      if(blob.type.includes('ogg')) ext = 'ogg';
+      else if(blob.type.includes('mp4') || blob.type.includes('m4a') || blob.type.includes('aac')) ext = 'mp4';
+      else if(blob.type.includes('wav')) ext = 'wav';
+    }
     const form=new FormData();
     form.append('file',new File([blob],`voice-input.${ext}`,{type:blob.type||`audio/${ext}`}));
     // Snapshot is passed in from the recorder.onstop handler — taken there
@@ -2701,13 +2712,13 @@ const _THEMES=[
   {name:'System', value:'system', colors:['#FEFCF7','#0D0D1A','#B8860B']},
 ];
 const _SKINS=[
-  {name:'Default',  colors:['#FFD700','#FFBF00','#CD7F32']},
+  {name:'Default',  colors:['#EF4444','#B91C1C','#060709']},
   {name:'Ares',     colors:['#FF4444','#CC3333','#992222']},
   {name:'Mono',     colors:['#CCCCCC','#999999','#666666']},
-  {name:'Graphite', colors:['#FFFFFF','#D6D6D6','#242424']},
-  {name:'GitHub', colors:['#0969DA','#1F883D','#242424']},
-  {name:'Codex', colors:['#72B39A','#242624','#ECEBE4']},
-  {name:'Terracotta', colors:['#D97757','#F0EEE6','#141413']},
+  {name:'Graphite', colors:['#F8FAFC','#94A3B8','#0F131C']},
+  {name:'GitHub', colors:['#388BFD','#1F6FEB','#0D1117']},
+  {name:'Codex', colors:['#10B981','#059669','#090B0D']},
+  {name:'Terracotta', colors:['#E06C53','#C2410C','#090709']},
   {name:'Slate',    colors:['#334155','#475569','#64748b']},
   {name:'Poseidon', colors:['#0EA5E9','#0284C7','#0369A1']},
   {name:'Sisyphus', colors:['#A78BFA','#8B5CF6','#7C3AED']},
@@ -2721,7 +2732,7 @@ const _SKINS=[
   {name:'Neon Paint', value:'neon-paint', colors:['#FF2D95','#00E5FF','#FFB800']},
   {name:'Geist Contrast', value:'geist-contrast', colors:['#000000','#ffffff','#FFF175']},
   {name:'Zeus',     colors:['#FFD700','#FFBF00','#1A1A00']},
-  {name:'Verdigris', value:'verdigris', colors:['#C89A5A','#0F1714','#22342C']},
+  {name:'Verdigris', value:'verdigris', colors:['#C89A5A','#10B981','#070B0A']},
 ];
 const _VALID_THEMES=new Set((_THEMES||[]).map(t=>t.value));
 const _VALID_SKINS=new Set((_SKINS||[]).map(s=>(s.value||s.name).toLowerCase()));
@@ -3210,7 +3221,7 @@ window._applyComposerFooterVisibilitySettings=_applyComposerFooterVisibilitySett
 function _applyTitlebarProfileVisibility(){
   const btn=$('titlebarProfileBtn');
   if(!btn) return;
-  btn.style.display=window._showTitlebarProfile?'':'none';
+  btn.style.display='';
 }
 window._applyTitlebarProfileVisibility=_applyTitlebarProfileVisibility;
 
@@ -3662,6 +3673,14 @@ window._mirrorSpeechSettingsFromServer=_mirrorSpeechSettingsFromServer;
   if (activeProfileState.status === 'recovery-redirect') return;
   S.activeProfile = activeProfileState.profile;
   S.activeProfileIsDefault = activeProfileState.isDefault;
+  if(S.activeProfile === 'sergey'){
+    document.documentElement.classList.add('profile-sergey');
+    document.body.classList.add('profile-sergey');
+    if(window._composerControlVisibility){
+      window._composerControlVisibility.hide_composer_model = true;
+      window._composerControlVisibility.hide_composer_reasoning = true;
+    }
+  }
   applyBotName();
   if(typeof window.renderQuickChips==='function') window.renderQuickChips(S.activeProfile);
   // Update profile chip label immediately
@@ -3669,6 +3688,7 @@ window._mirrorSpeechSettingsFromServer=_mirrorSpeechSettingsFromServer;
   if(profileLabel) profileLabel.textContent=profileDisplayLabel(S.activeProfile);
   const titleLabel=$('titlebarProfileLabel');
   if(titleLabel) titleLabel.textContent=profileDisplayLabel(S.activeProfile);
+  if(typeof _applyTitlebarProfileVisibility==='function') _applyTitlebarProfileVisibility();
   const profileIntent=(typeof _profileQueryIntentFromLocation==='function')?_profileQueryIntentFromLocation():null;
   const _savedLocalBeforeProfileSwitch=localStorage.getItem('hermes-webui-session');
   const _profileSwitchProfileBefore=S.activeProfile||'default';
