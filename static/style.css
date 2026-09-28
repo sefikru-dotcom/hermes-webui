@@ -7773,7 +7773,7 @@ html[data-conversation-outline="enabled"] #outlineToggleBtn:not([hidden]){displa
 }
 
 
-/* ── Compact Mars Soft-Red Neon Quick Chips (No harsh border, deep soft glow) ── */
+/* ── Compact Mars Soft-Red Neon Quick Chips ── */
 .quick-chips-bar {
   display: flex !important;
   gap: 6px !important;
@@ -7808,9 +7808,9 @@ html[data-conversation-outline="enabled"] #outlineToggleBtn:not([hidden]){displa
   display: inline-flex !important;
   align-items: center !important;
   gap: 5px !important;
-  background: rgba(18, 12, 16, 0.55) !important;
-  border: none !important;
-  color: #e2e8f0 !important;
+  background: rgba(28, 12, 16, 0.72) !important;
+  border: 1px solid rgba(239, 68, 68, 0.38) !important;
+  color: #ffe4e6 !important;
   font-size: 11.5px !important;
   font-weight: 500 !important;
   letter-spacing: 0.15px !important;
@@ -7822,18 +7822,20 @@ html[data-conversation-outline="enabled"] #outlineToggleBtn:not([hidden]){displa
   cursor: pointer !important;
   white-space: nowrap !important;
   user-select: none !important;
-  backdrop-filter: blur(14px) !important;
-  -webkit-backdrop-filter: blur(14px) !important;
-  box-shadow: 0 0 12px rgba(225, 29, 72, 0.16), 0 2px 6px rgba(0, 0, 0, 0.35) !important;
+  backdrop-filter: blur(12px) !important;
+  -webkit-backdrop-filter: blur(12px) !important;
+  box-shadow: 0 0 10px rgba(225, 29, 72, 0.20), 0 2px 6px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 120, 130, 0.15) !important;
   transition: all 0.18s cubic-bezier(0.4, 0, 0.2, 1) !important;
 }
 
 .quick-chip:hover, .quick-chip:active {
-  background: rgba(225, 29, 72, 0.22) !important;
+  background: linear-gradient(135deg, rgba(225, 29, 72, 0.38) 0%, rgba(185, 28, 28, 0.30) 100%) !important;
+  border-color: rgba(239, 68, 68, 0.85) !important;
   color: #ffffff !important;
-  box-shadow: 0 0 16px rgba(239, 68, 68, 0.38), 0 2px 8px rgba(0, 0, 0, 0.5) !important;
+  box-shadow: 0 0 16px rgba(239, 68, 68, 0.50), 0 0 4px rgba(255, 255, 255, 0.30), 0 2px 8px rgba(0, 0, 0, 0.6) !important;
   transform: translateY(-1px) scale(1.02) !important;
 }
+
 
 .empty-logo {
   display: flex;
@@ -8137,15 +8139,12 @@ html[data-conversation-outline="enabled"] #outlineToggleBtn:not([hidden]){displa
   z-index: 2 !important;
 }
 
-/* ── Mars UI V2: Airy Glass Composer, Soft Neon Controls, Calm Profile & Natural Buttons ── */
-
-/* 1. Окошко ввода текста - воздушное парящее темное стекло без топорной заливки */
+/* ── Seamless Airy Translucent Glass Composer ── */
 .composer-wrap,
 :root.dark .composer-wrap {
   background: transparent !important;
   border-top: none !important;
   box-shadow: none !important;
-  padding: 6px 14px calc(10px + var(--keyboard-bottom-inset, 0px)) !important;
 }
 
 .composer-wrap::before,
@@ -8155,145 +8154,52 @@ html[data-conversation-outline="enabled"] #outlineToggleBtn:not([hidden]){displa
 
 :root.dark .composer-box,
 .composer-box {
-  background: rgba(10, 12, 18, 0.60) !important;
-  border: 1px solid rgba(255, 255, 255, 0.08) !important;
-  border-radius: 20px !important;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
-  backdrop-filter: blur(24px) saturate(140%) !important;
-  -webkit-backdrop-filter: blur(24px) saturate(140%) !important;
+  background: rgba(12, 14, 20, 0.76) !important;
+  border: 1px solid rgba(255, 255, 255, 0.09) !important;
+  border-radius: 18px !important;
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.06) !important;
+  backdrop-filter: blur(20px) !important;
+  -webkit-backdrop-filter: blur(20px) !important;
   transition: all 0.22s cubic-bezier(0.4, 0, 0.2, 1) !important;
 }
 
 :root.dark .composer-box:focus-within,
 .composer-box:focus-within {
-  background: rgba(12, 14, 22, 0.78) !important;
-  border-color: rgba(239, 68, 68, 0.38) !important;
-  box-shadow: 0 10px 36px rgba(0, 0, 0, 0.55), 0 0 16px rgba(225, 29, 72, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
-  animation: none !important;
+  background: rgba(15, 17, 25, 0.90) !important;
+  border-color: rgba(239, 68, 68, 0.55) !important;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.55), 0 0 16px rgba(225, 29, 72, 0.22), inset 0 1px 0 rgba(255, 120, 130, 0.10) !important;
 }
 
-#msg {
-  background: transparent !important;
-  color: #f1f5f9 !important;
-}
-
-.composer-footer {
-  background: transparent !important;
-  border-top: 1px solid rgba(255, 255, 255, 0.05) !important;
-}
-
-/* 2. Профиль в футере - спокойный стандартный цвет без ядовитого розового */
-.profile-chip,
-.composer-profile-chip,
-#profileChip {
-  user-select: none !important;
-  color: var(--muted, #94a3b8) !important;
-  background: transparent !important;
-  border-color: transparent !important;
-  box-shadow: none !important;
-}
-
-.profile-chip:hover,
-.composer-profile-chip:hover,
-#profileChip:hover {
+/* Soft User Message Bubbles */
+.msg-row[data-role="user"] .msg-body,
+:root.dark .msg-user,
+.msg-user {
+  background: rgba(20, 25, 38, 0.72) !important;
+  border: 1px solid rgba(255, 255, 255, 0.10) !important;
+  border-radius: 18px 18px 4px 18px !important;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
+  backdrop-filter: blur(14px) !important;
+  -webkit-backdrop-filter: blur(14px) !important;
   color: #f8fafc !important;
-  background: rgba(255, 255, 255, 0.06) !important;
 }
 
-.composer-profile-icon svg,
-.composer-profile-chevron svg {
-  color: currentColor !important;
-}
+/* Quick chips heartbeat handled in refined quick-chip rule */
 
-/* 3. Кнопка отправки и микрофон - стандартный цвет со спокойным неоновым мерцанием */
-@keyframes mars-ctl-neon-breathe {
-  0%, 100% {
-    box-shadow: 0 0 4px rgba(225, 29, 72, 0.14), 0 2px 6px rgba(0, 0, 0, 0.35);
-    border-color: rgba(255, 255, 255, 0.08);
-  }
-  50% {
-    box-shadow: 0 0 12px rgba(239, 68, 68, 0.38), 0 2px 8px rgba(0, 0, 0, 0.45);
-    border-color: rgba(239, 68, 68, 0.40);
-  }
-}
-
-.send-btn,
-:root.dark .send-btn {
-  background: rgba(255, 255, 255, 0.08) !important;
-  color: #cbd5e1 !important;
-  border: 1px solid rgba(255, 255, 255, 0.08) !important;
-  border-radius: 999px !important;
-  width: 34px !important;
-  height: 34px !important;
-  min-width: 34px !important;
-  min-height: 34px !important;
-  display: inline-flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  animation: mars-ctl-neon-breathe 5.2s ease-in-out infinite !important;
+/* Composer box on focus */
+:root.dark .composer-box {
+  background: rgba(14, 18, 26, 0.82) !important;
+  border: 1px solid rgba(255, 255, 255, 0.09) !important;
+  border-radius: 16px !important;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.40), inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
+  backdrop-filter: blur(16px) !important;
+  -webkit-backdrop-filter: blur(16px) !important;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
 }
-
-.send-btn:hover:not(:disabled) {
-  background: rgba(225, 29, 72, 0.32) !important;
-  border-color: rgba(239, 68, 68, 0.65) !important;
-  color: #ffffff !important;
-  box-shadow: 0 0 16px rgba(239, 68, 68, 0.48) !important;
-  transform: scale(1.05) !important;
-}
-
-.send-btn:disabled {
-  opacity: 0.35 !important;
+:root.dark .composer-box:focus-within {
+  background: rgba(16, 21, 30, 0.94) !important;
+  border-color: rgba(239, 68, 68, 0.55) !important;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.50), 0 0 0 1px rgba(239, 68, 68, 0.30), inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
   animation: none !important;
-  box-shadow: none !important;
-  border-color: rgba(255, 255, 255, 0.05) !important;
-}
-
-.send-btn.sending {
-  background: rgba(225, 29, 72, 0.25) !important;
-  border-color: rgba(239, 68, 68, 0.5) !important;
-}
-
-/* Микрофон */
-.mic-btn,
-.composer-right .mic-btn {
-  color: #cbd5e1 !important;
-  border: 1px solid rgba(255, 255, 255, 0.08) !important;
-  border-radius: 10px !important;
-  background: transparent !important;
-  animation: mars-ctl-neon-breathe 5.2s ease-in-out infinite !important;
-  transition: all 0.2s ease !important;
-}
-
-.mic-btn:hover,
-.composer-right .mic-btn:hover {
-  background: rgba(255, 255, 255, 0.10) !important;
-  color: #ffffff !important;
-}
-
-.mic-btn.recording,
-.composer-right .mic-btn.recording {
-  background: rgba(225, 29, 72, 0.28) !important;
-  border-color: rgba(239, 68, 68, 0.85) !important;
-  box-shadow: 0 0 18px rgba(239, 68, 68, 0.60) !important;
-  color: #ffffff !important;
-  animation: mic-pulse 1.2s ease-in-out infinite !important;
-}
-
-/* Скрепка справа и значок контекста слева */
-.composer-right #btnAttach {
-  color: #94a3b8 !important;
-  border-radius: 8px !important;
-  transition: color 0.15s, background 0.15s !important;
-}
-
-.composer-right #btnAttach:hover {
-  color: #f1f5f9 !important;
-  background: rgba(255, 255, 255, 0.08) !important;
-}
-
-.composer-left #ctxIndicatorWrap {
-  margin-right: 6px !important;
 }
 
 /* --- LEFT BAR: Rail & Sidebar --- */
@@ -8805,8 +8711,16 @@ html.mars-transparent-stream #marsTurnFoldBtn:not([hidden]){display:flex;}
   background: rgba(255, 255, 255, 0.02);
 }
 
-/* 4. Умное скрытие чипсов над полем ввода (override cleaned) */
+/* 4. Умное скрытие чипсов над полем ввода */
 .quick-chips-bar {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 6px 12px 8px;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  margin-bottom: 4px;
+  max-height: 52px;
   opacity: 1;
   transition: max-height 0.24s cubic-bezier(0.4, 0, 0.2, 1),
               opacity 0.18s ease,
