@@ -3221,7 +3221,7 @@ window._applyComposerFooterVisibilitySettings=_applyComposerFooterVisibilitySett
 function _applyTitlebarProfileVisibility(){
   const btn=$('titlebarProfileBtn');
   if(!btn) return;
-  btn.style.display='';
+  btn.style.display='none';
 }
 window._applyTitlebarProfileVisibility=_applyTitlebarProfileVisibility;
 

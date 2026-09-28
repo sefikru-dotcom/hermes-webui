@@ -8877,27 +8877,44 @@ textarea#msg {
   color: currentColor !important;
 }
 
-/* 2. Кнопка отправки и микрофон - идентичный нейтральный цвет со спокойным неоновым мерцанием */
+/* Гарантированное скрытие профиля из шапки */
+#titlebarProfileBtn,
+.app-titlebar-profile,
+.app-titlebar .app-titlebar-profile,
+button#titlebarProfileBtn {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+  width: 0 !important;
+  height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  opacity: 0 !important;
+  position: absolute !important;
+}
+
+
+/* 2. Кнопка отправки: Марсианская Звезда / Планета (Mars Nova Core) и микрофон */
 @keyframes mars-ctl-neon-breathe {
   0%, 100% {
-    box-shadow: 0 0 4px rgba(225, 29, 72, 0.14), 0 2px 6px rgba(0, 0, 0, 0.35);
+    box-shadow: 0 0 5px rgba(225, 29, 72, 0.16), 0 2px 6px rgba(0, 0, 0, 0.35);
     border-color: rgba(255, 255, 255, 0.08);
   }
   50% {
-    box-shadow: 0 0 12px rgba(239, 68, 68, 0.38), 0 2px 8px rgba(0, 0, 0, 0.45);
-    border-color: rgba(239, 68, 68, 0.40);
+    box-shadow: 0 0 13px rgba(239, 68, 68, 0.40), 0 2px 8px rgba(0, 0, 0, 0.45);
+    border-color: rgba(239, 68, 68, 0.38);
   }
 }
 
-/* Кнопка отправки - ВСЕГДА нейтральная, мерцает точно так же, как кнопка микрофона */
 button.send-btn,
 button.send-btn:not(:disabled),
+button.send-btn:disabled,
 button.send-btn.visible,
 .send-btn,
 :root.dark .send-btn,
 :root[data-skin] button.send-btn,
 :root[data-skin] button.send-btn:not(:disabled) {
-  background: transparent !important;
+  background: rgba(18, 22, 32, 0.60) !important;
   color: #cbd5e1 !important;
   border: 1px solid rgba(255, 255, 255, 0.08) !important;
   border-radius: 999px !important;
@@ -8908,30 +8925,74 @@ button.send-btn.visible,
   display: inline-flex !important;
   align-items: center !important;
   justify-content: center !important;
-  box-shadow: none !important;
+  padding: 0 !important;
+  cursor: pointer !important;
   animation: mars-ctl-neon-breathe 5.2s ease-in-out infinite !important;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
 }
 
+/* Иконка внутри кнопки отправки ВСЕГДА видна и центрирована */
+button.send-btn svg,
+.send-btn svg {
+  display: block !important;
+  width: 18px !important;
+  height: 18px !important;
+  flex-shrink: 0 !important;
+  color: inherit !important;
+  transition: transform 0.25s ease, filter 0.25s ease, opacity 0.25s ease !important;
+}
+
+/* Спокойное состояние (когда текста нет) - мягкое ненавязчивое дыхание, звезда видна */
+button.send-btn:disabled,
+.send-btn:disabled {
+  opacity: 0.70 !important;
+  color: #94a3b8 !important;
+  background: rgba(16, 20, 30, 0.45) !important;
+  border-color: rgba(255, 255, 255, 0.06) !important;
+  animation: mars-ctl-neon-breathe 5.2s ease-in-out infinite !important;
+  cursor: default !important;
+}
+
+button.send-btn:disabled svg,
+.send-btn:disabled svg {
+  opacity: 0.85 !important;
+}
+
+/* Активное состояние (когда текст введен) - звезда оживает, мягкое свечение ядра */
+button.send-btn:not(:disabled),
+.send-btn:not(:disabled) {
+  opacity: 1 !important;
+  color: #fca5a5 !important;
+  background: rgba(26, 16, 22, 0.75) !important;
+  border-color: rgba(239, 68, 68, 0.45) !important;
+  box-shadow: 0 0 14px rgba(225, 29, 72, 0.30), 0 2px 6px rgba(0, 0, 0, 0.45) !important;
+}
+
+button.send-btn:not(:disabled) svg,
+.send-btn:not(:disabled) svg {
+  filter: drop-shadow(0 0 5px rgba(239, 68, 68, 0.55)) !important;
+}
+
+/* При наведении - деликатный космический импульс */
 button.send-btn:hover:not(:disabled),
 .send-btn:hover:not(:disabled),
 :root[data-skin] button.send-btn:not(:disabled):hover {
-  background: rgba(255, 255, 255, 0.10) !important;
-  border-color: rgba(239, 68, 68, 0.35) !important;
   color: #ffffff !important;
-  box-shadow: 0 0 12px rgba(225, 29, 72, 0.25) !important;
-  transform: scale(1.05) !important;
+  background: rgba(225, 29, 72, 0.28) !important;
+  border-color: rgba(239, 68, 68, 0.70) !important;
+  box-shadow: 0 0 16px rgba(239, 68, 68, 0.50), 0 2px 8px rgba(0, 0, 0, 0.5) !important;
+  transform: scale(1.06) !important;
 }
 
-button.send-btn:disabled,
-.send-btn:disabled {
-  opacity: 0.35 !important;
-  background: transparent !important;
-  color: #94a3b8 !important;
-  border-color: rgba(255, 255, 255, 0.05) !important;
-  box-shadow: none !important;
-  animation: none !important;
-  cursor: not-allowed !important;
+button.send-btn:hover:not(:disabled) svg,
+.send-btn:hover:not(:disabled) svg {
+  transform: rotate(15deg) scale(1.08) !important;
+  filter: drop-shadow(0 0 8px rgba(239, 68, 68, 0.80)) !important;
+}
+
+button.send-btn:active:not(:disabled),
+.send-btn:active:not(:disabled) {
+  transform: scale(0.94) !important;
 }
 
 .mic-btn,

@@ -28,6 +28,7 @@ function _rememberProfileDisplayNames(rows){
 }
 function profileDisplayLabel(name){
   const n=(typeof name==='string'&&name.trim())?name.trim():'default';
+  if(n==='default') return 'Стеф';
   const map=S.profileDisplayNames;
   if(map&&map[n]) return map[n];
   return n;
@@ -5885,6 +5886,7 @@ window.openComposerContextMenu=openComposerContextMenu;
 
 document.addEventListener('click',function(e){
   if(
+    e.target.closest('#composerEnvPill') ||
     e.target.closest('#composerMobileConfigBtn') ||
     e.target.closest('#composerMobileConfigPanel') ||
     e.target.closest('#composerWsDropdown') ||
@@ -5906,12 +5908,7 @@ document.addEventListener('keydown',function(e){
 });
 
 window.addEventListener('resize',function(){
-  if(window.matchMedia && !window.matchMedia('(max-width: 640px)').matches){
-    closeMobileComposerConfig();
-    closeModelDropdown();
-    closeReasoningDropdown();
-    if(typeof closeWsDropdown==='function') closeWsDropdown();
-  }
+  // Auto-close open dropdowns on extreme layout shifts
 });
 
 // ── Scroll pinning ──────────────────────────────────────────────────────────
@@ -6213,10 +6210,49 @@ function _syncScrollToBottomCue(show, opts){
   if(!btn) return;
   const newMessage=!!(opts&&opts.newMessage);
   btn.classList.toggle('scroll-to-bottom-btn--new-message',newMessage);
-  if(newMessage) _setScrollToBottomCueText(btn,'session_new_message','session_new_message_label');
-  else _setScrollToBottomCueText(btn,'session_jump_end','session_jump_end_label');
-  btn.style.display=show?'flex':'none';
+  btn.classList.toggle('auto-follow-off', !window._autoScrollFollow);
+  
+  if(!window._autoScrollFollow) {
+    btn.innerHTML = '<span style="font-size:13px">⏸</span><span class="session-jump-btn__text" style="margin-left:4px;font-size:11px">Пауза</span>';
+    btn.title = 'Слежение на паузе. Нажмите, чтобы включить';
+  } else if(newMessage) {
+    _setScrollToBottomCueText(btn,'session_new_message','session_new_message_label');
+  } else {
+    btn.innerHTML = '<span style="font-size:13px">↓</span><span class="session-jump-btn__text" style="margin-left:4px;font-size:11px">Вниз</span>';
+    btn.title = 'Перейти к свежим сообщениям';
+  }
+  
+  const shouldShow = show || !window._autoScrollFollow;
+  btn.style.display=shouldShow?'flex':'none';
 }
+
+function toggleAutoScrollFollow(e){
+  if(e){
+    e.preventDefault();
+    e.stopPropagation();
+  }
+  window._autoScrollFollow = !window._autoScrollFollow;
+  try {
+    localStorage.setItem('mars_auto_scroll_follow', window._autoScrollFollow ? '1' : '0');
+  } catch(_) {}
+  
+  if(window._autoScrollFollow){
+    _messageUserUnpinned = false;
+    _scrollPinned = true;
+    scrollToBottom();
+    if(typeof showToast === 'function') showToast('Слежение включено', 1500);
+  } else {
+    _scrollPinned = false;
+    _messageUserUnpinned = true;
+    if(typeof showToast === 'function') showToast('Экран зафиксирован на месте', 1500);
+  }
+  
+  const cb = $('settingsAutoScrollFollow');
+  if(cb) cb.checked = window._autoScrollFollow;
+  _syncScrollToBottomCue(!_scrollPinned, {newMessage: _newMessageCueVisible});
+}
+window.toggleAutoScrollFollow = toggleAutoScrollFollow;
+
 function _showNewMessageScrollCue(){
   _newMessageCueVisible=true;
   _syncScrollToBottomCue(true,{newMessage:true});
@@ -8408,12 +8444,12 @@ function _setComposerPrimaryButtonIcon(btn,action){
   // Queue/interrupt/steer icons are inline Lucide SVGs (ISC):
   // https://lucide.dev/icons/
   const icons={
-    send:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>',
+    send:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" class="mars-send-star" aria-hidden="true"><ellipse cx="12" cy="12" rx="9" ry="3.5" transform="rotate(-28 12 12)" stroke="currentColor" stroke-width="1.2" stroke-dasharray="1.5 2" opacity="0.55"/><path d="M12 2.5 C12 7.2, 14.2 9.8, 20.5 12 C14.2 14.2, 12 16.8, 12 21.5 C12 16.8, 9.8 14.2, 3.5 12 C9.8 9.8, 12 7.2, 12 2.5 Z" fill="currentColor" fill-opacity="0.2" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><circle cx="12" cy="12" r="2" fill="currentColor"/></svg>',
     queue:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 5H3"/><path d="M16 12H3"/><path d="M9 19H3"/><path d="m16 16-3 3 3 3"/><path d="M21 5v12a2 2 0 0 1-2 2h-6"/></svg>',
     interrupt:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 4v16"/><path d="M6.029 4.285A2 2 0 0 0 3 6v12a2 2 0 0 0 3.029 1.715l9.997-5.998a2 2 0 0 0 .003-3.432z"/></svg>',
     steer:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="m16.24 7.76-1.804 5.411a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.411a2 2 0 0 1 1.265-1.265z"/></svg>',
     stop:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2"></rect></svg>',
-    disabled:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>'
+    disabled:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" class="mars-send-star" aria-hidden="true"><ellipse cx="12" cy="12" rx="9" ry="3.5" transform="rotate(-28 12 12)" stroke="currentColor" stroke-width="1.2" stroke-dasharray="1.5 2" opacity="0.55"/><path d="M12 2.5 C12 7.2, 14.2 9.8, 20.5 12 C14.2 14.2, 12 16.8, 12 21.5 C12 16.8, 9.8 14.2, 3.5 12 C9.8 9.8, 12 7.2, 12 2.5 Z" fill="currentColor" fill-opacity="0.2" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><circle cx="12" cy="12" r="2" fill="currentColor"/></svg>'
   };
   const next=icons[action]||icons.send;
   if(btn.innerHTML!==next) btn.innerHTML=next;
