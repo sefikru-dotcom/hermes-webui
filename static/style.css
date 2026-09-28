@@ -7772,47 +7772,70 @@ html[data-conversation-outline="enabled"] #outlineToggleBtn:not([hidden]){displa
   border-color: rgba(224, 108, 83, 0.8) !important;
 }
 
-/* Modern Quick Chips for POCO F5 (Mars Terracotta/Copper Palette) */
+
+/* ── Compact Mars Soft-Red Neon Quick Chips ── */
 .quick-chips-bar {
-  display: flex;
-  gap: 8px;
-  overflow-x: auto;
-  padding: 6px 12px 8px;
-  scrollbar-width: none;
-  -webkit-overflow-scrolling: touch;
-  margin-bottom: 4px;
+  display: flex !important;
+  gap: 6px !important;
+  overflow-x: auto !important;
+  padding: 3px 12px 5px !important;
+  scrollbar-width: none !important;
+  -webkit-overflow-scrolling: touch !important;
+  margin-bottom: 3px !important;
+  max-height: 38px !important;
+  opacity: 1;
+  transition: max-height 0.22s cubic-bezier(0.4, 0, 0.2, 1),
+              opacity 0.18s ease,
+              margin 0.22s ease,
+              padding 0.22s ease !important;
 }
+
 .quick-chips-bar::-webkit-scrollbar {
-  display: none;
+  display: none !important;
 }
+
+.quick-chips-bar.hidden-by-input {
+  max-height: 0 !important;
+  opacity: 0 !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+  margin-bottom: 0 !important;
+  pointer-events: none !important;
+  overflow: hidden !important;
+}
+
 .quick-chip {
   display: inline-flex !important;
   align-items: center !important;
-  gap: 6px !important;
-  background: rgba(16, 20, 30, 0.85) !important;
-  border: 1px solid rgba(255, 255, 255, 0.09) !important;
-  color: #e2e8f0 !important;
-  font-size: 13px !important;
+  gap: 5px !important;
+  background: rgba(28, 12, 16, 0.72) !important;
+  border: 1px solid rgba(239, 68, 68, 0.38) !important;
+  color: #ffe4e6 !important;
+  font-size: 11.5px !important;
   font-weight: 500 !important;
-  padding: 8px 16px !important;
-  min-height: 38px !important;
+  letter-spacing: 0.15px !important;
+  padding: 4px 11px !important;
+  min-height: 27px !important;
+  max-height: 29px !important;
+  line-height: 1 !important;
   border-radius: 999px !important;
   cursor: pointer !important;
   white-space: nowrap !important;
   user-select: none !important;
-  backdrop-filter: blur(14px) !important;
-  -webkit-backdrop-filter: blur(14px) !important;
-  animation: none !important;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35) !important;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  backdrop-filter: blur(12px) !important;
+  -webkit-backdrop-filter: blur(12px) !important;
+  box-shadow: 0 0 10px rgba(225, 29, 72, 0.20), 0 2px 6px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 120, 130, 0.15) !important;
+  transition: all 0.18s cubic-bezier(0.4, 0, 0.2, 1) !important;
 }
+
 .quick-chip:hover, .quick-chip:active {
-  background: linear-gradient(135deg, rgba(225, 29, 72, 0.25) 0%, rgba(185, 28, 28, 0.18) 100%) !important;
-  border-color: rgba(239, 68, 68, 0.70) !important;
+  background: linear-gradient(135deg, rgba(225, 29, 72, 0.38) 0%, rgba(185, 28, 28, 0.30) 100%) !important;
+  border-color: rgba(239, 68, 68, 0.85) !important;
   color: #ffffff !important;
-  box-shadow: 0 4px 20px rgba(225, 29, 72, 0.35) !important;
+  box-shadow: 0 0 16px rgba(239, 68, 68, 0.50), 0 0 4px rgba(255, 255, 255, 0.30), 0 2px 8px rgba(0, 0, 0, 0.6) !important;
   transform: translateY(-1px) scale(1.02) !important;
 }
+
 
 .empty-logo {
   display: flex;
@@ -7997,44 +8020,7 @@ html[data-conversation-outline="enabled"] #outlineToggleBtn:not([hidden]){displa
 }
 
 /* Quick Chips: Modern Touch Pills for POCO F5 */
-.quick-chips-bar {
-  display: flex;
-  gap: 8px;
-  overflow-x: auto;
-  padding: 8px 14px;
-  scrollbar-width: none;
-  -webkit-overflow-scrolling: touch;
-  margin-bottom: 4px;
-}
-.quick-chips-bar::-webkit-scrollbar {
-  display: none;
-}
-.quick-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  background: rgba(26, 31, 44, 0.85);
-  border: 1px solid rgba(255, 255, 255, 0.10);
-  color: #e2e8f0;
-  font-size: 12.5px;
-  font-weight: 550;
-  padding: 8px 16px;
-  min-height: 38px;
-  border-radius: 999px;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-  user-select: none;
-  backdrop-filter: blur(8px);
-}
-.quick-chip:hover, .quick-chip:active {
-  background: rgba(229, 57, 53, 0.18);
-  border-color: rgba(229, 57, 53, 0.6);
-  color: #ffffff;
-  box-shadow: 0 4px 14px rgba(229, 57, 53, 0.35);
-  transform: translateY(-1px);
-}
+/* Quick chips unified above */
 
 .empty-logo {
   display: flex;
@@ -8283,47 +8269,7 @@ html[data-conversation-outline="enabled"] #outlineToggleBtn:not([hidden]){displa
 }
 
 
-/* Unified modern translucent quick-chips for POCO F5 touch */
-.quick-chips-bar {
-  display: flex;
-  gap: 8px;
-  overflow-x: auto;
-  padding: 8px 14px;
-  scrollbar-width: none;
-  -webkit-overflow-scrolling: touch;
-  margin-bottom: 6px;
-}
-.quick-chips-bar::-webkit-scrollbar {
-  display: none;
-}
-.quick-chip {
-  display: inline-flex !important;
-  align-items: center !important;
-  gap: 6px !important;
-  background: rgba(16, 20, 30, 0.85) !important;
-  border: 1px solid rgba(255, 255, 255, 0.09) !important;
-  color: #e2e8f0 !important;
-  font-size: 13px !important;
-  font-weight: 500 !important;
-  padding: 8px 16px !important;
-  min-height: 38px !important;
-  border-radius: 999px !important;
-  cursor: pointer !important;
-  white-space: nowrap !important;
-  user-select: none !important;
-  backdrop-filter: blur(14px) !important;
-  -webkit-backdrop-filter: blur(14px) !important;
-  animation: none !important;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35) !important;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
-}
-.quick-chip:hover, .quick-chip:active {
-  background: linear-gradient(135deg, rgba(225, 29, 72, 0.25) 0%, rgba(185, 28, 28, 0.18) 100%) !important;
-  border-color: rgba(239, 68, 68, 0.70) !important;
-  color: #ffffff !important;
-  box-shadow: 0 4px 20px rgba(225, 29, 72, 0.35) !important;
-  transform: translateY(-1px) scale(1.02) !important;
-}
+/* Quick chips unified in core section */
 
 
 /* ── Mars chat UX: folded reasoning (thinking_mode = collapsed) ───────────
