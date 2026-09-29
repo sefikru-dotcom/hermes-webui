@@ -8577,8 +8577,8 @@ const _ACTIVITY_MODE_FULL_KEY={
 
 function _canonicalActivityMode(mode){
   if(mode==='stream_full'||mode==='stream_window'||mode==='stream_quiet') return mode;
-  if(mode==='transparent_stream') return 'stream_full';
-  if(mode==='hide_all_activity') return 'stream_quiet';
+  if(mode==='stream_full') return 'stream_full';
+  if(mode==='stream_quiet') return 'stream_quiet';
   return 'stream_window';
 }
 

@@ -12385,7 +12385,7 @@ function _attachCopyButton(header){
   return btn;
 }
 function _transparentEventCountLabel(toolCount){
-  return toolCount?`Trace: ${toolCount} ${toolCount===1?'tool':'tools'}`:'Trace';
+  return toolCount?t('activity_trace_count', toolCount):t('activity_trace_base');
 }
 function _setTransparentDetailMode(tab, mode){
   const row=tab&&tab.closest?tab.closest('.transparent-event-row'):null;
@@ -14020,9 +14020,15 @@ function renderLiveAnchorActivityScene(streamId, scene, opts){
   // flicker) when #5746's requestedMode-precedence landed: the good build always
   // checked isTransparentStream() FIRST and ignored the hint. Restore active-mode-wins:
   // honor requestedMode ONLY when there is no usable active mode.
-  const knownMode=(m)=>m==='compact_worklog'||m==='transparent_stream'||m==='hide_all_activity';
-  const sceneMode=knownMode(activeMode)?activeMode:(knownMode(requestedMode)?requestedMode:activeMode);
-  if(sceneMode==='hide_all_activity') return false;
+  const knownMode=(m)=>m==='compact_worklog'||m==='transparent_stream'||m==='hide_all_activity'||m==='stream_full'||m==='stream_window'||m==='stream_quiet';
+  const _norm = (m) => {
+    if(m === 'stream_full') return 'transparent_stream';
+    if(m === 'stream_quiet') return 'hide_all_activity';
+    if(m === 'stream_window') return 'compact_worklog';
+    return m;
+  };
+  const sceneMode = _norm(knownMode(activeMode) ? activeMode : (knownMode(requestedMode) ? requestedMode : activeMode));
+  if(sceneMode === 'hide_all_activity') return false;
   const existingTurn=$('liveAssistantTurn');
   const requestedSessionId=String(opts.sessionId||'');
   const existingTurnSessionId=String(existingTurn&&existingTurn.dataset&&existingTurn.dataset.sessionId||'');
@@ -14509,11 +14515,17 @@ function _refreshTransparentLiveRow(existing, node, opts){
 function _renderLiveAnchorActivitySceneForStream(streamId, sessionId, opts){
   const requestedMode=opts&&opts.mode;
   const activeMode=chatActivityMode();
-  const mode=activeMode==='hide_all_activity'
+  const _norm = (m) => {
+    if(m === 'stream_full') return 'transparent_stream';
+    if(m === 'stream_quiet') return 'hide_all_activity';
+    if(m === 'stream_window') return 'compact_worklog';
+    return m;
+  };
+  const mode = _norm(activeMode) === 'hide_all_activity'
     ? 'hide_all_activity'
-    : (requestedMode==='compact_worklog'||requestedMode==='transparent_stream'||requestedMode==='hide_all_activity'
+    : (requestedMode === 'compact_worklog' || requestedMode === 'transparent_stream' || requestedMode === 'hide_all_activity'
     ? requestedMode
-    : activeMode);
+    : _norm(activeMode));
   const scene=_projectLiveAnchorActivitySceneForStream(streamId,mode);
   if(!scene) return false;
   return renderLiveAnchorActivityScene(streamId,scene,{...(opts||{}),sessionId});
@@ -15090,7 +15102,7 @@ function ensureActivityGroup(inner, opts){
     if(burstId) group.setAttribute('data-activity-burst-id',burstId);
     if(segmentSeq) group.setAttribute('data-live-segment-seq',segmentSeq);
     group.classList.toggle('open',!collapsed);
-    group.innerHTML=`<button type="button" class="tool-call-group-summary tool-worklog-summary activity-summary" aria-expanded="${collapsed?'false':'true'}" onclick="_toggleActivityGroup(this)"><span class="as-dot"></span><span class="tool-call-group-label tool-worklog-label as-text">Running</span><span class="tool-call-group-duration"></span><span class="tool-call-group-chevron as-caret">${li('chevron-right',12)}</span></button><div class="tool-call-group-body tool-worklog-body activity-body"><div class="worklog"><div class="tool-worklog-list"></div></div></div>`;
+    group.innerHTML=`<button type="button" class="tool-call-group-summary tool-worklog-summary activity-summary" aria-expanded="${collapsed?'false':'true'}" onclick="_toggleActivityGroup(this)"><span class="as-dot"></span><span class="tool-call-group-label tool-worklog-label as-text">" + t("activity_status_running") + "</span><span class="tool-call-group-duration"></span><span class="tool-call-group-chevron as-caret">${li('chevron-right',12)}</span></button><div class="tool-call-group-body tool-worklog-body activity-body"><div class="worklog"><div class="tool-worklog-list"></div></div></div>`;
     const anchor=opts.anchor||null;
     if(anchor&&anchor.parentElement===inner){
       if(opts.beforeAnchor) inner.insertBefore(group, anchor);
@@ -15169,7 +15181,7 @@ function ensureRunActivityGroup(inner, opts){
     group.setAttribute('data-tool-call-group','1');
     group.setAttribute('data-agent-activity-group','1');
     group.setAttribute('data-run-activity-group','1');
-    group.innerHTML=`<button type="button" class="tool-call-group-summary" aria-expanded="${collapsed?'false':'true'}" onclick="_toggleActivityGroup(this)"><span class="tool-call-group-chevron">${li('chevron-right',12)}</span><span class="tool-call-group-label">Running</span><span class="tool-call-group-duration"></span></button><div class="tool-call-group-body"></div>`;
+    group.innerHTML=`<button type="button" class="tool-call-group-summary" aria-expanded="${collapsed?'false':'true'}" onclick="_toggleActivityGroup(this)"><span class="tool-call-group-chevron">${li('chevron-right',12)}</span><span class="tool-call-group-label">" + t("activity_status_running") + "</span><span class="tool-call-group-duration"></span></button><div class="tool-call-group-body"></div>`;
     if(inner.firstChild) inner.insertBefore(group, inner.firstChild);
     else inner.appendChild(group);
   }
@@ -15258,7 +15270,7 @@ function _renderLiveRunStatusContent(el,startedAt){
     return;
   }
   el.className='live-run-status live-footer';
-  el.innerHTML=`<span class="live-run-status-dot tool-card-running-dot"></span><span class="live-run-status-text lf-time">${timeStr}</span>${tokens?`<span class="lf-sep">·</span><span class="lf-tokens">${_fmtTokens(tokens)} tokens</span>`:''}<span class="lf-sep">·</span><span class="lf-status">Running</span>`;
+  el.innerHTML=`<span class="live-run-status-dot tool-card-running-dot"></span><span class="live-run-status-text lf-time">${timeStr}</span>${tokens?`<span class="lf-sep">·</span><span class="lf-tokens">${_fmtTokens(tokens)} " + t("activity_tokens") + "</span>`:''} <span class="lf-sep">·</span> <span class="lf-status">" + t("activity_status_running") + "</span>`;
 }
 function updateLiveRunStatus(opts){
   if(opts&&opts.sessionId&&_liveRunStatusSessionId&&opts.sessionId!==_liveRunStatusSessionId) return;
@@ -19538,11 +19550,11 @@ function _syncToolCallGroupSummary(group){
       if(skillCount) suffix+=`, ${skillCount} ${skillCount===1?'skill':'skills'} updated`;
       const toolsPart=otherCount?`${otherCount} tool${otherCount===1?'':'s'}`:'';
       if(group.getAttribute('data-live-tool-call-group')==='1'){
-        if(toolsPart) label.textContent=`Activity: ${toolsPart}${suffix}`;
+        if(toolsPart) label.textContent=t("activity_count_tools", toolsPart) + suffix;
         else if(suffix) label.textContent=`Activity: ${suffix.slice(2)}`;
         else label.textContent='Running';
       }else if(toolsPart||suffix){
-        label.textContent=toolsPart?`Activity: ${toolsPart}${suffix}`:`Activity: ${suffix.slice(2)}`;
+        label.textContent=toolsPart?t("activity_count_tools", toolsPart)+suffix:t("activity_count_tools", "")+suffix.slice(2);
       }else label.textContent='Activity';
     }
     label.setAttribute('data-sweep-label', label.textContent);

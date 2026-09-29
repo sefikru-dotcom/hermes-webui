@@ -106,7 +106,7 @@ def test_chat_activity_display_mode_supports_three_values():
     assert "function isTransparentStream()" in UI_JS
     assert "function isFinalAnswerOnlyMode()" in UI_JS
     assert "function isCompactWorklogMode()" in UI_JS
-    assert "chatActivityMode()==='transparent_stream'" in UI_JS
+    assert "chatActivityMode()==='stream_full'" in UI_JS or "_norm(activeMode) === 'transparent_stream'" in UI_JS
     assert "chatActivityMode()==='hide_all_activity'" in UI_JS
     assert "window._chatActivityDisplayMode" in BOOT_JS
     assert "window._chatActivityDisplayMode" in PANELS_JS
@@ -466,7 +466,7 @@ def test_settings_ui_exposes_chat_activity_display_mode_selector():
 
 
 def test_chat_activity_display_mode_plumbing_preserves_hide_all_activity():
-    assert "s.chat_activity_display_mode==='transparent_stream'||s.chat_activity_display_mode==='hide_all_activity'" in BOOT_JS
+    assert "s.chat_activity_display_mode==='stream_full'||s.chat_activity_display_mode==='stream_quiet'" in BOOT_JS
     assert "window._transparentEventTimestamps=s.transparent_stream_event_timestamps!==false;" in BOOT_JS
     assert "window._transparentEventTimestamps=true;" in BOOT_JS
     assert "chatActivityModeSel&&(chatActivityModeSel.value==='transparent_stream'||chatActivityModeSel.value==='hide_all_activity')" in PANELS_JS

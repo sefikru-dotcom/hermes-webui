@@ -3387,7 +3387,7 @@ window._mirrorSpeechSettingsFromServer=_mirrorSpeechSettingsFromServer;
       document.documentElement.classList.toggle('mars-thinking-collapsed',window._thinkingMode==='collapsed');
       document.documentElement.classList.toggle('mars-hide-tools',!window._showToolCalls);
       document.documentElement.classList.toggle('mars-autocollapse-turns',window._autoCollapsePreviousTurns);
-      document.documentElement.classList.toggle('mars-transparent-stream',window._chatActivityDisplayMode==='transparent_stream'||window._chatActivityDisplayMode==='stream_full');
+      document.documentElement.classList.toggle('mars-transparent-stream',window._chatActivityDisplayMode==='stream_full');
     }catch(_){}
     window._workspaceTodosTab=!!s.workspace_todos_tab;
     if(typeof _applyWorkspaceTodosTabVisibility==='function') _applyWorkspaceTodosTabVisibility();
