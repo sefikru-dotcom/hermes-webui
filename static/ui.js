@@ -13181,6 +13181,12 @@ function _finalizeLiveActivityDisclosureGroup(group){
   group.removeAttribute('data-live-tool-worklog-group');
   group.removeAttribute('data-live-anchor-scene-owner');
   group.classList.toggle('tool-call-group-collapsed', !keepOpen);
+  const win = group.closest('.mars-process-window');
+  if (win && chatActivityMode() === 'stream_window') {
+    win.classList.add('is-collapsed');
+    const spinner = win.querySelector('.mars-quiet-status-spinner');
+    if (spinner) spinner.style.display = 'none';
+  }
   group.classList.toggle('open', keepOpen);
   if(keepOpen&&disclosureKey) _writeActivityDisclosureState(disclosureKey, true);
   const summary=group.querySelector&&group.querySelector('.tool-worklog-summary,.tool-call-group-summary');
@@ -13288,16 +13294,49 @@ function ensureLiveWorklogContainer(blocks, opts){
     ? blocks.querySelector(`.live-worklog[data-live-worklog-shell="1"][data-tool-worklog-key="${CSS.escape(activityKey)}"]`)
     : null;
   if(!worklog) worklog=blocks.querySelector('.live-worklog[data-live-worklog-shell="1"][data-live-activity-current="1"]');
+  let shell = null;
   if(!worklog){
-    worklog=document.createElement('div');
-    worklog.className='live-worklog worklog';
-    worklog.setAttribute('data-live-worklog-shell','1');
+    const isWindow = chatActivityMode() === 'stream_window';
+    worklog = document.createElement('div');
+    if (isWindow) {
+      worklog.className = 'mars-process-window';
+      worklog.innerHTML = `
+        <div class="mars-process-window-header" onclick="this.parentElement.classList.toggle('is-collapsed')">
+          <div class="mars-process-window-title">
+            <span class="mars-quiet-status-spinner"></span>
+            <span>${esc(t('activity_mode_short_stream_window'))}</span>
+          </div>
+          <div class="mars-process-window-actions">
+            <span class="mars-process-window-btn">⌄</span>
+          </div>
+        </div>
+        <div class="mars-process-window-stream live-worklog worklog" data-live-worklog-shell="1">
+          <div class="tool-worklog-list"></div>
+        </div>
+      `;
+      // Redirect worklog reference to the inner stream container for the rest of the logic
+      const shell = worklog.querySelector('.live-worklog');
+      shell.setAttribute('data-live-tool-worklog-group', '1');
+      shell.setAttribute('data-live-tool-call-group', '1');
+      shell.setAttribute('data-live-activity-current', '1');
+      shell.setAttribute('data-tool-worklog-group', '1');
+      shell.setAttribute('data-tool-worklog-key', activityKey || '');
+    } else {
+      worklog.className = 'live-worklog worklog';
+      worklog.setAttribute('data-live-worklog-shell', '1');
+      worklog.setAttribute('data-live-tool-worklog-group', '1');
+      worklog.setAttribute('data-live-tool-call-group', '1');
+      worklog.setAttribute('data-live-activity-current', '1');
+      worklog.setAttribute('data-tool-worklog-group', '1');
+      worklog.setAttribute('data-tool-worklog-key', activityKey || '');
+      worklog.innerHTML = '<div class="tool-worklog-list"></div>';
+    }
     worklog.setAttribute('data-live-tool-worklog-group','1');
     worklog.setAttribute('data-live-tool-call-group','1');
     worklog.setAttribute('data-live-activity-current','1');
     worklog.setAttribute('data-tool-worklog-group','1');
     worklog.setAttribute('data-tool-worklog-key',activityKey||'');
-    worklog.innerHTML='<div class="tool-worklog-list"></div>';
+    
     const anchor=opts.anchor||null;
     const footer=blocks.querySelector('#liveRunStatus');
     if(anchor&&anchor.parentElement===blocks) anchor.insertAdjacentElement('afterend',worklog);
@@ -13309,7 +13348,7 @@ function ensureLiveWorklogContainer(blocks, opts){
   if(opts.anchor) _syncWorklogReasonFromAnchor(worklog, opts.anchor);
   _migrateLegacyLiveActivityGroupsToWorklog(blocks, worklog);
   _syncToolCallGroupSummary(worklog);
-  return worklog;
+  return isWindow ? worklog.querySelector('.live-worklog') : worklog;
 }
 function _migrateLegacyLiveActivityGroupsToWorklog(blocks, worklog){
   if(!blocks||!worklog) return;
