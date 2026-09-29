@@ -7,7 +7,7 @@
 
 // Cache version is injected by the server at request time (routes.py /sw.js handler).
 // Bumps automatically whenever the git commit changes — no manual edits needed.
-const CACHE_NAME = 'hermes-shell-__WEBUI_VERSION__';
+const CACHE_NAME = 'hermes-shell-__WEBUI_VERSION__-mars-projects-v11';
 
 // Static assets that form the app shell.
 //
@@ -20,7 +20,7 @@ const CACHE_NAME = 'hermes-shell-__WEBUI_VERSION__';
 // either the authenticated app shell or login code, and stale cached responses
 // can make valid password submits fail until the user clears browser cache.
 // Navigations populate './' only after a successful non-redirect network load.
-const VQ = '?v=__WEBUI_VERSION__';
+const VQ = '?v=__WEBUI_VERSION__-mars-projects-v11';
 const SHELL_ASSETS = [
   './static/style.css' + VQ,
   './static/pwa-startup.js' + VQ,
@@ -41,6 +41,10 @@ const SHELL_ASSETS = [
   './static/vendor/katex/0.16.22/katex.min.js' + VQ,
   './static/favicon.svg',
   './static/favicon-32.png',
+  './static/favicon-192.png',
+  './static/badge-monochrome-96.png',
+  './static/badge-monochrome-72.png',
+  './static/mars-logo.png',
   './manifest.json',
 ];
 
@@ -110,7 +114,9 @@ self.addEventListener('fetch', (event) => {
     url.pathname.includes('/api/') ||
     url.pathname.includes('/stream') ||
     url.pathname.startsWith('/health') ||
-    url.pathname.includes('/health')
+    url.pathname.includes('/health') ||
+    url.pathname.startsWith('/dashboard') ||
+    url.pathname.startsWith('/music')
   ) {
     return; // let browser handle normally
   }
@@ -187,12 +193,20 @@ self.addEventListener('push', (event) => {
   const title = payload.title || 'Марс';
   const body = payload.body || '';
   const url = payload.url || './';
+  const origin = self.location.origin;
+  const iconUrl = payload.icon
+    ? (payload.icon.startsWith('http') ? payload.icon : new URL(payload.icon, origin).href)
+    : new URL('/static/favicon-192.png', origin).href;
+  const badgeUrl = payload.badge
+    ? (payload.badge.startsWith('http') ? payload.badge : new URL(payload.badge, origin).href)
+    : new URL('/static/badge-monochrome-96.png', origin).href;
   const options = {
     body: body,
-    tag: payload.tag || 'hermes-webui',
+    tag: payload.tag || 'mars-alert',
     renotify: true,
-    icon: 'static/favicon-192.png',
-    badge: 'static/favicon-32.png',
+    icon: iconUrl,
+    badge: badgeUrl,
+    vibrate: [100, 50, 100],
     data: { url: url },
   };
   event.waitUntil((async () => {

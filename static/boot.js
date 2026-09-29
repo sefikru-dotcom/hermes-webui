@@ -713,6 +713,15 @@ function _micToastKeyForRecognitionError(error){
   const ta=$('msg');
   const statusText=status?status.querySelector('.status-text'):null;
   btn.style.display=''; // Show button — browser supports speech recognition or recording fallback
+  requestAnimationFrame(()=>{
+    try {
+      const sAnim = $('btnSend')?.getAnimations()?.find(a => a.animationName === 'mars-ctl-neon-breathe');
+      const mAnim = btn.getAnimations()?.find(a => a.animationName === 'mars-ctl-neon-breathe');
+      if (sAnim && mAnim && sAnim.currentTime != null) {
+        mAnim.currentTime = sAnim.currentTime;
+      }
+    } catch(_) {}
+  });
 
   let recognition=null;
   let mediaRecorder=null;

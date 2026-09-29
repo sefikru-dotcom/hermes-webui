@@ -4611,10 +4611,10 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
     return window._fadeTextEffect===true;
   }
   function _shouldUseTransparentStreamFade(){
-    return typeof isTransparentStream==='function'&&isTransparentStream();
+    return false;
   }
   function _shouldUseLiveProseFade(){
-    return !_streamFadeReduceMotionEnabled() && (_shouldUseStreamFade() || _shouldUseTransparentStreamFade());
+    return !_streamFadeReduceMotionEnabled() && _shouldUseStreamFade();
   }
   function _streamFadeSkipNode(node){
     if(!node||node.nodeType!==1) return false;

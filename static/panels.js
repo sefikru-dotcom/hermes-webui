@@ -43,9 +43,11 @@ const APP_TITLEBAR_KEYS = {
   chat: 'tab_chat', tasks: 'tab_tasks', skills: 'tab_skills',
   memory: 'tab_memory', workspaces: 'tab_workspaces',
   profiles: 'tab_profiles', todos: 'tab_todos', insights: 'tab_insights', logs: 'tab_logs', settings: 'tab_settings',
+  projects: 'tab_projects',
+  music: 'tab_music',
 };
-const MAIN_VIEW_PANELS = ['settings','skills','memory','tasks','kanban','workspaces','profiles','insights','logs','plugin'];
-const MAIN_VIEW_SIDEBAR_PANEL_FALLBACKS = { plugin: 'settings' };
+const MAIN_VIEW_PANELS = ['settings','skills','memory','tasks','kanban','projects','music','workspaces','profiles','insights','logs','plugin'];
+const MAIN_VIEW_SIDEBAR_PANEL_FALLBACKS = { plugin: 'settings', projects: 'chat', music: 'chat' };
 
 /**
  * Update the top app titlebar to reflect the current page or selected conversation.
@@ -381,13 +383,20 @@ function _syncMobileSidebarPanelFromMainView(){
   }
   const panel=_panelFromCurrentMainView();
   if(!panel)return _currentPanel||'chat';
-  const panelEl=$('panel'+panel.charAt(0).toUpperCase()+panel.slice(1));
+  const panelEl=$('panel'+panel.charAt(0).toUpperCase()+panel.slice(1)) || $('panelChat');
   if(!panelEl)return _currentPanel||'chat';
   _currentPanel=panel;
   document.querySelectorAll('[data-panel]').forEach(t=>t.classList.toggle('active',t.dataset.panel===panel));
   document.querySelectorAll('.panel-view').forEach(p=>p.classList.remove('active'));
   panelEl.classList.add('active');
   return panel;
+}
+
+function reloadProjectsFrame() {
+  const f = document.getElementById('projectsIframe');
+  if (f) {
+    try { f.contentWindow.location.reload(); } catch(e) { f.src = '/dashboard/'; }
+  }
 }
 
 async function switchPanel(name, opts = {}) {
@@ -426,11 +435,17 @@ async function switchPanel(name, opts = {}) {
   // stayed at the bottom of this function, a form opened from inside the drawer
   // (e.g. openWorkspaceCreate closing the drawer) would race the deferred
   // re-open and the drawer would win, covering the main-view form.
+  // Fullscreen main-view panels (projects, music) live in <main> and have no
+  // sidebar; on mobile the sidebar drawer must stay closed so the view is visible.
   if (opts.fromRailClick && typeof _isDesktopWidth === 'function' && !_isDesktopWidth()) {
-    const sidebar = document.querySelector('.sidebar');
-    if (sidebar) {
-      sidebar.classList.remove('mobile-session-page');
-      sidebar.classList.add('mobile-panel-drawer', 'mobile-open');
+    if (nextPanel === 'projects' || nextPanel === 'music') {
+      if (typeof closeMobileSidebar === 'function') closeMobileSidebar();
+    } else {
+      const sidebar = document.querySelector('.sidebar');
+      if (sidebar) {
+        sidebar.classList.remove('mobile-session-page');
+        sidebar.classList.add('mobile-panel-drawer', 'mobile-open');
+      }
     }
   }
   // Update nav tabs (rail + mobile sidebar-nav share data-panel)
@@ -449,6 +464,11 @@ async function switchPanel(name, opts = {}) {
       mainEl.classList.toggle('showing-' + p, nextPanel === p);
     });
   }
+  const layoutEl = document.querySelector('.layout');
+  if (layoutEl) {
+    layoutEl.classList.toggle('showing-projects-active', nextPanel === 'projects');
+    layoutEl.classList.toggle('showing-music-active', nextPanel === 'music');
+  }
   // Lazy-load panel data
   if (nextPanel === 'tasks') await loadCrons();
   if (nextPanel === 'kanban') await loadKanban();
@@ -464,6 +484,20 @@ async function switchPanel(name, opts = {}) {
   if (nextPanel === 'settings') {
     switchSettingsSection(_currentSettingsSection);
     loadSettingsPanel();
+  }
+  if (nextPanel === 'projects') {
+    const f = document.getElementById('projectsIframe');
+    if (f && (!f.src || f.src.indexOf('/dashboard') === -1)) {
+      f.src = '/dashboard/';
+    }
+    _closeMobileSidebarAfterPanelSelection();
+  }
+  if (nextPanel === 'music') {
+    const f = document.getElementById('musicIframe');
+    if (f && (!f.src || f.src.indexOf('/music') === -1)) {
+      f.src = '/music/';
+    }
+    _closeMobileSidebarAfterPanelSelection();
   }
   _resyncChatSidebarAfterPanelSwitch();
   if (nextPanel === 'chat' && typeof syncTopbar === 'function') syncTopbar();
@@ -6512,7 +6546,7 @@ function _profileDropdownDataCacheUsable(data){
 }
 
 function _profileDropdownCacheUsable(data){
-  return !!(_profileDropdownDataCacheUsable(data) && data.single_profile_mode !== true);
+  return !!_profileDropdownDataCacheUsable(data);
 }
 
 function _profileDropdownReadStoredCache(){
@@ -6878,8 +6912,8 @@ function renderProfileDropdown(data) {
     };
     dd.appendChild(opt);
   }
-  // Divider + Manage link (hidden in single profile mode)
-  if (!data.single_profile_mode) {
+  // Divider + Manage link (profiles)
+  {
     const div = document.createElement('div'); div.className = 'ws-divider'; dd.appendChild(div);
     const mgmt = document.createElement('div'); mgmt.className = 'profile-opt ws-manage';
     mgmt.innerHTML = `${li('settings',12)} ${esc(t('manage_profiles'))}`;
@@ -6902,7 +6936,7 @@ function toggleProfileDropdown(e) {
   const openGen = ++_profileDropdownOpenGeneration;
   const cached = _profileDropdownBestCachedData();
 
-  if(cached && !cached.single_profile_mode){
+  if(cached){
     renderProfileDropdown(cached);
     _openProfileDropdownShell();
   }else{
@@ -6912,16 +6946,11 @@ function toggleProfileDropdown(e) {
 
   _profileDropdownFetchFresh().then(data => {
     if(openGen !== _profileDropdownOpenGeneration) return;
-    // In single profile mode, don't show profile dropdown at all
-    if (data.single_profile_mode) {
-      closeProfileDropdown();
-      return;
-    }
     renderProfileDropdown(data);
     _openProfileDropdownShell();
   }).catch(e => {
     if(openGen !== _profileDropdownOpenGeneration) return;
-    if(cached && !cached.single_profile_mode){
+    if(cached){
       // Keep the cached menu open; the next click/background refresh will retry.
       return;
     }
@@ -8528,7 +8557,7 @@ function _appearancePayloadFromUi(){
   };
 }
 
-const _ACTIVITY_MODE_CYCLE_ORDER=['stream_window','stream_quiet'];
+const _ACTIVITY_MODE_CYCLE_ORDER=['stream_full','stream_window','stream_quiet'];
 const _ACTIVITY_MODE_LABEL_KEY={
   stream_full:'activity_mode_short_stream_full',
   stream_window:'activity_mode_short_stream_window',

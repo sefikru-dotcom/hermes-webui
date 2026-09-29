@@ -276,6 +276,8 @@ def send_push(
     tag: str = "hermes-webui",
     *,
     urgent: bool = False,
+    icon: str = "/static/favicon-192.png",
+    badge: str = "/static/badge-monochrome-96.png",
 ) -> dict[str, Any]:
     """Deliver a notification to every stored subscription.
 
@@ -311,6 +313,8 @@ def send_push(
             "body": body or "",
             "url": url or "./",
             "tag": tag or "hermes-webui",
+            "icon": icon or "/static/favicon-192.png",
+            "badge": badge or "/static/badge-monochrome-96.png",
             "urgent": bool(urgent),
             "ts": time.time(),
         },

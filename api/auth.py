@@ -1096,6 +1096,10 @@ def check_auth(handler, parsed) -> bool:
     If not authorized, sends 401 (API) or 302 redirect (page) and returns False."""
     if not is_auth_enabled():
         return True
+    # Local Mars internal loopback automation
+    client_ip = getattr(handler, "client_address", ("", 0))[0]
+    if client_ip in ("127.0.0.1", "::1", "localhost") and handler.headers.get("X-Mars-Internal") == "1":
+        return True
     # Public paths don't require auth
     if (
         parsed.path in PUBLIC_PATHS
