@@ -2932,6 +2932,7 @@ from api.config import (
     get_reasoning_status,
     set_reasoning_display,
     set_reasoning_effort,
+    set_model_reasoning_override,
     create_stream_channel,
     get_config,
     get_webui_session_save_mode,
@@ -15554,6 +15555,16 @@ def handle_post(handler, parsed) -> bool:
                 model_id = str(body.get("model") or "").strip() or None
                 provider_id = str(body.get("provider") or "").strip() or None
                 base_url = str(body.get("base_url") or "").strip() or None
+                # Mars: scope=model pins the level to the picked model
+                # (agent.reasoning_overrides) instead of the global default, so
+                # the model picker's inline ladder can set a level per model.
+                if str(body.get("scope") or "").strip().lower() == "model":
+                    if not model_id:
+                        return bad(handler, "reasoning: scope=model requires 'model'")
+                    return j(
+                        handler,
+                        set_model_reasoning_override(effort, model_id=model_id),
+                    )
                 return j(
                     handler,
                     set_reasoning_effort(
@@ -24243,6 +24254,9 @@ def _handle_chat_start(handler, body, diag=None):
             if "model_provider" in body
             else getattr(s, "model_provider", None)
         )
+        if os.environ.get("HERMES_WEBUI_ISOLATED_PROFILE") == "1" or active_profile == "sergey" or getattr(s, "profile", None) == "sergey":
+            requested_model = "deepseek-flash"
+            requested_provider = "custom"
         _pp_provider, _pp_default, _pp_cfg = _read_profile_model_config(s, requested_provider)
         explicit_model_pick = bool(body.get("explicit_model_pick"))
         moa_config = None
@@ -24266,6 +24280,9 @@ def _handle_chat_start(handler, body, diag=None):
             profile_config=_pp_cfg,
             explicit_model_pick=explicit_model_pick,
         )
+        if os.environ.get("HERMES_WEBUI_ISOLATED_PROFILE") == "1" or active_profile == "sergey" or getattr(s, "profile", None) == "sergey":
+            model = "deepseek-flash"
+            model_provider = "custom"
         # #5979: record a SIGNATURE of the deliberately-picked model+provider so
         # the streaming resolver can preserve a custom-proxy vendor namespace on a
         # cold catalog — but ONLY while the routing context still matches. On a

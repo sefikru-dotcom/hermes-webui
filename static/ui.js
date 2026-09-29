@@ -4305,6 +4305,222 @@ function _mountSearchableModelSelect(opts={}){
   return {searchInput,selectEl,customInput,customButton};
 }
 
+// ── Mars: thinking level next to each model in the picker ──────────────────
+// The composer reasoning chip sets ONE session-wide level. This block adds the
+// level choice inline on every model row, so a model and its thinking level are
+// picked in the same list. A level picked here is pinned per model through
+// POST /api/reasoning {scope:'model'} → agent.reasoning_overrides, which the
+// core resolves as session override > per-model override > global default.
+let _marsModelReasoningCache=Object.create(null);   // 'provider::model' -> /api/reasoning payload
+let _marsModelReasoningOverrides={};                // '<model>' -> '<effort>' (agent.reasoning_overrides)
+let _marsReasoningOpenRow=null;                     // currently expanded row (one at a time)
+
+function _marsBareModelId(value){
+  const raw=String(value||'').trim();
+  if(raw.startsWith('@')&&raw.includes(':')) return raw.slice(raw.lastIndexOf(':')+1);
+  return raw;
+}
+function _marsReasoningProvider(modelValue,providerId){
+  return String(providerId||(typeof _providerFromModelValue==='function'?_providerFromModelValue(modelValue):'')||'').trim();
+}
+function _marsReasoningCacheKey(model,provider){
+  return String(provider||'')+'::'+String(model||'');
+}
+// Spelling-tolerant lookup (claude-fable-5.1 == claude-fable-5-1), matching how
+// the core matches agent.reasoning_overrides keys.
+function _marsReasoningOverrideFor(model){
+  const target=String(model||'').trim();
+  if(!target) return '';
+  const norm=function(s){return String(s||'').trim().toLowerCase().replace(/[\s._-]+/g,'-');};
+  const keys=Object.keys(_marsModelReasoningOverrides||{});
+  const hit=keys.find(function(k){return norm(k)===norm(target);});
+  return hit?String(_marsModelReasoningOverrides[hit]||''):'';
+}
+function _marsReasoningLabel(effort){
+  const eff=String(effort||'').trim().toLowerCase();
+  if(!eff) return t('model_reasoning_auto');
+  return (typeof _formatReasoningEffortLabel==='function')?_formatReasoningEffortLabel(eff):eff;
+}
+function _marsReasoningSupported(status){
+  const out=[];
+  const supported=Array.isArray(status&&status.supported_efforts)?status.supported_efforts:[];
+  supported.forEach(function(level){
+    const eff=String(level||'').trim().toLowerCase();
+    if(eff&&out.indexOf(eff)<0) out.push(eff);
+  });
+  // A model that only accepts the thinking on/off toggle (no effort ladder)
+  // still gets an operable control: Auto (on) + None (off).
+  if(!out.length&&status&&status.supports_thinking_toggle) out.push('none');
+  return out;
+}
+function _marsFetchModelReasoning(model,provider){
+  const key=_marsReasoningCacheKey(model,provider);
+  if(_marsModelReasoningCache[key]) return Promise.resolve(_marsModelReasoningCache[key]);
+  const params=new URLSearchParams();
+  if(model) params.set('model',model);
+  if(provider) params.set('provider',provider);
+  return api('/api/reasoning'+(params.size?'?'+params.toString():'')).then(function(st){
+    const payload=st||{};
+    _marsModelReasoningCache[key]=payload;
+    if(payload.model_overrides&&typeof payload.model_overrides==='object'){
+      _marsModelReasoningOverrides=payload.model_overrides;
+    }
+    return payload;
+  });
+}
+
+// Paint one row's level list: 'Auto' (clears the pin) plus every level the model
+// actually supports. Pinned level gets the selected state.
+function _marsPaintEffortList(list,status,pill,bare){
+  if(!list) return;
+  const levels=_marsReasoningSupported(status);
+  const pinned=_marsReasoningOverrideFor(bare);
+  const entries=[{effort:'',label:t('model_reasoning_auto')}];
+  levels.forEach(function(level){entries.push({effort:level,label:_marsReasoningLabel(level)});});
+  list.innerHTML='';
+  entries.forEach(function(entry){
+    const btn=document.createElement('button');
+    btn.type='button';
+    btn.className='model-effort-level'+((pinned||'')===(entry.effort||'')?' selected':'');
+    btn.dataset.effort=entry.effort;
+    btn.setAttribute('role','option');
+    btn.setAttribute('aria-selected',((pinned||'')===(entry.effort||'')).toString());
+    btn.textContent=entry.label;
+    list.appendChild(btn);
+  });
+  if(pill){
+    const label=pill.querySelector('.model-effort-pill-label');
+    if(label) label.textContent=_marsReasoningLabel(pinned);
+    pill.classList.toggle('is-pinned',!!pinned);
+    pill.title=t('model_reasoning_row_title');
+    pill.classList.remove('is-loading');
+  }
+}
+
+function _marsCloseReasoningRows(exceptRow){
+  const open=_marsReasoningOpenRow;
+  if(open&&open!==exceptRow){
+    const list=open._marsEffortList;
+    if(list) list.hidden=true;
+    const pill=open.querySelector('.model-effort-pill');
+    if(pill) pill.setAttribute('aria-expanded','false');
+    _marsReasoningOpenRow=null;
+  }
+}
+
+function _marsToggleReasoningRow(row,list,pill,bare,provider){
+  if(!row||!list||!pill) return;
+  const model=(row.dataset&&row.dataset.marsModel)||'';
+  if(_marsReasoningOpenRow===row&&!list.hidden){
+    list.hidden=true;
+    pill.setAttribute('aria-expanded','false');
+    _marsReasoningOpenRow=null;
+    return;
+  }
+  _marsCloseReasoningRows(row);
+  row._marsEffortList=list;
+  _marsReasoningOpenRow=row;
+  list.hidden=false;
+  list.innerHTML='<div class="model-effort-loading">…</div>';
+  pill.setAttribute('aria-expanded','true');
+  pill.classList.add('is-loading');
+  _marsFetchModelReasoning(model,provider).then(function(status){
+    if(_marsReasoningOpenRow!==row){
+      // The menu closed (or another row opened) while the lookup was in flight.
+      return;
+    }
+    if(!_marsReasoningSupported(status).length&&!(status&&status.supports_thinking_toggle)){
+      list.innerHTML='<div class="model-effort-empty">'+esc(t('model_reasoning_unsupported'))+'</div>';
+      pill.classList.remove('is-loading');
+      return;
+    }
+    _marsPaintEffortList(list,status,pill,bare);
+  }).catch(function(){
+    if(_marsReasoningOpenRow===row){
+      list.innerHTML='<div class="model-effort-empty">'+esc(t('model_reasoning_failed'))+'</div>';
+      pill.classList.remove('is-loading');
+    }
+  });
+}
+
+function _marsRefreshActiveChip(model){
+  const sel=$('modelSelect');
+  const active=sel?(sel.value||''):'';
+  if(!sel||_marsBareModelId(active)!==model) return;
+  if(typeof fetchReasoningChip!=='function') return;
+  // Force a chip refetch: the cached key is unchanged (same model/provider) but
+  // the effective level just changed, and the chip must show what will be sent.
+  _lastReasoningFetchKey=null;
+  fetchReasoningChip();
+}
+
+function _marsSetModelReasoning(model,provider,effort,pill,list,row){
+  if(!model) return;
+  api('/api/reasoning',{
+    method:'POST',
+    body:JSON.stringify({effort:effort||'',model:model,provider:provider||'',scope:'model'})
+  }).then(function(status){
+    if(status&&status.model_overrides&&typeof status.model_overrides==='object'){
+      _marsModelReasoningOverrides=status.model_overrides;
+    }
+    // Keep the per-model cache coherent with the write.
+    Object.keys(_marsModelReasoningCache).forEach(function(key){
+      const cached=_marsModelReasoningCache[key];
+      if(cached&&typeof cached==='object') cached.model_overrides=_marsModelReasoningOverrides;
+    });
+    _marsPaintEffortList(list,status,pill,model);
+    if(list) list.hidden=true;
+    if(pill) pill.setAttribute('aria-expanded','false');
+    _marsReasoningOpenRow=null;
+    _marsRefreshActiveChip(model);
+    showToast('🧠 '+t('model_reasoning_saved',model,_marsReasoningLabel(effort)));
+  }).catch(function(){
+    showToast('🧠 '+t('model_reasoning_failed'));
+  });
+}
+
+// Add the level pill + inline ladder to a model-option row. Kept out of the row
+// markup builders so every picker (composer + settings) shares one control.
+function _marsAttachReasoning(row,modelValue,providerId){
+  if(!row) return;
+  const model=String(modelValue||'').trim();
+  if(!model) return;
+  const bare=_marsBareModelId(model);
+  const provider=_marsReasoningProvider(model,providerId);
+  row.dataset.marsModel=model;
+  row.dataset.marsProvider=provider;
+  const holder=document.createElement('div');
+  holder.className='model-opt-reasoning';
+  holder.innerHTML='<button type="button" class="model-effort-pill" aria-haspopup="listbox" aria-expanded="false">'
+    +'<span class="model-effort-pill-icon" aria-hidden="true">\u25CF</span>'
+    +'<span class="model-effort-pill-label">'+esc(_marsReasoningLabel(_marsReasoningOverrideFor(bare)))+'</span>'
+    +'</button>'
+    +'<div class="model-effort-list" role="listbox" hidden></div>';
+  row.appendChild(holder);
+  const pill=holder.querySelector('.model-effort-pill');
+  const list=holder.querySelector('.model-effort-list');
+  pill.title=t('model_reasoning_row_title');
+  pill.addEventListener('click',function(event){
+    event.preventDefault();
+    event.stopPropagation();
+    _marsToggleReasoningRow(row,list,pill,bare,provider);
+  });
+  list.addEventListener('click',function(event){
+    event.preventDefault();
+    event.stopPropagation();
+    const btn=event.target.closest('.model-effort-level');
+    if(!btn) return;
+    _marsSetModelReasoning(model,provider,btn.dataset.effort||'',pill,list,row);
+  });
+  // The active model's real level is one cached GET away — learn it up front so
+  // its pill shows the effective level instead of a generic 'Auto'.
+  if(row.classList.contains('active')){
+    _marsFetchModelReasoning(model,provider).then(function(status){
+      _marsPaintEffortList(list,status,pill,bare);
+    }).catch(function(){});
+  }
+}
+
 function renderModelDropdown(){
   const opts=arguments[0]||{};
   const dd=$(opts.dropdownId||'composerModelDropdown');
@@ -4477,6 +4693,7 @@ function renderModelDropdown(){
     const providerChip=(_plainGroup&&withProviderChip)?`<span class="model-opt-provider">${esc(_plainGroup)}</span>`:'';
     row.innerHTML=`<div class="model-opt-top"><span class="model-opt-name">${esc(m.name)}</span>${badgeHtml}${_selectedModelBadge(m)}${providerChip}</div><span class="model-opt-id">${esc(m.id)}</span>`;
     row.onclick=()=>selectFromDropdown(m.value,m.providerId||(m.badge&&m.badge.provider)||null);
+    _marsAttachReasoning(row,m.value,m.providerId||(m.badge&&m.badge.provider)||null);
     return row;
   };
   const _expandOverflowGroup=(groupMetaEntry)=>{
@@ -4596,6 +4813,7 @@ function renderModelDropdown(){
     const providerChip=(_plainGroup&&!_underOwnHeading)?`<span class="model-opt-provider">${esc(_plainGroup)}</span>`:'';
     row.innerHTML=`<div class="model-opt-top"><span class="model-opt-name">${esc(m.name)}</span>${badgeHtml}${_selectedModelBadge(m)}${providerChip}</div><span class="model-opt-id">${esc(m.id)}</span>`;
     row.onclick=()=>selectFromDropdown(m.value,m.providerId||(m.badge&&m.badge.provider)||null);
+    _marsAttachReasoning(row,m.value,m.providerId||(m.badge&&m.badge.provider)||null);
     return row;
   };
   const _filterModels=(term)=>{
@@ -4701,6 +4919,7 @@ function renderModelDropdown(){
         const badgeHtml=m.badge?`<span class="model-opt-badge model-opt-badge--${esc(m.badge.role||'configured')}">${esc(badgeLabel)}</span>`:'';
         row.innerHTML=`<div class="model-opt-top"><span class="model-opt-name">${esc(modelName)}</span>${badgeHtml}${_selectedModelBadge(m)}</div><span class="model-opt-id">${esc(m.id)}</span>`;
         row.onclick=()=>selectFromDropdown(m.value,(m.badge&&m.badge.provider)||m.providerId||null);
+        _marsAttachReasoning(row,m.value,(m.badge&&m.badge.provider)||m.providerId||null);
         dd.appendChild(row);
       }
     }
@@ -5350,6 +5569,18 @@ let _lastReasoningFetchKey=null;
 // a different agent.reasoning_effort) — #4650 review.
 let _reasoningFetchSeq=0;
 
+// Mars: the level a model will actually send is a per-model pin (set from the
+// model picker) when one exists, else the global default. The chip label must
+// show the effective one, or it lies about the next turn.
+function _marsReasoningPinnedForQuery(key){
+  try{
+    const params=new URLSearchParams(String(key||'').replace(/^\?/,''));
+    const model=params.get('model')||'';
+    if(!model) return '';
+    return _marsReasoningOverrideFor(_marsBareModelId(model));
+  }catch(_marsErr){ return ''; }
+}
+
 function fetchReasoningChip(keyOverride){
   // Set the cache key OPTIMISTICALLY before the request so rapid routine syncs
   // while this GET is in flight short-circuit instead of re-dispatching (that
@@ -5361,7 +5592,8 @@ function fetchReasoningChip(keyOverride){
     // Ignore a stale/superseded response: only the most recent dispatch may
     // apply, so an older in-flight GET can't poison the current chip (#4650).
     if(seq!==_reasoningFetchSeq) return;
-    _applyReasoningChip((st&&st.reasoning_effort)||'', st||{});
+    if(st&&st.model_overrides&&typeof st.model_overrides==='object') _marsModelReasoningOverrides=st.model_overrides;
+    _applyReasoningChip(_marsReasoningPinnedForQuery(key)||((st&&st.reasoning_effort)||''), st||{});
   }).catch(function(){
     // Same staleness guard on failure: a stale error must neither hide the chip
     // nor clear a newer fetch's key. Only the latest dispatch clears the key so
@@ -5480,8 +5712,20 @@ document.addEventListener('click',function(e){
     // (#6219 round-3)
     if(opt){
       const payload=Object.assign({effort:effort},_reasoningEffortContext());
+      // Mars: if the active model carries a per-model pin (set from the model
+      // picker), the chip must edit that pin — otherwise a level picked here
+      // would be silently overridden by the pin at runtime.
+      const _ctxModel=String((payload&&payload.model)||'');
+      if(_ctxModel&&_marsReasoningOverrideFor(_marsBareModelId(_ctxModel))){
+        payload.model=_marsBareModelId(_ctxModel);
+        payload.scope='model';
+      }
       api('/api/reasoning',{method:'POST',body:JSON.stringify(payload)})
         .then(function(st){
+          if(st&&st.model_overrides&&typeof st.model_overrides==='object'){
+            _marsModelReasoningOverrides=st.model_overrides;
+            _marsModelReasoningCache=Object.create(null);
+          }
           // For Default (effort=''), the returned reasoning_effort is '' (clear)
           // — display 'Default' rather than an empty toast.
           const effVal=(st&&st.reasoning_effort)||effort;
@@ -8492,6 +8736,13 @@ function updateSendBtn(){
     requestAnimationFrame(()=>btn.classList.add('visible'));
   } else if(action==='disabled'){
     btn.classList.remove('visible');
+    try {
+      const sAnim = btn.getAnimations()?.find(a => a.animationName === 'mars-ctl-neon-breathe');
+      const mAnim = $('btnMic')?.getAnimations()?.find(a => a.animationName === 'mars-ctl-neon-breathe');
+      if (sAnim && mAnim && mAnim.currentTime != null) {
+        sAnim.currentTime = mAnim.currentTime;
+      }
+    } catch(_) {}
   }
 }
 
@@ -11631,6 +11882,7 @@ function _restoreWorklogDetailDisclosureState(root, state){
 }
 function _thinkingCardHtml(text, open){
   const clean=_sanitizeThinkingDisplayText(text);
+  if(!clean || !String(clean).trim()) return '';
   const copyBtn=`<button class="thinking-copy-btn" onclick="event.stopPropagation();_copyThinkingText(this)" title="${t('copy')}" aria-label="${t('copy')}">${li('copy',12)}</button>`;
   const collapsed=isThinkingCollapsed();
   const shouldOpen=!collapsed&&(!!open||_worklogDetailsExpandedDefault());
@@ -11651,8 +11903,15 @@ function _thinkingActivityNode(text, open, disclosureKey){
     row.setAttribute('data-live-thinking','1');
   }
   if(disclosureKey) row.setAttribute('data-thinking-key', String(disclosureKey));
-  row.innerHTML=_thinkingCardHtml(text, open);
-  _renderThinkingInto(row,text);
+  const html=_thinkingCardHtml(text, open);
+  if(html){
+    row.innerHTML=html;
+    _renderThinkingInto(row,text);
+  }else if(open){
+    row.innerHTML='<div class="thinking"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>';
+  }else{
+    row.style.display='none';
+  }
   return row;
 }
 function chatActivityMode(){
@@ -20608,7 +20867,8 @@ function finalizeThinkingCard(){
     // If the row is still just a spinner (no thinking content rendered),
     // remove it entirely — it's the initial waiting dots.
     const hasContent=!!row.querySelector('.thinking-card');
-    if(!hasContent && row.getAttribute('data-thinking-active')==='1'){
+    const emptyPre = row.querySelector('.thinking-card-body pre');
+    if((!hasContent || (emptyPre && !emptyPre.textContent.trim())) && row.getAttribute('data-thinking-active')==='1'){
       row.remove();
       return;
     }

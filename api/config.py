@@ -4225,6 +4225,49 @@ def _configured_reasoning_effort_lists(provider_entry, model_id: str) -> list:
     return configured_lists
 
 
+def _mars_infer_custom_provider_slug(model_id: str, base_url: str | None) -> str:
+    """Mars: map a generic bare ``custom`` provider id to its concrete entry.
+
+    Legacy WebUI sessions and older configs store ``provider: custom`` (bare).
+    That id matches no ``custom_providers`` entry, so the reasoning ladder
+    resolves empty and the effort control silently disappears even though the
+    same model has a configured ladder under ``custom:<slug>``. Resolution order:
+    provider-qualified model id, then base_url, then a single unambiguous
+    model-id match across the configured custom providers.
+    """
+    entries = _custom_provider_entries()
+    if not entries:
+        return ""
+
+    parsed = _parse_provider_qualified_model_id(model_id)
+    if parsed:
+        _bare, provider_hint = parsed
+        hint = str(provider_hint or "").strip().lower()
+        if hint.startswith("custom:"):
+            return hint
+
+    resolved_base = _normalize_base_url_for_match(base_url)
+    if resolved_base:
+        for entry in entries:
+            if _normalize_base_url_for_match(entry.get("base_url")) == resolved_base:
+                slug = _custom_provider_slug_from_name(entry.get("name"))
+                if slug:
+                    return slug
+
+    model_key = str(model_id or "").strip().lower()
+    if not model_key or model_key.startswith("@"):
+        return ""
+    matches: list[str] = []
+    for entry in entries:
+        slugs = _configured_model_ids(entry.get("models"))
+        if any(str(candidate).strip().lower() == model_key for candidate in slugs):
+            slug = _custom_provider_slug_from_name(entry.get("name"))
+            if slug:
+                matches.append(slug)
+    unique = {slug for slug in matches}
+    return matches[0] if len(unique) == 1 else ""
+
+
 def _resolve_model_reasoning_efforts_impl(
     model_id: str | None = None,
     provider_id: str | None = None,
@@ -4244,6 +4287,11 @@ def _resolve_model_reasoning_efforts_impl(
             provider = str((cfg.get("model") or {}).get("provider") or "").strip().lower()
 
     provider = _resolve_provider_alias(provider)
+
+    # Mars: a bare 'custom' id carries no configured ladder — resolve it to the
+    # concrete custom provider entry so the effort control doesn't vanish.
+    if provider == "custom":
+        provider = _mars_infer_custom_provider_slug(model, resolved_base_url) or provider
 
     # IDE-copilot providers never expose reasoning effort options.
     # Guard early so a stray config entry can't override this.
@@ -4507,6 +4555,10 @@ def get_reasoning_status(
         # effort-capable model OR a ZAI GLM model that accepts the thinking
         # toggle but not the effort ladder. False hides the chip entirely.
         "supports_thinking_toggle": supports_thinking_toggle,
+        # Mars: per-model pinned levels from agent.reasoning_overrides. The model
+        # picker renders its inline effort ladder from this map so a level chosen
+        # next to a model in the list survives across sessions and devices.
+        "model_overrides": get_model_reasoning_overrides(),
     }
 
 
@@ -4656,6 +4708,98 @@ def set_reasoning_effort(
         provider_id=provider_id,
         base_url=base_url,
     )
+
+
+def get_model_reasoning_overrides() -> dict:
+    """Return ``agent.reasoning_overrides`` (per-model pinned levels) as a flat map.
+
+    Keys are the configured model ids exactly as they appear in config.yaml;
+    values are validated effort levels. Malformed entries are skipped rather
+    than raising, so one bad hand-edited key can't blank the whole picker.
+    """
+    config_data = _load_yaml_config_file(_get_config_path())
+    agent_cfg = config_data.get("agent") or {}
+    raw = agent_cfg.get("reasoning_overrides") if isinstance(agent_cfg, dict) else None
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, str] = {}
+    for key, value in raw.items():
+        level = str(value or "").strip().lower()
+        model_key = str(key or "").strip()
+        if not model_key or not level:
+            continue
+        if level != "none" and level not in VALID_REASONING_EFFORTS:
+            continue
+        out[model_key] = level
+    return out
+
+
+def _match_reasoning_override_key(existing: dict, model_id: str) -> str | None:
+    """Find the stored override key for *model_id* (spelling-tolerant).
+
+    Mirrors the core's spelling tolerance (``claude-fable-5.1`` ==
+    ``claude-fable-5-1``) so a level pinned in the picker updates the same key
+    the core reads instead of creating a near-duplicate.
+    """
+
+    def _norm(value: str) -> str:
+        return re.sub(r"[-_.\s]+", "-", str(value or "").strip().lower())
+
+    target = _norm(model_id)
+    if not target:
+        return None
+    for key in existing:
+        if _norm(key) == target:
+            return key
+    return None
+
+
+def set_model_reasoning_override(effort: str, *, model_id: str) -> dict:
+    """Persist a per-model reasoning level into ``agent.reasoning_overrides``.
+
+    Mars: the model picker offers the effort ladder inline on each model row, so
+    a level is chosen together with the model. The core resolves effort as
+    session override > ``agent.reasoning_overrides`` (per model) > global, which
+    is why this writes the per-model map instead of the global key.
+
+    An empty *effort* removes the pin (the model falls back to the global level).
+    Raises ``ValueError`` for an unknown level or a missing model id.
+    """
+    model_key = str(model_id or "").strip()
+    if not model_key:
+        raise ValueError("model is required for a per-model reasoning level")
+    raw = str(effort or "").strip().lower()
+    if raw and raw != "none" and raw not in VALID_REASONING_EFFORTS:
+        raise ValueError(
+            f"Unknown reasoning effort '{effort}'. "
+            f"Valid: none, {', '.join(VALID_REASONING_EFFORTS)}."
+        )
+    config_path = _get_config_path()
+    with _cfg_lock:
+        config_data = _load_yaml_config_file(config_path)
+        agent_cfg = config_data.get("agent")
+        if not isinstance(agent_cfg, dict):
+            agent_cfg = {}
+        overrides = agent_cfg.get("reasoning_overrides")
+        if not isinstance(overrides, dict):
+            overrides = {}
+        # Drop near-duplicate spellings of the same model before writing, so the
+        # map cannot accumulate 'gpt-5.4' and 'gpt-5-4' entries that both match.
+        existing_key = _match_reasoning_override_key(overrides, model_key)
+        if existing_key and existing_key != model_key:
+            overrides.pop(existing_key, None)
+        if raw:
+            overrides[model_key] = raw
+        else:
+            overrides.pop(model_key, None)
+        if overrides:
+            agent_cfg["reasoning_overrides"] = overrides
+        else:
+            agent_cfg.pop("reasoning_overrides", None)
+        config_data["agent"] = agent_cfg
+        _save_yaml_config_file(config_path, config_data)
+    reload_config()
+    return get_reasoning_status(model_id=model_key)
 
 
 def _public_advanced_model_options(model_cfg: dict) -> dict:
@@ -8476,18 +8620,10 @@ def get_available_models(*, prefer_cache: bool = False, force_refresh: bool = Fa
         _deduplicate_model_ids(groups)
 
         # Defense-in-depth: drop any optgroup that ended up with zero models
-        # — those are pure UI noise. A zero-model group typically means a
-        # detection path added an id that has no static catalog AND the
-        # live-fetch returned empty (#1568 — the user's
-        # ``providers.opencode_go`` config-key path produced an empty
-        # ``Opencode_Go`` group at the end of the picker before this fix).
-        # Custom providers from ``custom_providers`` config are exempt —
-        # they may legitimately render with zero entries when the user
-        # hasn't filled in models yet but wants the card visible.
         groups = [
             g for g in groups
-            if g.get("models")
-            or (g.get("provider_id") or "").startswith("custom:")
+            if (g.get("models") or (g.get("provider_id") or "").startswith("custom:"))
+            and not (g.get("provider_id") or "").startswith("opencode-")
         ]
 
         # Sort groups: active provider first, then custom:* providers,
