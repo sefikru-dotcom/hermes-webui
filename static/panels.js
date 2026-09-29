@@ -344,6 +344,23 @@ function _closeMobileSidebarAfterPanelSelection(){
   closeMobileSidebar();
 }
 
+// Any gesture whose outcome is "the user is now looking at the conversation"
+// (+ / new chat, picking a session from the list) must first bring the chat
+// main-view back to the front. A fullscreen panel (Music, Projects, Settings…)
+// keeps `main.main` carrying showing-<panel>, which hides #mainChat — so without
+// this the user tapped "+" or a session, the drawer closed, and they kept staring
+// at the player: the classic "переход в чат не работает" report.
+function _ensureChatPanelVisible(){
+  try{
+    const mainEl=document.querySelector('main.main');
+    if(!mainEl)return false;
+    const showing=Array.from(mainEl.classList).find(c=>c.startsWith('showing-'));
+    if(!showing)return false;              // уже чат (класса showing-chat не существует)
+    if(typeof switchPanel==='function')switchPanel('chat');
+    return true;
+  }catch(_){return false;}
+}
+
 function _panelFromCurrentMainView(){
   const mainEl=document.querySelector('main.main');
   if(!mainEl)return _currentPanel||'chat';
@@ -447,6 +464,15 @@ async function switchPanel(name, opts = {}) {
         sidebar.classList.add('mobile-panel-drawer', 'mobile-open');
       }
     }
+  }
+  // Mobile: the chat view lives in <main>, while the sidebar is a fixed 100vw
+  // overlay (z-index 200). Switching to Chat must therefore ALWAYS dismiss the
+  // drawer — regardless of how the switch was triggered. Otherwise the drawer
+  // stays open on top of the chat, the session list covers the whole screen,
+  // and "переход в чат" looks broken. Covers the drawer button, edge swipe,
+  // keyboard shortcuts and any programmatic switch back to chat.
+  if (nextPanel === 'chat' && typeof _isDesktopWidth === 'function' && !_isDesktopWidth()) {
+    if (typeof closeMobileSidebar === 'function') closeMobileSidebar();
   }
   // Update nav tabs (rail + mobile sidebar-nav share data-panel)
   document.querySelectorAll('[data-panel]').forEach(t => t.classList.toggle('active', t.dataset.panel === nextPanel));

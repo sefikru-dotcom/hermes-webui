@@ -2108,6 +2108,10 @@ function _currentSessionIsReusableEmptyChat(){
 $('fileInput').onchange=e=>{addFiles(Array.from(e.target.files));e.target.value='';};
 if($('cameraInput')) $('cameraInput').onchange=e=>{addFiles(Array.from(e.target.files));e.target.value='';};
 $('btnNewChat').onclick=async()=>{
+  // The "+" (titlebar and panel) means "give me the conversation": surface the
+  // chat main-view before anything else, otherwise tapping it while Music or
+  // Projects is on screen creates the session behind that panel.
+  if(typeof _ensureChatPanelVisible==='function')_ensureChatPanelVisible();
   // If the current session has no messages AND nothing is in flight, just focus
   // the composer rather than creating another empty session that will clutter the
   // sidebar list (#1171).

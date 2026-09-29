@@ -2507,6 +2507,9 @@ async function _openSidebarSession(session, loadOpts={}){
   }
   // #5409: close mobile sidebar AFTER veto guard passes — only close if open proceeds.
   if(typeof closeMobileSidebar==='function')closeMobileSidebar();
+  // Opening a session must also leave any fullscreen main-view panel (Music,
+  // Projects, Settings) — the drawer closing alone left the chat hidden behind it.
+  if(typeof _ensureChatPanelVisible==='function')_ensureChatPanelVisible();
   if(_isExternalSession(session)){
     try{await api('/api/session/import_cli',{method:'POST',body:JSON.stringify(_externalImportPayload(session))});}
     catch(_e){ /* import failed -- fall through to read-only view */ }

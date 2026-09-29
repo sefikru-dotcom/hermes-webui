@@ -7,7 +7,8 @@
 
 // Cache version is injected by the server at request time (routes.py /sw.js handler).
 // Bumps automatically whenever the git commit changes — no manual edits needed.
-const CACHE_NAME = 'hermes-shell-__WEBUI_VERSION__-mars-projects-v11';
+// MANUAL BUMP: mars-chatnav-v12 — force clients off the pre-chat-navigation shell cache.
+const CACHE_NAME = 'hermes-shell-__WEBUI_VERSION__-mars-chatnav-v12';
 
 // Static assets that form the app shell.
 //
@@ -20,7 +21,7 @@ const CACHE_NAME = 'hermes-shell-__WEBUI_VERSION__-mars-projects-v11';
 // either the authenticated app shell or login code, and stale cached responses
 // can make valid password submits fail until the user clears browser cache.
 // Navigations populate './' only after a successful non-redirect network load.
-const VQ = '?v=__WEBUI_VERSION__-mars-projects-v11';
+const VQ = '?v=__WEBUI_VERSION__-mars-chatnav-v12';
 const SHELL_ASSETS = [
   './static/style.css' + VQ,
   './static/pwa-startup.js' + VQ,
