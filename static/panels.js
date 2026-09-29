@@ -465,15 +465,6 @@ async function switchPanel(name, opts = {}) {
       }
     }
   }
-  // Mobile: the chat view lives in <main>, while the sidebar is a fixed 100vw
-  // overlay (z-index 200). Switching to Chat must therefore ALWAYS dismiss the
-  // drawer — regardless of how the switch was triggered. Otherwise the drawer
-  // stays open on top of the chat, the session list covers the whole screen,
-  // and "переход в чат" looks broken. Covers the drawer button, edge swipe,
-  // keyboard shortcuts and any programmatic switch back to chat.
-  if (nextPanel === 'chat' && typeof _isDesktopWidth === 'function' && !_isDesktopWidth()) {
-    if (typeof closeMobileSidebar === 'function') closeMobileSidebar();
-  }
   // Update nav tabs (rail + mobile sidebar-nav share data-panel)
   document.querySelectorAll('[data-panel]').forEach(t => t.classList.toggle('active', t.dataset.panel === nextPanel));
   // Refresh aria-expanded on the newly-active rail button to mirror sidebar state.
