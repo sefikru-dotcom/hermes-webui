@@ -2256,6 +2256,8 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
   // streaming-markdown state: incremental DOM-building parser per segment
   let _smdParser=null;     // current smd parser instance (null until first content)
   let _smdWrittenLen=0;    // how many chars of displayText have been fed to smd parser
+  let _smdWriteRaf=0;      // batch streaming tokens to rAF for rendering stability
+  let _smdWritePendingText='';
   let _smdWrittenText='';  // exact displayText snapshot used for prefix-alignment checks
   let _streamingKatexTimer=null; // throttles live KaTeX scans while smd writes deltas
   // On reconnect, the assistantBody already has partial smd-rendered content.
@@ -4484,6 +4486,16 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
   // Helper: feed new displayText delta to the smd parser.
   // Only feeds chars beyond what has already been written (_smdWrittenLen).
   function _smdWrite(displayText, fade=false){
+    if(!_smdParser||!window.smd) return;
+    _smdWritePendingText=String(displayText||'');
+    if(_smdWriteRaf) return;
+    _smdWriteRaf=requestAnimationFrame(()=>{
+      _smdWriteRaf=0;
+      const text=_smdWritePendingText;
+      _smdWriteSync(text, fade);
+    });
+  }
+  function _smdWriteSync(displayText, fade=false){
     if(!_smdParser||!window.smd) return;
     displayText=String(displayText||'');
     let _rewindPrevRendered='';

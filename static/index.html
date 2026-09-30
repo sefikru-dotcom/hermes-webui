@@ -72,7 +72,7 @@
     };
   }
 })()</script>
-<link rel="stylesheet" href="static/style.css?v=__WEBUI_VERSION__-mars-effort1">
+<link rel="stylesheet" href="static/style.css?v=__WEBUI_VERSION__-mars-effort2">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" integrity="sha384-LJcOxlx9IMbNXDqJ2axpfEQKkAYbFjJfhXexLfiRJhjDU81mzgkiQq8rkV0j6dVh" crossorigin="anonymous">
   <!-- KaTeX math rendering CSS (loaded eagerly from vendored assets to prevent font CSP noise) -->
   <link rel="stylesheet" href="static/vendor/katex/0.16.22/katex.min.css">
@@ -131,11 +131,28 @@
   </button>
   </div>
   <div class="app-titlebar-inner">
-    <span class="app-titlebar-icon" aria-hidden="true"><img src="static/mars-logo.png?v=mars4" width="20" height="20" alt="Марс" class="mars-tb-planet"></span>
-    <span class="app-titlebar-title" id="appTitlebarTitle">Марс</span>
+    <span class="app-titlebar-icon" aria-hidden="true" onclick="switchPanel('chat')" style="cursor:pointer;"><img src="static/mars-logo.png?v=mars4" width="20" height="20" alt="Марс" class="mars-tb-planet"></span>
+    <span class="app-titlebar-title" id="appTitlebarTitle" onclick="switchPanel('chat')" style="cursor:pointer;">Марс</span>
     <span class="app-titlebar-sub" id="appTitlebarSub" hidden></span>
+    <button class="btn-return-chat" id="btnTitlebarReturnChat" onclick="switchPanel('chat')" title="Вернуться в чат" type="button">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      <span>Чат</span>
+    </button>
   </div>
   <div class="app-titlebar-spacer" aria-hidden="true"></div>
+
+  <!-- Компактный мини-плеер в шапке Марса -->
+  <div id="titlebarMusicMini" class="tb-music-mini" style="display:none; align-items:center; gap:6px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.1); border-radius:18px; padding:2px 8px 2px 4px; max-width:180px; margin-right:4px;">
+    <img id="tbMusicMiniThumb" src="" referrerpolicy="no-referrer" style="width:20px; height:20px; border-radius:50%; object-fit:cover; display:none; background:rgba(255,255,255,0.1);">
+    <div id="tbMusicMiniTitle" onclick="switchPanel('music')" style="font-size:11px; font-weight:500; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; cursor:pointer; max-width:90px;" title="Открыть плеер">Трек</div>
+    <button type="button" onclick="sendMusicCmd('playPause')" id="tbMusicMiniPlayBtn" style="background:none; border:none; color:var(--text); cursor:pointer; padding:2px; display:flex; align-items:center;" title="Воспроизведение / Пауза">
+      <svg id="tbMusicMiniPlayIcon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+    </button>
+    <button type="button" onclick="sendMusicCmd('next')" style="background:none; border:none; color:var(--text-muted); cursor:pointer; padding:2px; display:flex; align-items:center;" title="Следующий трек">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/></svg>
+    </button>
+  </div>
+
   <button class="app-titlebar-new-chat" id="btnTitlebarNewChat" onclick="$('btnNewChat') && $('btnNewChat').click()" type="button" aria-label="New conversation" data-i18n-title="new_conversation" data-i18n-aria-label="new_conversation" title="New conversation">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" width="16" height="16">
       <line x1="12" y1="5" x2="12" y2="19"/>

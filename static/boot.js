@@ -2534,6 +2534,77 @@ document.addEventListener('keydown',async e=>{
     if(typeof toggleSettings==='function') toggleSettings();
     return;
   }
+
+  // ── Mars custom hotkeys (Alt + physical key codes → work in RU/EN layouts) ──
+  if (e.altKey) {
+    // Determine if focus is in a text input/textarea/contenteditable
+    const t = e.target;
+    const inText = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
+
+    let handled = false;
+    switch (e.code) {
+      // Music controls (via iframe postMessage) — work globally, even in text inputs
+      case 'KeyZ': // Z / Я
+        e.preventDefault();
+        window.sendMusicCmd?.('prev');
+        handled = true;
+        break;
+      case 'KeyX': // X / Ч
+        e.preventDefault();
+        window.sendMusicCmd?.('playPause');
+        handled = true;
+        break;
+      case 'KeyC': // C / С
+        e.preventDefault();
+        window.sendMusicCmd?.('next');
+        handled = true;
+        break;
+      case 'KeyV': // V / М
+        e.preventDefault();
+        // toggle favorite inside music iframe
+        const musicIframe = document.getElementById('musicIframe');
+        if (musicIframe?.contentWindow) {
+          musicIframe.contentWindow.postMessage({ type: 'MARS_MUSIC_CMD', action: 'favorite' }, '*');
+        }
+        handled = true;
+        break;
+
+      // Chat controls — only when NOT in text input
+      case 'KeyA': // A / Ф
+        if (!inText) {
+          e.preventDefault();
+          if (S.session && typeof deleteSession === 'function') {
+            deleteSession(S.session.session_id);
+          }
+          handled = true;
+        }
+        break;
+      case 'KeyS': // S / Ы
+        if (!inText) {
+          e.preventDefault();
+          if (typeof newSession === 'function') newSession(false);
+          closeMobileSidebar();
+          handled = true;
+        }
+        break;
+      case 'KeyD': // D / В
+        if (!inText) {
+          e.preventDefault();
+          // "Продолжай" — send continue message
+          const composer = $('msg');
+          if (composer) {
+            composer.value = 'Продолжай';
+            if (typeof autoResize === 'function') autoResize();
+            if (typeof handleComposerPrimaryAction === 'function') handleComposerPrimaryAction();
+            else if (typeof send === 'function') send();
+          }
+          handled = true;
+        }
+        break;
+    }
+    if (handled) return;
+  }
+
   if(e.key==='Escape'){
     // Close onboarding overlay if open (skip/dismiss the wizard)
     const onboardingOverlay=$('onboardingOverlay');
@@ -2567,6 +2638,21 @@ document.addEventListener('keydown',async e=>{
 });
 const LARGE_TEXT_PASTE_CHAR_THRESHOLD=4000;
 const LARGE_TEXT_PASTE_LINE_THRESHOLD=100;
+
+// ── Alt + Wheel → Mars Music volume (global, even in text inputs) ──
+window.addEventListener('wheel', (e) => {
+  if (!e.altKey) return;
+  const iframe = document.getElementById('musicIframe');
+  if (!iframe?.contentWindow) return;
+  const delta = e.deltaY > 0 ? -5 : 5; // up = louder, down = quieter
+  iframe.contentWindow.postMessage({
+    type: 'MARS_MUSIC_CMD',
+    action: 'volumeDelta',
+    delta: delta
+  }, '*');
+  e.preventDefault();
+}, { passive: false });
+
 function _largeTextPasteLineCount(text){
   const value=String(text||'');
   const lines=value.split('\n');

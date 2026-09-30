@@ -2304,8 +2304,11 @@ main.main.showing-plugin > #mainPlugin {
   .workspace-toggle-btn:disabled{opacity:.38;cursor:not-allowed;}
   .chip.model{color:var(--accent-text);border-color:var(--accent-bg-strong);background:var(--accent-bg);}
   .messages-shell{flex:1;min-height:0;position:relative;display:flex;flex-direction:column;}
-  .messages{flex:1;overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;min-height:0;position:relative;z-index:0;-webkit-overflow-scrolling:touch;touch-action:pan-y;overscroll-behavior-y:contain;overflow-anchor:auto;}
+  .messages{flex:1;overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;min-height:0;position:relative;z-index:0;-webkit-overflow-scrolling:touch;touch-action:pan-y;overscroll-behavior-y:contain;overflow-anchor:auto;will-change:scroll-position;contain:content;}
 @media (hover:hover) and (pointer:fine){.messages{overflow-anchor:none;}}
+
+.msg-row{contain:layout style;content-visibility:auto;contain-intrinsic-size:auto 96px;}
+.assistant-turn{contain:layout style;content-visibility:auto;contain-intrinsic-size:auto 200px;}
   /* Modern floating scroll-to-bottom button */
   .scroll-to-bottom-btn{
     position:absolute;
@@ -3190,9 +3193,9 @@ main.main.showing-plugin > #mainPlugin {
     .system-health-label{font-size:10px;gap:4px;}
     .system-health-bar{height:4px;}
     /* Overlay backdrop */
-    .mobile-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);
-      z-index:199;-webkit-tap-highlight-color:transparent;}
-    .mobile-overlay.visible{display:none;}
+    .mobile-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);backdrop-filter:blur(3px);
+      z-index:2400;-webkit-tap-highlight-color:transparent;}
+    .mobile-overlay.visible{display:block !important;}
     /* Keep edge guard aligned with the mobile titlebar's effective 52px height.
        If this rule or app-titlebar sizing changes, update both together to
        avoid accidental sidebar swipe collisions. */
@@ -5098,6 +5101,48 @@ main.main.showing-projects > #mainProjects{display:flex;flex:1 1 auto;height:100
 main.main.showing-music > #mainMusic{display:flex;flex:1 1 auto;height:100%;min-height:0;min-width:0;width:100%;overflow:hidden;}
 #projectsIframe, #musicIframe{flex:1 1 auto !important;width:100% !important;height:100% !important;min-height:0 !important;min-width:0 !important;border:none !important;background:transparent !important;display:block !important;}
 
+/* Полноэкранный режим для Проектов и Музыки: скрываем левый сайдбар WebUI и панель воркспейса ТОЛЬКО когда сайдбар закрыт */
+.layout.showing-projects-active .sidebar:not(.mobile-open),
+.layout.showing-music-active .sidebar:not(.mobile-open),
+.layout.showing-projects-active .workspace-panel-edge-toggle,
+.layout.showing-music-active .workspace-panel-edge-toggle,
+.layout.showing-projects-active .rightpanel:not(.mobile-open),
+.layout.showing-music-active .rightpanel:not(.mobile-open) {
+  display: none !important;
+}
+
+/* Мобильный сайдбар при открытии поверх полноэкранных панелей */
+.sidebar.mobile-open {
+  display: flex !important;
+  z-index: 2500 !important;
+  transform: translateX(0) !important;
+}
+
+/* Кнопка быстрого возврата в чат в шапке при активной Музыке или Проектах */
+.btn-return-chat {
+  display: none;
+  align-items: center;
+  gap: 5px;
+  background: rgba(239, 68, 68, 0.15);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  color: #fff;
+  border-radius: 14px;
+  padding: 3px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+.btn-return-chat:hover, .btn-return-chat:active {
+  background: rgba(239, 68, 68, 0.35);
+  border-color: rgba(239, 68, 68, 0.8);
+}
+.layout.showing-music-active .btn-return-chat,
+.layout.showing-projects-active .btn-return-chat {
+  display: inline-flex !important;
+}
+
 main.main.showing-workspaces > #mainWorkspaces{display:flex;}
 main.main.showing-profiles > #mainProfiles{display:flex;}
 main.main.showing-logs > #mainLogs{display:flex;}
@@ -5117,6 +5162,32 @@ main.main > #mainPlugin{display:none;}
 .panel-head-btn:disabled,.panel-head-btn[aria-busy="true"]{opacity:.5;cursor:wait;}
 .panel-head-btn:disabled:hover,.panel-head-btn[aria-busy="true"]:hover{background:transparent;color:var(--muted);}
 /* Titlebar activity-display mode switch (cycle button) */
+.tb-music-mini {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  background: rgba(225, 29, 72, 0.12);
+  border: 1px solid rgba(225, 29, 72, 0.25);
+  border-radius: 18px;
+  padding: 3px 8px 3px 5px;
+  max-width: 170px;
+  height: 28px;
+  box-sizing: border-box;
+  flex-shrink: 0;
+  -webkit-app-region: no-drag;
+}
+.tb-music-mini:hover {
+  background: rgba(225, 29, 72, 0.2);
+  border-color: rgba(225, 29, 72, 0.4);
+}
+@media (max-width: 768px) {
+  .tb-music-mini {
+    max-width: 125px;
+    padding: 2px 6px 2px 4px;
+    height: 26px;
+  }
+}
+
 .app-titlebar-activity-mode{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 9px;background:none;border:none;color:var(--muted);border-radius:8px;cursor:pointer;font-size:11px;font-weight:600;flex-shrink:0;-webkit-tap-highlight-color:transparent;transition:background-color .15s,color .15s;}
 .app-titlebar-activity-mode:hover{background:var(--hover-bg);color:var(--text);}
 .app-titlebar-activity-mode .activity-mode-ico{display:inline-flex;align-items:center;justify-content:center;line-height:1;}

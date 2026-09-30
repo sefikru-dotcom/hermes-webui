@@ -553,9 +553,9 @@ async function startCompressionRecovery(btn){
   }
 }
 
-const MESSAGE_RENDER_WINDOW_DEFAULT=50;
-const MESSAGE_VIRTUAL_THRESHOLD_ROWS=80;
-const MESSAGE_VIRTUAL_BUFFER_PX=900;
+const MESSAGE_RENDER_WINDOW_DEFAULT=20;
+const MESSAGE_VIRTUAL_THRESHOLD_ROWS=30;
+const MESSAGE_VIRTUAL_BUFFER_PX=600;
 const MESSAGE_VIRTUAL_DEFAULT_ROW_HEIGHTS={
   user:120,
   process_wakeup:96,
@@ -7595,7 +7595,15 @@ function scrollIfPinned(){
   if(_messageBottomDistance()>500) _setMessageScrollToBottom();
   _settleMessageScrollToBottom(false);
 }
+let _scrollToBottomRaf=0;
 function scrollToBottom(){
+  if(_scrollToBottomRaf) return;
+  _scrollToBottomRaf=requestAnimationFrame(()=>{
+    _scrollToBottomRaf=0;
+    _scrollToBottomSync();
+  });
+}
+function _scrollToBottomSync(){
   // An explicit scroll-to-bottom (End button, or any definitive pin-to-bottom)
   // supersedes a pending jump-to-question reconciliation: cancel the active jump
   // owner first so its deferred _finishMessageJumpScroll() can't restore the
@@ -20128,15 +20136,22 @@ function _postProcessWithAnchorSuppression(container){
   }
 }
 function postProcessRenderedMessages(container) {
-  highlightCode(container);
   addCopyButtons(container);
   loadDiffInline(container);
   loadCsvInline(container);
   loadExcalidrawInline(container);
   loadPdfInline(container);
   loadHtmlInline(container);
-  renderMermaidBlocks(container);
-  renderKatexBlocks(container);
+  // Defer heavy renderers to idle callbacks so they don't block the critical path
+  if (typeof requestIdleCallback === 'function') {
+    requestIdleCallback(() => renderMermaidBlocks(container));
+    requestIdleCallback(() => renderKatexBlocks(container));
+    requestIdleCallback(() => highlightCode(container));
+  } else {
+    setTimeout(() => renderMermaidBlocks(container), 0);
+    setTimeout(() => renderKatexBlocks(container), 0);
+    setTimeout(() => highlightCode(container), 0);
+  }
   initTreeViews(container);
 }
 

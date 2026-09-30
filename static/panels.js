@@ -447,6 +447,11 @@ async function switchPanel(name, opts = {}) {
     if (typeof _kanbanStopPolling === 'function') _kanbanStopPolling();
   }
   _currentPanel = nextPanel;
+  // Скрываем мини-плеер в шапке, если пользователь перешел во вкладку музыки
+  const tbMini = document.getElementById('titlebarMusicMini');
+  if (tbMini && nextPanel === 'music') {
+    tbMini.style.display = 'none';
+  }
   // Mobile drawer visibility: a rail/tab click on a phone should surface the
   // panel synchronously, NOT after the panel's async data load. If the re-open
   // stayed at the bottom of this function, a form opened from inside the drawer
@@ -521,6 +526,69 @@ async function switchPanel(name, opts = {}) {
   else syncAppTitlebar();
   return true;
 }
+
+// ── Mars Music Topbar Integration ──
+window.sendMusicCmd = function(action) {
+  const iframe = document.getElementById('musicIframe');
+  if (iframe && iframe.contentWindow) {
+    iframe.contentWindow.postMessage({ type: 'MARS_MUSIC_CMD', action: action }, '*');
+  }
+};
+
+window.addEventListener('message', function(e) {
+  if (!e.data || typeof e.data !== 'object') return;
+  if (e.data.type === 'MARS_MUSIC_STATE') {
+    const mini = document.getElementById('titlebarMusicMini');
+    const titleEl = document.getElementById('tbMusicMiniTitle');
+    const thumbEl = document.getElementById('tbMusicMiniThumb');
+    const playIcon = document.getElementById('tbMusicMiniPlayIcon');
+    if (!mini) return;
+
+    const isMusicViewActive = _currentPanel === 'music' || document.querySelector('.nav-tab[data-panel="music"]')?.classList.contains('active');
+
+    if (e.data.track && !isMusicViewActive) {
+      mini.style.display = 'inline-flex';
+      if (titleEl) {
+        titleEl.textContent = e.data.track.title || 'Трек';
+        titleEl.title = `${e.data.track.artist} - ${e.data.track.title} (Открыть плеер)`;
+      }
+      if (thumbEl) {
+        const trId = e.data.track.id || '';
+        thumbEl.setAttribute('referrerpolicy', 'no-referrer');
+        thumbEl.onerror = function() {
+          if (trId && this.src.indexOf('/music/api/thumb') === -1) {
+            this.src = '/music/api/thumb?v=' + encodeURIComponent(trId);
+          } else {
+            this.style.display = 'none';
+          }
+        };
+        if (e.data.track.thumbnail) {
+          thumbEl.src = e.data.track.thumbnail;
+          thumbEl.style.display = 'block';
+        } else if (trId) {
+          thumbEl.src = '/music/api/thumb?v=' + encodeURIComponent(trId);
+          thumbEl.style.display = 'block';
+        } else {
+          thumbEl.style.display = 'none';
+        }
+      }
+      if (playIcon) {
+        if (e.data.isPlaying) {
+          playIcon.innerHTML = '<rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>';
+        } else {
+          playIcon.innerHTML = '<polygon points="5 3 19 12 5 21 5 3"/>';
+        }
+      }
+    } else {
+      mini.style.display = 'none';
+    }
+  }
+});
+
+// Периодический запрос статуса плеера (например, после обновления страницы)
+setInterval(function() {
+  window.sendMusicCmd('getState');
+}, 3000);
 
 // ── Cron panel ──
 function _isRecurringCronJob(job) {
