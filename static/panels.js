@@ -551,6 +551,10 @@ window.addEventListener('message', function(e) {
       mini.style.display = 'inline-flex';
       if (titleEl) {
         titleEl.textContent = e.data.track.title || 'Трек';
+      const artistEl = document.getElementById('tbMusicMiniArtist');
+      if (artistEl) {
+        artistEl.textContent = e.data.track.artist || 'Марс Музыка';
+      }
         titleEl.title = `${e.data.track.artist} - ${e.data.track.title} (Открыть плеер)`;
       }
       if (thumbEl) {
