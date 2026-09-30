@@ -5101,9 +5101,7 @@ main.main.showing-projects > #mainProjects{display:flex;flex:1 1 auto;height:100
 main.main.showing-music > #mainMusic{display:flex;flex:1 1 auto;height:100%;min-height:0;min-width:0;width:100%;overflow:hidden;}
 #projectsIframe, #musicIframe{flex:1 1 auto !important;width:100% !important;height:100% !important;min-height:0 !important;min-width:0 !important;border:none !important;background:transparent !important;display:block !important;}
 
-/* Полноэкранный режим для Проектов и Музыки: скрываем левый сайдбар WebUI и панель воркспейса ТОЛЬКО когда сайдбар закрыт */
-.layout.showing-projects-active .sidebar:not(.mobile-open),
-.layout.showing-music-active .sidebar:not(.mobile-open),
+/* Унифицированный режим: сайдбар всегда доступен как в Памяти и Канбане */
 .layout.showing-projects-active .workspace-panel-edge-toggle,
 .layout.showing-music-active .workspace-panel-edge-toggle,
 .layout.showing-projects-active .rightpanel:not(.mobile-open),

@@ -47,7 +47,7 @@ const APP_TITLEBAR_KEYS = {
   music: 'tab_music',
 };
 const MAIN_VIEW_PANELS = ['settings','skills','memory','tasks','kanban','projects','music','workspaces','profiles','insights','logs','plugin'];
-const MAIN_VIEW_SIDEBAR_PANEL_FALLBACKS = { plugin: 'settings', projects: 'chat', music: 'chat' };
+const MAIN_VIEW_SIDEBAR_PANEL_FALLBACKS = { plugin: 'settings', projects: 'projects', music: 'music' };
 
 /**
  * Update the top app titlebar to reflect the current page or selected conversation.
@@ -409,6 +409,13 @@ function _syncMobileSidebarPanelFromMainView(){
   return panel;
 }
 
+function reloadMusicFrame() {
+  const f = document.getElementById('musicIframe');
+  if (f) {
+    try { f.contentWindow.location.reload(); } catch(e) { f.src = '/music/'; }
+  }
+}
+
 function reloadProjectsFrame() {
   const f = document.getElementById('projectsIframe');
   if (f) {
@@ -460,14 +467,10 @@ async function switchPanel(name, opts = {}) {
   // Fullscreen main-view panels (projects, music) live in <main> and have no
   // sidebar; on mobile the sidebar drawer must stay closed so the view is visible.
   if (opts.fromRailClick && typeof _isDesktopWidth === 'function' && !_isDesktopWidth()) {
-    if (nextPanel === 'projects' || nextPanel === 'music') {
-      if (typeof closeMobileSidebar === 'function') closeMobileSidebar();
-    } else {
-      const sidebar = document.querySelector('.sidebar');
-      if (sidebar) {
-        sidebar.classList.remove('mobile-session-page');
-        sidebar.classList.add('mobile-panel-drawer', 'mobile-open');
-      }
+    const sidebar = document.querySelector('.sidebar');
+    if (sidebar) {
+      sidebar.classList.remove('mobile-session-page');
+      sidebar.classList.add('mobile-panel-drawer', 'mobile-open');
     }
   }
   // Update nav tabs (rail + mobile sidebar-nav share data-panel)
@@ -512,14 +515,12 @@ async function switchPanel(name, opts = {}) {
     if (f && (!f.src || f.src.indexOf('/dashboard') === -1)) {
       f.src = '/dashboard/';
     }
-    _closeMobileSidebarAfterPanelSelection();
   }
   if (nextPanel === 'music') {
     const f = document.getElementById('musicIframe');
     if (f && (!f.src || f.src.indexOf('/music') === -1)) {
       f.src = '/music/';
     }
-    _closeMobileSidebarAfterPanelSelection();
   }
   _resyncChatSidebarAfterPanelSwitch();
   if (nextPanel === 'chat' && typeof syncTopbar === 'function') syncTopbar();

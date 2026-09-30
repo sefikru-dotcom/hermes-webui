@@ -334,6 +334,43 @@ window._marsFallbackActivityCycle=function(btn){
         </div>
       </div>
     </div>
+
+    <!-- Music (Player) panel -->
+    <div class="panel-view" id="panelMusic">
+      <div class="panel-head">
+        <span>Марс Музыка</span>
+        <div class="panel-head-actions">
+          <button class="panel-head-btn has-tooltip has-tooltip--bottom" onclick="toggleSidebar(true)" data-tooltip="Развернуть во всю ширину" aria-label="Развернуть во всю ширину"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg></button>
+          <button class="panel-head-btn has-tooltip has-tooltip--bottom" onclick="reloadMusicFrame()" data-tooltip="Обновить плеер" aria-label="Обновить плеер"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></button>
+        </div>
+      </div>
+      <div style="padding: 16px 14px; font-size: 13px; color: var(--muted); line-height: 1.5;">
+        <div style="margin-bottom: 12px; font-weight: 500; color: var(--text);">Стриминговый плеер Марса</div>
+        <div style="display:flex; flex-direction:column; gap:8px;">
+          <div style="display:flex; align-items:center; justify-content:space-between; padding:8px 10px; background:var(--card-bg, rgba(255,255,255,0.03)); border-radius:6px; border:1px solid var(--border);">
+            <span>Статус сервиса</span>
+            <span style="display:inline-flex; align-items:center; gap:5px; color:#10b981; font-weight:500;">
+              <span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:#10b981;"></span> Активен (:8796)
+            </span>
+          </div>
+          <div style="display:flex; align-items:center; justify-content:space-between; padding:8px 10px; background:var(--card-bg, rgba(255,255,255,0.03)); border-radius:6px; border:1px solid var(--border);">
+            <span>Кэш треков</span>
+            <span style="color:var(--text);">2 ГБ (LRU)</span>
+          </div>
+        </div>
+        <div style="margin-top: 16px; display:flex; flex-direction:column; gap:8px;">
+          <button class="btn secondary" style="width:100%; justify-content:center; display:flex; gap:6px; align-items:center;" onclick="toggleSidebar(true)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+            Открыть плеер во весь экран
+          </button>
+          <button class="btn secondary" style="width:100%; justify-content:center; display:flex; gap:6px; align-items:center;" onclick="switchPanel('chat')">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            Вернуться в чат
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- Skills panel -->
     <div class="panel-view" id="panelSkills">
       <div class="panel-head">
