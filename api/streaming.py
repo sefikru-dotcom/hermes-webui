@@ -689,13 +689,15 @@ def _is_fallback_lifecycle_message(kind: str, message: str) -> bool:
     k = str(kind or '').strip().lower()
     m = str(message or '').strip().lower()
     return (
-        k == 'lifecycle'
+        (k in ('lifecycle', 'status'))
         and (
             'rate limited' in m
             or 'switching to fallback' in m
             or 'falling back' in m
             or 'fallback activated' in m
             or 'trying fallback' in m
+            or 'model fallback:' in m
+            or 'model fallback' in m
         )
     )
 
