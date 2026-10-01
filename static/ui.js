@@ -7395,31 +7395,29 @@ document.addEventListener('DOMContentLoaded',function(){
   tooltip.addEventListener('click',function(e){e.stopPropagation();});
 });
 
+let _messageScrollRaf = 0;
 function _setMessageScrollToBottom(){
-  const el=$('messages');
+  const el=$(messages);
   if(!el) return;
   _programmaticScroll=true;_programmaticScrollSetAt=performance.now();
   el.scrollTop=el.scrollHeight;
   _lastScrollTop=el.scrollTop;_lastMessageClientHeight=el.clientHeight;
   _nearBottomCount=2;
   _scrollPinned=true;
-  requestAnimationFrame(()=>{
-    // Retry the bottom write on the next layout frame so a DOM rebuild that
-    // grows the transcript after the first write doesn't strand a pinned
-    // conversation mid-scroll (#3319). But by this frame the user may have
-    // scrolled up — under the sticky-unpin model (#3343) _messageUserUnpinned
-    // is the authoritative "user scrolled away" signal, so DON'T snap them back
-    // or re-pin if so; only release the programmatic-scroll latch.
-    if(_messageUserUnpinned || !_scrollPinned || _recentNonMessageScrollIntent()){
+  if(!_messageScrollRaf){
+    _messageScrollRaf=requestAnimationFrame(()=>{
+      _messageScrollRaf=0;
+      if(_messageUserUnpinned || !_scrollPinned || _recentNonMessageScrollIntent()){
+        _deferClearProgrammaticScroll();
+        return;
+      }
+      el.scrollTop=el.scrollHeight;
+      _lastScrollTop=el.scrollTop;_lastMessageClientHeight=el.clientHeight;
+      _nearBottomCount=2;
+      _scrollPinned=true;
       _deferClearProgrammaticScroll();
-      return;
-    }
-    el.scrollTop=el.scrollHeight;
-    _lastScrollTop=el.scrollTop;_lastMessageClientHeight=el.clientHeight;
-    _nearBottomCount=2;
-    _scrollPinned=true;
-    _deferClearProgrammaticScroll();
-  });
+    });
+  }
 }
 function _isMessagePaneNearBottom(threshold=250){
   const el=$('messages');
@@ -7500,6 +7498,15 @@ function _settleMessageScrollToBottom(force, explicit){
   // transcript grows inside #msgInner (.messages-inner). Observing #messages
   // would mean the callback never fires. (Codex review #2.)
   const observed=document.getElementById('msgInner')||el;
+  // ОПТИМИЗАЦИЯ: если ResizeObserver уже активен, не пересоздаем его!
+  if(_settleRO){
+    clearTimeout(_settleTimer);
+    _settleTimer=setTimeout(()=>{
+      if(_settleRO){ _settleRO.disconnect(); _settleRO=null; }
+      _setMessageScrollToBottom();
+    },300);
+    return;
+  }
 
   // Instance-owned cleanup: close over THIS observer so a stale callback (from a
   // superseded settle) only ever disconnects its own observer, never the newer

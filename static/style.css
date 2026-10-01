@@ -2307,8 +2307,8 @@ main.main.showing-plugin > #mainPlugin {
   .messages{flex:1;overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;min-height:0;position:relative;z-index:0;-webkit-overflow-scrolling:touch;touch-action:pan-y;overscroll-behavior-y:contain;overflow-anchor:auto;will-change:scroll-position;contain:content;}
 @media (hover:hover) and (pointer:fine){.messages{overflow-anchor:none;}}
 
-.msg-row{contain:layout style;content-visibility:auto;contain-intrinsic-size:auto 96px;}
-.assistant-turn{contain:layout style;content-visibility:auto;contain-intrinsic-size:auto 200px;}
+.msg-row{contain:layout style;content-visibility:visible;}
+.assistant-turn{contain:layout style;content-visibility:visible;}
   /* Modern floating scroll-to-bottom button */
   .scroll-to-bottom-btn{
     position:absolute;
@@ -6397,7 +6397,7 @@ main.main > #mainPlugin{display:none;}
      which is where most of the off-screen-skip win comes from anyway. This mirrors
      the existing "some rows must stay fully rendered" opt-out pattern for
      #liveAssistantTurn below. */
-  .msg-row[data-role="user"] { content-visibility: auto; contain-intrinsic-size: auto 96px; contain: layout style; }
+  .msg-row[data-role="user"] { content-visibility: visible; contain: layout style; }
   .msg-row { contain: layout style; }
   /* Keep the LIVE streaming turn fully rendered while a response streams. The
      live turn is always id="liveAssistantTurn" (assigned on every render path:
