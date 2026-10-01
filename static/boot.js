@@ -2536,72 +2536,58 @@ document.addEventListener('keydown',async e=>{
   }
 
   // ── Mars custom hotkeys (Alt + physical key codes → work in RU/EN layouts) ──
-  if (e.altKey) {
-    // Determine if focus is in a text input/textarea/contenteditable
-    const t = e.target;
-    const inText = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
-
+  if (e.altKey && !e.ctrlKey && !e.metaKey) {
     let handled = false;
-    switch (e.code) {
-      // Music controls (via iframe postMessage) — work globally, even in text inputs
-      case 'KeyZ': // Z / Я
-        e.preventDefault();
-        window.sendMusicCmd?.('prev');
-        handled = true;
-        break;
-      case 'KeyX': // X / Ч
-        e.preventDefault();
-        window.sendMusicCmd?.('playPause');
-        handled = true;
-        break;
-      case 'KeyC': // C / С
-        e.preventDefault();
-        window.sendMusicCmd?.('next');
-        handled = true;
-        break;
-      case 'KeyV': // V / М
-        e.preventDefault();
-        // toggle favorite inside music iframe
-        const musicIframe = document.getElementById('musicIframe');
-        if (musicIframe?.contentWindow) {
-          musicIframe.contentWindow.postMessage({ type: 'MARS_MUSIC_CMD', action: 'favorite' }, '*');
-        }
-        handled = true;
-        break;
+    const code = e.code || '';
+    const k = (e.key || '').toLowerCase();
+    const matchKey = (c, ru, en) => code === c || k === ru.toLowerCase() || k === en.toLowerCase();
 
-      // Chat controls — only when NOT in text input
-      case 'KeyA': // A / Ф
-        if (!inText) {
-          e.preventDefault();
-          if (S.session && typeof deleteSession === 'function') {
-            deleteSession(S.session.session_id);
-          }
-          handled = true;
-        }
-        break;
-      case 'KeyS': // S / Ы
-        if (!inText) {
-          e.preventDefault();
-          if (typeof newSession === 'function') newSession(false);
-          closeMobileSidebar();
-          handled = true;
-        }
-        break;
-      case 'KeyD': // D / В
-        if (!inText) {
-          e.preventDefault();
-          // "Продолжай" — send continue message
-          const composer = $('msg');
-          if (composer) {
-            composer.value = 'Продолжай';
-            if (typeof autoResize === 'function') autoResize();
-            if (typeof handleComposerPrimaryAction === 'function') handleComposerPrimaryAction();
-            else if (typeof send === 'function') send();
-          }
-          handled = true;
-        }
-        break;
+    // Music controls (via iframe postMessage) — work globally, even in text inputs
+    if (matchKey('KeyZ', 'я', 'z')) {
+      e.preventDefault();
+      window.sendMusicCmd?.('prev');
+      handled = true;
+    } else if (matchKey('KeyX', 'ч', 'x')) {
+      e.preventDefault();
+      window.sendMusicCmd?.('playPause');
+      handled = true;
+    } else if (matchKey('KeyC', 'с', 'c')) {
+      e.preventDefault();
+      window.sendMusicCmd?.('next');
+      handled = true;
+    } else if (matchKey('KeyV', 'м', 'v')) {
+      e.preventDefault();
+      const musicIframe = document.getElementById('musicIframe');
+      if (musicIframe?.contentWindow) {
+        musicIframe.contentWindow.postMessage({ type: 'MARS_MUSIC_CMD', action: 'favorite' }, '*');
+      }
+      handled = true;
     }
+    // Chat controls — work globally everywhere (even in composer / text inputs)
+    else if (matchKey('KeyA', 'ф', 'a')) {
+      e.preventDefault();
+      if (S.session && typeof deleteSession === 'function') {
+        deleteSession(S.session.session_id);
+      }
+      handled = true;
+    } else if (matchKey('KeyS', 'ы', 's')) {
+      e.preventDefault();
+      if (typeof newSession === 'function') newSession(false);
+      if (typeof closeMobileSidebar === 'function') closeMobileSidebar();
+      handled = true;
+    } else if (matchKey('KeyD', 'в', 'd')) {
+      e.preventDefault();
+      // "Продолжай" — send continue message
+      const composer = $('msg');
+      if (composer) {
+        composer.value = 'Продолжай';
+        if (typeof autoResize === 'function') autoResize();
+        if (typeof handleComposerPrimaryAction === 'function') handleComposerPrimaryAction();
+        else if (typeof send === 'function') send();
+      }
+      handled = true;
+    }
+
     if (handled) return;
   }
 

@@ -141,32 +141,7 @@
   </div>
   <div class="app-titlebar-spacer" aria-hidden="true"></div>
 
-<!-- Компактный мини-плеер в шапке Марса -->
-  <div id="titlebarMusicMini" class="tb-music-mini" style="display:none;" onclick="if(event.target.closest('button'))return; switchPanel('music');">
-    <div class="tb-music-mini-thumb-wrap">
-      <img id="tbMusicMiniThumb" src="" referrerpolicy="no-referrer" alt="">
-      <div class="tb-music-wave-indicator">
-        <span></span><span></span><span></span>
-      </div>
-    </div>
-    <div class="tb-music-mini-info">
-      <div id="tbMusicMiniTitle" class="tb-music-mini-title" title="Открыть плеер">Трек</div>
-      <div id="tbMusicMiniArtist" class="tb-music-mini-artist">Артист</div>
-    </div>
-    <div class="tb-music-mini-controls">
-      <button type="button" class="tb-music-btn" onclick="sendMusicCmd('prev')" title="Предыдущий трек">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="19 20 9 12 19 4 19 20"/><line x1="5" y1="19" x2="5" y2="5"/></svg>
-      </button>
-      <button type="button" class="tb-music-btn play-btn" onclick="sendMusicCmd('playPause')" id="tbMusicMiniPlayBtn" title="Воспроизведение / Пауза">
-        <svg id="tbMusicMiniPlayIcon" width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-      </button>
-      <button type="button" class="tb-music-btn" onclick="sendMusicCmd('next')" title="Следующий трек">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/></svg>
-      </button>
-    </div>
-  </div>
-
-    <button class="app-titlebar-new-chat" id="btnTitlebarNewChat" onclick="$('btnNewChat') && $('btnNewChat').click()" type="button" aria-label="New conversation" data-i18n-title="new_conversation" data-i18n-aria-label="new_conversation" title="New conversation">
+<button class="app-titlebar-new-chat" id="btnTitlebarNewChat" onclick="$('btnNewChat') && $('btnNewChat').click()" type="button" aria-label="New conversation" data-i18n-title="new_conversation" data-i18n-aria-label="new_conversation" title="New conversation">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" width="16" height="16">
       <line x1="12" y1="5" x2="12" y2="19"/>
       <line x1="5" y1="12" x2="19" y2="12"/>
@@ -223,6 +198,48 @@ window._marsFallbackActivityCycle=function(btn){
   }catch(e){window.location.reload();}
 };
 </script>
+<!-- Mars Music Sub-Header Player Bar -->
+<div id="marsSubbarPlayer" class="mars-subbar-player" style="display:none;">
+  <div class="mars-subbar-progress-container" id="marsSubbarProgressContainer" onclick="handleSubbarSeek(event)" title="Перемотка">
+    <div class="mars-subbar-progress-fill" id="marsSubbarProgressFill"></div>
+  </div>
+  <div class="mars-subbar-inner">
+    <div class="mars-subbar-meta" onclick="switchPanel('music');" title="Нажмите, чтобы открыть плеер">
+      <div class="mars-subbar-thumb-wrap">
+        <img id="marsSubbarThumb" src="" referrerpolicy="no-referrer" alt="">
+        <div class="mars-subbar-disc-icon">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>
+        </div>
+      </div>
+      <div class="mars-subbar-info">
+        <div class="mars-subbar-title-row">
+          <span id="marsSubbarTitle" class="mars-subbar-title">Трек</span>
+          <span id="marsSubbarBadge" class="mars-subbar-badge" style="display:none;">Connect</span>
+        </div>
+        <div class="mars-subbar-sub-row">
+          <span id="marsSubbarArtist" class="mars-subbar-artist">Исполнитель</span>
+          <span class="mars-subbar-dot">·</span>
+          <span id="marsSubbarTime" class="mars-subbar-time">0:00 / 0:00</span>
+        </div>
+      </div>
+    </div>
+    <div class="mars-subbar-controls">
+      <button type="button" class="mars-subbar-btn" id="marsSubbarFavBtn" onclick="sendMusicCmd('favorite')" title="В избранное">
+        <svg id="marsSubbarFavIcon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+      </button>
+      <button type="button" class="mars-subbar-btn" onclick="sendMusicCmd('prev')" title="Предыдущий трек (Alt+Z)">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polygon points="19 20 9 12 19 4 19 20"/><line x1="5" y1="19" x2="5" y2="5"/></svg>
+      </button>
+      <button type="button" class="mars-subbar-btn play-btn" id="marsSubbarPlayBtn" onclick="sendMusicCmd('playPause')" title="Воспроизведение / Пауза (Alt+X)">
+        <svg id="marsSubbarPlayIcon" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+      </button>
+      <button type="button" class="mars-subbar-btn" onclick="sendMusicCmd('next')" title="Следующий трек (Alt+C)">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/></svg>
+      </button>
+    </div>
+  </div>
+</div>
+
 <div class="layout">
   <nav class="rail" aria-label="Primary navigation">
     <button class="rail-btn nav-tab active has-tooltip" data-panel="chat" onclick="switchPanel('chat',{fromRailClick:true})" data-tooltip="Chat" data-i18n-title="tab_chat" aria-label="Chat"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></button>
@@ -509,6 +526,10 @@ window._marsFallbackActivityCycle=function(btn){
           <button type="button" class="side-menu-item" data-settings-section="preferences" onclick="switchSettingsSection('preferences',{fromSidebarItem:true})">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
             <span data-i18n="settings_tab_preferences">Preferences</span>
+          </button>
+          <button type="button" class="side-menu-item" data-settings-section="shortcuts" onclick="switchSettingsSection('shortcuts',{fromSidebarItem:true})">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="2"/><line x1="6" y1="8" x2="6.01" y2="8"/><line x1="10" y1="8" x2="10.01" y2="8"/><line x1="14" y1="8" x2="14.01" y2="8"/><line x1="18" y1="8" x2="18.01" y2="8"/><line x1="6" y1="12" x2="6.01" y2="12"/><line x1="10" y1="12" x2="10.01" y2="12"/><line x1="14" y1="12" x2="14.01" y2="12"/><line x1="18" y1="12" x2="18.01" y2="12"/><line x1="7" y1="16" x2="17" y2="16"/></svg>
+            <span data-i18n="settings_tab_shortcuts">Hotkeys</span>
           </button>
           <button type="button" class="side-menu-item" data-settings-section="providers" onclick="switchSettingsSection('providers',{fromSidebarItem:true})">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>

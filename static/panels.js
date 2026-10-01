@@ -528,34 +528,79 @@ async function switchPanel(name, opts = {}) {
   return true;
 }
 
-// ── Mars Music Topbar Integration ──
-window.sendMusicCmd = function(action) {
+// ── Mars Music Sub-Header Player Bar Integration ──
+window.sendMusicCmd = function(action, extra) {
   const iframe = document.getElementById('musicIframe');
   if (iframe && iframe.contentWindow) {
-    iframe.contentWindow.postMessage({ type: 'MARS_MUSIC_CMD', action: action }, '*');
+    const payload = Object.assign({ type: 'MARS_MUSIC_CMD', action: action }, extra || {});
+    iframe.contentWindow.postMessage(payload, '*');
   }
 };
+
+window.handleSubbarSeek = function(e) {
+  const container = document.getElementById('marsSubbarProgressContainer');
+  if (!container) return;
+  const rect = container.getBoundingClientRect();
+  const clickX = e.clientX - rect.left;
+  const width = rect.width;
+  if (width > 0) {
+    const pct = Math.max(0, Math.min(1, clickX / width));
+    window.sendMusicCmd('seekPct', { pct: pct });
+  }
+};
+
+function formatSubbarTime(sec) {
+  if (!sec || isNaN(sec) || sec < 0) return '0:00';
+  sec = Math.floor(sec);
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return m + ':' + (s < 10 ? '0' : '') + s;
+}
 
 window.addEventListener('message', function(e) {
   if (!e.data || typeof e.data !== 'object') return;
   if (e.data.type === 'MARS_MUSIC_STATE') {
-    const mini = document.getElementById('titlebarMusicMini');
-    const titleEl = document.getElementById('tbMusicMiniTitle');
-    const thumbEl = document.getElementById('tbMusicMiniThumb');
-    const playIcon = document.getElementById('tbMusicMiniPlayIcon');
-    if (!mini) return;
+    const subbar = document.getElementById('marsSubbarPlayer');
+    const titleEl = document.getElementById('marsSubbarTitle');
+    const artistEl = document.getElementById('marsSubbarArtist');
+    const timeEl = document.getElementById('marsSubbarTime');
+    const thumbEl = document.getElementById('marsSubbarThumb');
+    const playIcon = document.getElementById('marsSubbarPlayIcon');
+    const favBtn = document.getElementById('marsSubbarFavBtn');
+    const progressFill = document.getElementById('marsSubbarProgressFill');
+    const badgeEl = document.getElementById('marsSubbarBadge');
+
+    if (!subbar) return;
 
     const isMusicViewActive = _currentPanel === 'music' || document.querySelector('.nav-tab[data-panel="music"]')?.classList.contains('active');
 
     if (e.data.track && !isMusicViewActive) {
-      mini.style.display = 'inline-flex';
+      subbar.style.display = 'flex';
       if (titleEl) {
         titleEl.textContent = e.data.track.title || 'Трек';
-      const artistEl = document.getElementById('tbMusicMiniArtist');
+      }
       if (artistEl) {
         artistEl.textContent = e.data.track.artist || 'Марс Музыка';
       }
-        titleEl.title = `${e.data.track.artist} - ${e.data.track.title} (Открыть плеер)`;
+      if (badgeEl) {
+        if (e.data.remote && e.data.deviceName) {
+          badgeEl.textContent = e.data.deviceName;
+          badgeEl.style.display = 'inline-block';
+        } else {
+          badgeEl.style.display = 'none';
+        }
+      }
+      if (timeEl) {
+        const cur = formatSubbarTime(e.data.currentTime || 0);
+        const dur = formatSubbarTime(e.data.duration || 0);
+        timeEl.textContent = `${cur} / ${dur}`;
+      }
+      if (progressFill && e.data.duration > 0) {
+        const pct = Math.max(0, Math.min(100, ((e.data.currentTime || 0) / e.data.duration) * 100));
+        progressFill.style.width = pct + '%';
+      }
+      if (favBtn) {
+        favBtn.classList.toggle('active', !!e.data.isFavorite);
       }
       if (thumbEl) {
         const trId = e.data.track.id || '';
@@ -585,15 +630,15 @@ window.addEventListener('message', function(e) {
         }
       }
     } else {
-      mini.style.display = 'none';
+      subbar.style.display = 'none';
     }
   }
 });
 
-// Периодический запрос статуса плеера (например, после обновления страницы)
+// Периодический запрос статуса плеера
 setInterval(function() {
   window.sendMusicCmd('getState');
-}, 3000);
+}, 2000);
 
 // ── Cron panel ──
 function _isRecurringCronJob(job) {
@@ -8091,7 +8136,7 @@ function switchSettingsSection(name,opts){
     _settingsSection = name;
     return;
   }
-  let section=(name==='appearance'||name==='preferences'||name==='providers'||name==='plugins'||name==='extensions'||name==='system'||name==='help')?name:'conversation';
+  let section=(name==='appearance'||name==='preferences'||name==='shortcuts'||name==='providers'||name==='plugins'||name==='extensions'||name==='system'||name==='help')?name:'conversation';
   // Deep-linking to the Plugins pane when the tab is hidden (no plugins
   // installed, #3457) falls back to Conversation. Resolve this BEFORE toggling
   // panes/sidebar/dropdown below so every downstream selection uses the
@@ -8103,13 +8148,13 @@ function switchSettingsSection(name,opts){
   }
   _settingsSection=section;
   _currentSettingsSection=section;
-  const map={conversation:'Conversation',appearance:'Appearance',preferences:'Preferences',providers:'Providers',plugins:'Plugins',extensions:'Extensions',system:'System',help:'Help'};
+  const map={conversation:'Conversation',appearance:'Appearance',preferences:'Preferences',shortcuts:'Shortcuts',providers:'Providers',plugins:'Plugins',extensions:'Extensions',system:'System',help:'Help'};
   // Sidebar menu items
   document.querySelectorAll('#settingsMenu .side-menu-item').forEach(it=>{
     it.classList.toggle('active', it.dataset.settingsSection===section);
   });
   // Panes in main
-  ['conversation','appearance','preferences','providers','plugins','extensions','system','help'].forEach(key=>{
+  ['conversation','appearance','preferences','shortcuts','providers','plugins','extensions','system','help'].forEach(key=>{
     const pane=$('settingsPane'+map[key]);
     if(pane) pane.classList.toggle('active', key===section);
   });
@@ -8184,6 +8229,7 @@ async function _buildSettingsIndex() {
       settingsPaneConversation: 'conversation',
       settingsPaneAppearance: 'appearance',
       settingsPanePreferences: 'preferences',
+      settingsPaneShortcuts: 'shortcuts',
       settingsPaneProviders: 'providers',
       settingsPanePlugins: 'plugins',
       settingsPaneExtensions: 'extensions',
@@ -8404,6 +8450,7 @@ function _resolveSettingsField(entry) {
     conversation: 'settingsPaneConversation',
     appearance: 'settingsPaneAppearance',
     preferences: 'settingsPanePreferences',
+    shortcuts: 'settingsPaneShortcuts',
     providers: 'settingsPaneProviders',
     plugins: 'settingsPanePlugins',
     extensions: 'settingsPaneExtensions',

@@ -8739,7 +8739,6 @@ function renderSessionListFromCache(){
     el.oncontextmenu=(e)=>{
       if(readOnly) return;
       e.preventDefault();
-      if(e.pointerType==='touch'||e.pointerType==='pen') return;
       e.stopPropagation();
       clearTimeout(_tapTimer);
       _tapTimer=null;
@@ -9003,7 +9002,7 @@ function renderSessionListFromCache(){
       if(e.pointerType==='mouse' && e.button!==0) return;
       if(_isSessionActionTarget(e.target)) return;
       _beginSessionGesture(e.clientX,e.clientY,e.pointerType||'');
-      if(e.pointerType==='pen'){
+      if(e.pointerType==='pen'||e.pointerType==='touch'){
         _scheduleSessionLongPressMenu();
       }
     };
