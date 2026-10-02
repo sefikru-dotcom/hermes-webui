@@ -5109,6 +5109,20 @@ main.main.showing-music > #mainMusic{display:flex;flex:1 1 auto;height:100%;min-
   display: none !important;
 }
 
+/* В режиме Музыки на ноутбуке/десктопе схлопываем промежуточный левый сайдбар */
+@media (min-width: 769px) {
+  .layout.showing-music-active .sidebar:not(.mobile-open) {
+    width: 0 !important;
+    min-width: 0 !important;
+    opacity: 0 !important;
+    transform: translateX(-14px) !important;
+    border-right-color: transparent !important;
+    pointer-events: none !important;
+    overflow: hidden !important;
+    transition: none !important;
+  }
+}
+
 /* Мобильный сайдбар при открытии поверх полноэкранных панелей */
 .sidebar.mobile-open {
   display: flex !important;
