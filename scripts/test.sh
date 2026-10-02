@@ -147,6 +147,12 @@ select_python() {
   local requested_path base_py
   local desired_major_minor current_major_minor
 
+  VENV_PY="$(resolve_venv_python || true)"
+  if [[ -z "$requested" && -x "$VENV_PY" ]] && is_supported_python "$VENV_PY" && has_pip "$VENV_PY"; then
+    printf '%s\n' "$VENV_PY"
+    return 0
+  fi
+
   if [[ -n "$requested" ]]; then
     requested_path="$(resolve_executable "$requested")"
     if [[ -z "$requested_path" || ! -x "$requested_path" ]]; then

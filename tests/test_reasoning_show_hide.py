@@ -465,3 +465,23 @@ class TestReasoningRoutes:
             "POST /api/reasoning must route effort changes through "
             "set_reasoning_effort"
         )
+
+    def test_post_api_reasoning_accepts_session_scope(self):
+        src = read('api/routes.py')
+        assert 'scope == "session"' in src and 's.reasoning_effort' in src, (
+            "POST /api/reasoning must handle scope=session"
+        )
+
+    def test_get_reasoning_status_returns_source(self):
+        import api.config as cfg
+        st = cfg.get_reasoning_status(model_id='claude-3-7-sonnet')
+        assert 'source' in st, "get_reasoning_status must include 'source' key"
+        assert st['source'] in {'session', 'model', 'default'}, (
+            f"unexpected reasoning source: {st['source']}"
+        )
+
+    def test_compute_threshold_tokens_for_model(self):
+        import api.routes as routes
+        t200k = routes._compute_threshold_tokens_for_model(200_000, model='custom:deepseek-v4.1-flash')
+        assert t200k > 0 and t200k < 200_000, f"threshold must be dynamic and within bounds, got {t200k}"
+        assert t200k == 150_000, f"expected 150k for 200k window, got {t200k}"

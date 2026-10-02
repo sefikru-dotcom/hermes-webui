@@ -7974,6 +7974,44 @@ def _rescale_threshold_tokens_for_context_window(
     return max(1, int(threshold * new_window / old_window))
 
 
+def _compute_threshold_tokens_for_model(
+    context_length: int,
+    model: str | None = None,
+    provider: str | None = None,
+    base_url: str | None = None,
+) -> int:
+    """Dynamically compute the context compression threshold for a model window.
+
+    Delegates to agent.context_compressor.ContextCompressor so custom percent
+    ceilings, safety margins, and model-specific rules are evaluated dynamically
+    without hardcoding 128k or standard ratios.
+    """
+    try:
+        context_length = int(context_length or 0)
+    except (TypeError, ValueError):
+        return 0
+    if context_length <= 0:
+        return 0
+    try:
+        from agent.context_compressor import ContextCompressor
+
+        cc = ContextCompressor(
+            model=str(model or ""),
+            provider=str(provider or ""),
+            base_url=str(base_url or ""),
+            config_context_length=context_length,
+            quiet_mode=True,
+        )
+        return int(cc.threshold_tokens or 0)
+    except Exception:
+        try:
+            from agent.context_compressor import ContextCompressor
+
+            return int(ContextCompressor._compute_threshold_tokens(context_length, 0.75))
+        except Exception:
+            return max(1, int(context_length * 0.75))
+
+
 def _worktree_default_from_config(profile: str | None) -> bool:
     """Return the agent's config-level ``worktree:`` default for *profile*.
 
@@ -13118,6 +13156,9 @@ def _handle_session_get(handler, parsed) -> bool:
         # fix addresses on the streaming side.
         _persisted_cl = getattr(s, "context_length", 0) or 0
         _threshold_tokens = getattr(s, "threshold_tokens", 0) or 0
+        _model_for_lookup = None
+        _provider_for_lookup = None
+        _base_url_for_lookup = None
         if (not _persisted_cl) or resolve_model:
             _stored_model_for_lookup = getattr(s, "model", "") or ""
             _stored_provider_for_lookup = getattr(s, "model_provider", None) or ""
@@ -13160,6 +13201,13 @@ def _handle_session_get(handler, parsed) -> bool:
                         _fb_cl,
                     )
                 _persisted_cl = _fb_cl
+        if (not _threshold_tokens) and _persisted_cl:
+            _threshold_tokens = _compute_threshold_tokens_for_model(
+                _persisted_cl,
+                model=_model_for_lookup or getattr(s, "model", None),
+                provider=_provider_for_lookup or getattr(s, "model_provider", None),
+                base_url=_base_url_for_lookup,
+            )
         _session_tool_calls = getattr(s, "tool_calls", []) if load_messages else []
         # Always include session-level tool_calls so the browser can merge
         # them with per-message tool_calls for messages that lack the
@@ -13202,6 +13250,7 @@ def _handle_session_get(handler, parsed) -> bool:
             "pending_user_source": getattr(s, "pending_user_source", None),
             "context_length": _persisted_cl,
             "threshold_tokens": _threshold_tokens,
+            "reasoning_effort": getattr(s, "reasoning_effort", None),
             "last_prompt_tokens": getattr(s, "last_prompt_tokens", 0) or 0,
         }
         if original_stream_id:
@@ -13957,12 +14006,14 @@ def handle_get(handler, parsed) -> bool:
         model_id = (query.get("model", [""])[0] or "").strip() or None
         provider_id = (query.get("provider", [""])[0] or "").strip() or None
         base_url = (query.get("base_url", [""])[0] or "").strip() or None
+        session_id = (query.get("session_id", [""])[0] or "").strip() or None
         return j(
             handler,
             get_reasoning_status(
                 model_id=model_id,
                 provider_id=provider_id,
                 base_url=base_url,
+                session_id=session_id,
             ),
         )
 
@@ -15347,6 +15398,30 @@ def handle_post(handler, parsed) -> bool:
             worktree_info=worktree_info,
             enabled_toolsets=enabled_toolsets,
         )
+        # Hydrate the selected model window before the first response.  A new
+        # session has no usage yet, but the composer must still show the real
+        # model metadata instead of hiding the context control (#1436).
+        try:
+            _lookup_model, _lookup_provider, _lookup_base_url, _lookup_api_key = _session_context_length_lookup_state(
+                getattr(s, "model", None),
+                getattr(s, "model_provider", None),
+            )
+            _new_context_length = _resolve_context_length_for_session_model(
+                _lookup_model or getattr(s, "model", None),
+                _lookup_provider or getattr(s, "model_provider", None),
+                base_url=_lookup_base_url,
+                api_key=_lookup_api_key,
+            )
+            if _new_context_length:
+                s.context_length = _new_context_length
+                s.threshold_tokens = _compute_threshold_tokens_for_model(
+                    _new_context_length,
+                    model=_lookup_model or getattr(s, "model", None),
+                    provider=_lookup_provider or getattr(s, "model_provider", None),
+                    base_url=_lookup_base_url,
+                )
+        except Exception:
+            logger.debug("new-session context metadata hydration failed", exc_info=True)
         if worktree_info:
             publish_session_list_changed(
                 "session_new",
@@ -15555,10 +15630,27 @@ def handle_post(handler, parsed) -> bool:
                 model_id = str(body.get("model") or "").strip() or None
                 provider_id = str(body.get("provider") or "").strip() or None
                 base_url = str(body.get("base_url") or "").strip() or None
+                session_id = str(body.get("session_id") or "").strip() or None
+                scope = str(body.get("scope") or "").strip().lower()
+
+                if scope == "session" and session_id:
+                    s = _get_or_materialize_session(session_id)
+                    s.reasoning_effort = effort if effort else None
+                    s.save()
+                    return j(
+                        handler,
+                        get_reasoning_status(
+                            model_id=model_id or getattr(s, "model", None),
+                            provider_id=provider_id or getattr(s, "model_provider", None),
+                            base_url=base_url,
+                            session_id=session_id,
+                        ),
+                    )
+
                 # Mars: scope=model pins the level to the picked model
                 # (agent.reasoning_overrides) instead of the global default, so
                 # the model picker's inline ladder can set a level per model.
-                if str(body.get("scope") or "").strip().lower() == "model":
+                if scope == "model":
                     if not model_id:
                         return bad(handler, "reasoning: scope=model requires 'model'")
                     return j(

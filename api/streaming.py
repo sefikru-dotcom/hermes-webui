@@ -10526,11 +10526,25 @@ def _run_agent_streaming(
 
             # CLI-parity reasoning effort: read agent.reasoning_effort from the
             # active profile's config.yaml (the same key the CLI writes via
-            # `/reasoning <level>`) and hand the parsed dict to AIAgent.  When
-            # the key is absent or invalid, pass None → agent uses its default.
+            # `/reasoning <level>`) and hand the parsed dict to AIAgent.
+            # Mars: priority order is session override > agent.reasoning_overrides (per-model) > global.
             try:
                 _effort_cfg = _cfg.get('agent', {}) if isinstance(_cfg, dict) else {}
                 _effort_raw = _effort_cfg.get('reasoning_effort') if isinstance(_effort_cfg, dict) else None
+                _session_effort = getattr(session, 'reasoning_effort', None) if session else None
+                if _session_effort:
+                    _effort_raw = _session_effort
+                else:
+                    _model_overrides = _effort_cfg.get('reasoning_overrides') if isinstance(_effort_cfg, dict) else {}
+                    if _model_overrides and resolved_model:
+                        from api.config import _match_reasoning_override_key
+
+                        _k = _match_reasoning_override_key(_model_overrides, resolved_model)
+                        if not _k and "/" in resolved_model:
+                            _k = _match_reasoning_override_key(_model_overrides, resolved_model.split("/")[-1])
+                        if _k and _model_overrides.get(_k):
+                            _effort_raw = _model_overrides.get(_k)
+
                 _effort = coerce_reasoning_effort_for_model(
                     _effort_raw,
                     resolved_model,

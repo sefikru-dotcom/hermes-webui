@@ -3821,9 +3821,7 @@ def _filter_reasoning_efforts_for_provider(
     # pre-adaptive Anthropic manual-thinking lacks a 'max' budget and falls to 8k).
     # Dropping 'max' here lets the existing downgrade ladder land on xhigh/high.
     if provider in {"gemini", "google", "google-gemini", "google-vertex", "vertex"} or "gemini" in bare or "gemini" in provider:
-        if bare.startswith("gemini-3"):
-            return [eff for eff in normalized if eff in {"low", "high"}]
-        return [eff for eff in normalized if eff in {"low", "medium", "high"}]
+        return [eff for eff in normalized if eff != "max"]
     # Legacy Claude is pre-adaptive whether served natively OR via Azure Foundry /
     # Bedrock / Vertex — the ceiling follows the MODEL, not just the provider name.
     _anthropic_lanes = {
@@ -4496,13 +4494,19 @@ def get_reasoning_status(
     model_id: str | None = None,
     provider_id: str | None = None,
     base_url: str | None = None,
+    session_id: str | None = None,
 ) -> dict:
     """Return current reasoning configuration from the active profile's
     config.yaml — the same source of truth the CLI reads from.
 
     Keys:
       - show_reasoning: bool — from ``display.show_reasoning`` (default True)
-      - reasoning_effort: str — from ``agent.reasoning_effort`` ('' = default)
+      - reasoning_effort: str — coerced effective reasoning effort
+      - source: str — 'session' | 'model' | 'default'
+      - supported_efforts: list[str]
+      - supports_reasoning_effort: bool
+      - supports_thinking_toggle: bool
+      - model_overrides: dict
     """
     config_data = _load_yaml_config_file(_get_config_path())
     display_cfg = config_data.get("display") or {}
@@ -4538,17 +4542,51 @@ def get_reasoning_status(
         resolve_model, resolve_provider
     )
     supports_thinking_toggle = bool(supported_efforts) or (zai_thinking is True)
+
+    session_effort = None
+    if session_id:
+        try:
+            from api.models import get_session
+            s = get_session(session_id, metadata_only=True)
+            _se = getattr(s, "reasoning_effort", None)
+            if _se is not None and str(_se).strip():
+                session_effort = str(_se).strip().lower()
+        except Exception:
+            session_effort = None
+
+    model_overrides = get_model_reasoning_overrides()
+    model_pin_effort = None
+    if resolve_model:
+        _k = _match_reasoning_override_key(model_overrides, resolve_model)
+        if not _k and "/" in resolve_model:
+            _k = _match_reasoning_override_key(model_overrides, resolve_model.split("/")[-1])
+        if _k and model_overrides.get(_k):
+            model_pin_effort = str(model_overrides.get(_k)).strip().lower()
+
+    global_effort = str(effort_raw or "").strip().lower()
+
+    if session_effort:
+        candidate_effort = session_effort
+        source = "session"
+    elif model_pin_effort:
+        candidate_effort = model_pin_effort
+        source = "model"
+    else:
+        candidate_effort = global_effort
+        source = "default"
+
     return {
         # Match CLI default (True if unset in config.yaml)
         "show_reasoning": bool(show_raw) if isinstance(show_raw, bool) else True,
         # Report the COERCED effort so boot/status/chip read paths agree with
         # what streaming actually sends. (Codex review of the drop-max alignment.)
         "reasoning_effort": coerce_reasoning_effort_for_model(
-            str(effort_raw or "").strip().lower(),
+            candidate_effort,
             resolve_model,
             provider_id=resolve_provider,
             base_url=resolve_base_url,
         ),
+        "source": source,
         "supported_efforts": supported_efforts,
         "supports_reasoning_effort": bool(supported_efforts),
         # Whether the composer should render ANY reasoning control. True for any
@@ -4558,7 +4596,7 @@ def get_reasoning_status(
         # Mars: per-model pinned levels from agent.reasoning_overrides. The model
         # picker renders its inline effort ladder from this map so a level chosen
         # next to a model in the list survives across sessions and devices.
-        "model_overrides": get_model_reasoning_overrides(),
+        "model_overrides": model_overrides,
     }
 
 

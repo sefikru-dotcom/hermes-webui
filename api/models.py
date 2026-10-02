@@ -1323,6 +1323,7 @@ class Session:
         self.context_engine_state = context_engine_state if isinstance(context_engine_state, dict) else {}
         self.context_length = context_length
         self.threshold_tokens = threshold_tokens
+        self.reasoning_effort = kwargs.get('reasoning_effort') or None
         self.last_prompt_tokens = last_prompt_tokens
         _post_compression_tokens = _parse_nonnegative_int(post_compression_context_tokens_estimate)
         self.post_compression_context_tokens_estimate = (
@@ -1435,6 +1436,7 @@ class Session:
             'worktree_path', 'worktree_branch', 'worktree_repo_root', 'worktree_created_at',
             'is_cli_session', 'source_tag', 'raw_source', 'session_source', 'source_label', 'read_only',
             'enabled_toolsets', 'composer_draft',
+            'reasoning_effort',
             'process_wakeup_pause',
             'share_token', 'share_created_at',
         ]
@@ -1825,6 +1827,7 @@ class Session:
             'source_label': self.source_label,
             'read_only': self.read_only,
             'enabled_toolsets': self.enabled_toolsets,
+            'reasoning_effort': getattr(self, 'reasoning_effort', None),
             'composer_draft': self.composer_draft if isinstance(self.composer_draft, dict) else {},
             'process_wakeup_pause': self.process_wakeup_pause if isinstance(self.process_wakeup_pause, dict) else {},
             'share_token': self.share_token,
