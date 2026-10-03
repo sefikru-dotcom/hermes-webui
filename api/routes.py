@@ -2871,6 +2871,7 @@ from api.gateway_chat import gateway_chat_config_status
 from api.request_diagnostics import RequestDiagnostics
 from api.system_health import build_system_health_payload
 from api.kanban_route_helpers import kanban_unknown_endpoint_message
+from api.login_locale import resolve_login_locale_key
 
 
 def _kanban_unknown_endpoint(handler, parsed, method: str) -> bool:
@@ -10826,34 +10827,7 @@ _LOGIN_LOCALE = {
 
 def _resolve_login_locale_key(raw_lang: str | None) -> str:
     """Resolve settings.language to a known _LOGIN_LOCALE key."""
-    if not raw_lang:
-        return "en"
-    lang = str(raw_lang).strip()
-    if not lang:
-        return "en"
-    if lang in _LOGIN_LOCALE:
-        return lang
-
-    normalized = lang.replace("_", "-")
-    lower = normalized.lower()
-
-    # Case-insensitive direct key match first.
-    for key in _LOGIN_LOCALE:
-        if key.lower() == lower:
-            return key
-
-    # Common Chinese aliases.
-    if lower == "zh" or lower.startswith("zh-cn") or lower.startswith("zh-sg") or lower.startswith("zh-hans"):
-        return "zh"
-    if lower.startswith("zh-tw") or lower.startswith("zh-hk") or lower.startswith("zh-mo") or lower.startswith("zh-hant"):
-        return "zh-Hant" if "zh-Hant" in _LOGIN_LOCALE else "zh"
-
-    # Fallback to base language subtag (e.g. en-US -> en).
-    base = lower.split("-", 1)[0]
-    for key in _LOGIN_LOCALE:
-        if key.lower() == base:
-            return key
-    return "en"
+    return resolve_login_locale_key(raw_lang, _LOGIN_LOCALE)
 
 # ── Login page (self-contained, no external deps) ────────────────────────────
 _LOGIN_PAGE_HTML = """<!doctype html>
