@@ -463,7 +463,12 @@ def test_service_worker_cache_bumped_for_frontend_fix_delivery():
     # cache whose key != current CACHE_NAME, so the old shell is reaped on
     # every upgrade and the new sessions.js (with the INFLIGHT[sid] clear)
     # ships to existing browsers.
-    assert "CACHE_NAME = 'hermes-shell-__WEBUI_VERSION__'" in SW_SRC, (
+    # Mars-local convention: a manual `-mars-*` suffix MAY follow the
+    # placeholder. Upstream only bumps __WEBUI_VERSION__ on release installs,
+    # but local fixes ship via git pull — the manual suffix guarantees the
+    # shell cache is reaped for those too. Prefix check keeps the upstream
+    # guarantee (placeholder present) while allowing the local suffix.
+    assert "CACHE_NAME = 'hermes-shell-__WEBUI_VERSION__" in SW_SRC, (
         "SW CACHE_NAME must include __WEBUI_VERSION__ so each release "
         "invalidates the previous cache and delivers frontend changes."
     )

@@ -555,6 +555,8 @@ def test_render_messages_keeps_anchor_owned_turn_out_of_legacy_activity_rebuilds
         function isTransparentStream() {{ return false; }}
         function isCompactWorklogMode() {{ return true; }}
         function isSimplifiedToolCalling() {{ return true; }}
+        function isFinalAnswerOnlyMode() {{ return false; }}
+        function isHideAllActivityMode() {{ return false; }}
         function t(key) {{ return key; }}
         function li() {{ return ''; }}
         function esc(value) {{ return String(value == null ? '' : value); }}

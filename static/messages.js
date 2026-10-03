@@ -4121,6 +4121,19 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
         status:options.sealed?'completed':'running',
         payload:{text:clean,activitySegmentSeq:segmentSeq,activityBurstId:_currentActivityBurstId},
       });
+      // Mars reasoning fast-path: a live (unsealed) delta only changes the TEXT
+      // of one existing scene row. The registry update above is the single
+      // source of truth, so sync the DOM in place (coalesced to frame rate)
+      // instead of projecting + rebuilding the whole anchor scene on every
+      // ~10Hz SSE reasoning event — that rebuild was O(rows) per event,
+      // O(rows²) per turn, and the dominant jank source in compact_worklog.
+      // Sealed flushes keep the full authoritative re-render. The live probe
+      // matters: without a painted row the render outcome must still decide
+      // between scene ownership and the visible fallback path (#5720).
+      if(!options.sealed&&_findLiveReasoningRow(localId)){
+        _scheduleLiveReasoningDomSync(localId,clean);
+        return replaced;
+      }
       return _renderAnchorLiveScene()?replaced:null;
     }
     const renderOutcome={rendered:false};
@@ -4133,6 +4146,67 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
       activityBurstId:_currentActivityBurstId,
     },null,renderOutcome);
     return renderOutcome.rendered?_findAnchorActivityEventByLocalId(localId,'reasoning'):null;
+  }
+  // ── Mars reasoning DOM fast-path ──────────────────────────────────────────
+  // Coalesce live reasoning DOM syncs to animation-frame rate and update ONLY
+  // the existing scene row in place. Any full scene rebuild (tool event, done,
+  // mode switch, session reattach) reads the anchor registry — which is
+  // updated synchronously — so dropping a pending frame never loses text.
+  let _reasoningDomSyncRaf=0;
+  let _reasoningDomSyncPending=null;
+  function _findLiveReasoningRow(localId){
+    const turn=$('liveAssistantTurn');
+    if(!turn||!localId) return null;
+    try{
+      const row=turn.querySelector(
+        `[data-anchor-scene-row="1"][data-anchor-source-event-type="reasoning"][data-anchor-local-id="${CSS.escape(localId)}"]`
+      );
+      return (row&&row.isConnected!==false)?row:null;
+    }catch(_){ return null; }
+  }
+  function _scheduleLiveReasoningDomSync(localId,text){
+    _reasoningDomSyncPending={localId,text};
+    if(_reasoningDomSyncRaf) return;
+    let ran=false;
+    const run=()=>{
+      if(ran) return;
+      ran=true;
+      _reasoningDomSyncRaf=0;
+      const pending=_reasoningDomSyncPending;
+      _reasoningDomSyncPending=null;
+      if(!pending) return;
+      if(_terminalStateReached||_streamFinalized) return;
+      if(!_isActiveSession()) return;
+      if(!_syncLiveReasoningRowInPlace(pending.localId,pending.text)){
+        // Row vanished (mode switch / rebuild raced) — fall back to the
+        // authoritative full scene render.
+        _renderAnchorLiveScene();
+      }
+    };
+    _reasoningDomSyncRaf=requestAnimationFrame(run);
+    // Synchronous rAF polyfills (node test harness) execute run() before the
+    // id assignment lands; normalize so a completed frame cannot wedge the
+    // scheduler into never firing again.
+    if(ran) _reasoningDomSyncRaf=0;
+  }
+  function _cancelLiveReasoningDomSync(){
+    const had=_reasoningDomSyncRaf;
+    _reasoningDomSyncRaf=0;
+    _reasoningDomSyncPending=null;
+    if(had&&typeof cancelAnimationFrame==='function'){
+      try{ cancelAnimationFrame(had); }catch(_){}
+    }
+  }
+  function _syncLiveReasoningRowInPlace(localId,text){
+    const clean=String(text||'').trim();
+    if(!clean) return false;
+    const row=_findLiveReasoningRow(localId);
+    if(!row) return false;
+    // _renderThinkingInto applies the live tail window + preview sync itself.
+    if(typeof _renderThinkingInto!=='function') return false;
+    _renderThinkingInto(row,clean);
+    if(typeof scrollIfPinned==='function') scrollIfPinned();
+    return true;
   }
   function _compactVisibleEchoText(value){
     return String(value||'').replace(/\s+/g,'');
@@ -4203,6 +4277,10 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
     return removed;
   }
   function _stripLiveReasoningEcho(visible){
+    // Drop any pending in-place reasoning DOM sync first: its captured text is
+    // pre-strip and would re-paint the echo this function is removing. The
+    // follow-up full scene render reads the stripped registry.
+    _cancelLiveReasoningDomSync();
     let removed=false;
     const durable=_stripCompactEchoSuffix(reasoningText, visible);
     if(durable.removed){
@@ -4406,7 +4484,22 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
     if(window._showThinking===false){removeThinking();return;}
     const text=(parsed&&parsed.thinkingText)||'';
     if(text||(parsed&&parsed.inThinking)){
-      _updateLiveThinkingCard(text||'Thinking…');
+      // Mars reasoning fast-path: when the anchor scene owns the live turn, the
+      // reasoning SSE handler already keeps registry + scene row in sync (see
+      // _upsertAnchorReasoning). Calling _updateLiveThinkingCard here would hit
+      // appendThinking's scene-owner branch and FULLY rebuild the anchor scene
+      // on every _doRender frame (up to 15fps while the answer streams with a
+      // non-empty thinkingText) — a redundant O(rows) rebuild per frame.
+      const sceneOwned=(typeof isLiveAnchorActivitySceneOwner==='function')&&isLiveAnchorActivitySceneOwner(S.activeStreamId);
+      if(!sceneOwned){
+        _updateLiveThinkingCard(text||'Thinking…');
+      }else if(text&&!_anchorHasReasoningEvents()){
+        // Inline-<think> providers (no SSE reasoning channel): mirror the parsed
+        // thinking into the anchor registry so it stays visible in scene modes;
+        // subsequent frames take the cheap in-place sync path.
+        _upsertAnchorReasoning(text);
+      }
+      if(parsed&&String(parsed.displayText||'').trim()) _autoCollapseLiveThinkingForAnswer();
       return;
     }
     // Only remove thinking if we're not in an active reasoning phase.
@@ -4414,6 +4507,21 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
     // don't wipe the finalized thinking card — it has no id anymore so
     // removeThinking() won't find it anyway, but guard explicitly.
     if(!reasoningText) removeThinking();
+  }
+  // Mars UX (#reasoning-fold): once the visible answer starts streaming, fold the
+  // live thinking card(s) so the answer stays in focus. One-shot per card; a
+  // manual user toggle (data-user-toggled) always wins, and _renderThinkingInto
+  // refuses to force-open cards marked data-auto-collapsed.
+  function _autoCollapseLiveThinkingForAnswer(){
+    if(typeof isThinkingCollapsed==='function'&&isThinkingCollapsed()) return;
+    const turn=$('liveAssistantTurn');
+    if(!turn) return;
+    turn.querySelectorAll('[data-thinking-active="1"] .thinking-card.open,[data-live-thinking="1"] .thinking-card.open').forEach(card=>{
+      if(card.hasAttribute('data-user-toggled')) return;
+      if(card.hasAttribute('data-auto-collapsed')) return;
+      card.setAttribute('data-auto-collapsed','1');
+      card.classList.remove('open');
+    });
   }
   // Helper: create (or recreate) the smd parser bound to a given DOM element.
   // Called when assistantBody is first created and after each tool-call segment reset.
@@ -5884,6 +5992,10 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
       if(!S.session||S.session.session_id!==activeSid||S.activeStreamId!==streamId) return;
       const d=JSON.parse(e.data);
       if(d.name==='clarify') return;
+      // Mars: cancel any pending in-place reasoning DOM sync — the tool
+      // rebuild below reads the (synchronously updated) anchor registry, so a
+      // late rAF frame would be redundant at best and race-prone at worst.
+      _cancelLiveReasoningDomSync();
       _completeAutomaticCompressionOnLiveProgress(activeSid);
       const tc=upsertLiveToolCall(d,'start');
       if(!tc) return;
@@ -6158,6 +6270,7 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
         // can reintroduce a stale thinking card or duplicate content.
         _streamFinalized=true;
         _cancelAnimationFramePendingStreamRender();
+        _cancelLiveReasoningDomSync();
         _streamFadeCleanupReduceMotionListener();
         if(typeof finalizeThinkingCard==='function') finalizeThinkingCard();
         // Finalize smd parser — flushes any remaining buffered markdown state

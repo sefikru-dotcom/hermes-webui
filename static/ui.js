@@ -11999,7 +11999,7 @@ function _thinkingCardHtml(text, open){
   const classes=`thinking-card${shouldOpen?' open':''}${collapsed?' thinking-card-collapsed':''}`;
   const preview=collapsed?_thinkingPreviewText(clean):'';
   const previewHtml=preview?`<span class="thinking-card-preview">${esc(preview)}</span>`:'';
-  return `<div class="${classes}"><div class="thinking-card-header" onclick="this.parentElement.classList.toggle('open')"><span class="thinking-card-icon">${li('lightbulb',14)}</span><span class="thinking-card-label">${t('thinking')}</span>${previewHtml}<span class="thinking-card-btn-row">${copyBtn}<span class="thinking-card-toggle">${li('chevron-right',12)}</span></span></div><div class="thinking-card-body"><pre>${esc(clean)}</pre></div></div>`;
+  return `<div class="${classes}"><div class="thinking-card-header" onclick="this.parentElement.setAttribute('data-user-toggled','1');this.parentElement.classList.toggle('open')"><span class="thinking-card-icon">${li('lightbulb',14)}</span><span class="thinking-card-label">${t('thinking')}</span>${previewHtml}<span class="thinking-card-btn-row">${copyBtn}<span class="thinking-card-toggle">${li('chevron-right',12)}</span></span></div><div class="thinking-card-body"><pre>${esc(clean)}</pre></div></div>`;
 }
 function isSimplifiedToolCalling(){
   return window._simplifiedToolCalling!==false;
@@ -20955,7 +20955,7 @@ function _thinkingMarkup(text='', open=false){
   const preview=collapsed?_thinkingPreviewText(clean):'';
   const previewHtml=preview?`<span class="thinking-card-preview">${esc(preview)}</span>`:'';
   return (clean&&String(clean).trim())
-    ? `<div class="thinking-card${openClass}${collapsed?' thinking-card-collapsed':''}"><div class="thinking-card-header" onclick="this.parentElement.classList.toggle('open')"><span class="thinking-card-icon">${li('lightbulb',14)}</span><span class="thinking-card-label">${t('thinking')}</span>${previewHtml}<span class="thinking-card-toggle">${li('chevron-right',12)}</span></div><div class="thinking-card-body"><pre>${esc(String(clean).trim())}</pre></div></div>`
+    ? `<div class="thinking-card${openClass}${collapsed?' thinking-card-collapsed':''}"><div class="thinking-card-header" onclick="this.parentElement.setAttribute('data-user-toggled','1');this.parentElement.classList.toggle('open')"><span class="thinking-card-icon">${li('lightbulb',14)}</span><span class="thinking-card-label">${t('thinking')}</span>${previewHtml}<span class="thinking-card-toggle">${li('chevron-right',12)}</span></div><div class="thinking-card-body"><pre>${esc(String(clean).trim())}</pre></div></div>`
     : `<div class="thinking"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>`;
 }
 // Keep the folded reasoning preview in sync while the stream updates the card.
@@ -20983,6 +20983,10 @@ function _syncThinkingCardPreview(row,clean){
   }
   preview.textContent=text;
 }
+// Mars live tail window: cap the streaming reasoning <pre> payload (see
+// _renderThinkingInto). 6000 chars ≈ the last ~120 lines — far more than the
+// 280px viewport shows, cheap to relayout per frame.
+const LIVE_THINKING_TAIL_LIMIT=6000;
 function _renderThinkingInto(row,text=''){
   if(!row) return;
   const clean=_sanitizeThinkingDisplayText(text);
@@ -20991,26 +20995,42 @@ function _renderThinkingInto(row,text=''){
     row.innerHTML=_thinkingMarkup(text, isLive);
     return;
   }
+  // Mars live tail window: while streaming, only the tail of the reasoning is
+  // kept in the <pre> so per-frame layout stays O(window) instead of O(full
+  // text) — the old full-text textContent write was quadratic over long
+  // thinking traces. The anchor registry / persisted reasoning keeps the FULL
+  // text; every rebuild, settle and reload re-renders it in full.
+  const shown=(isLive&&clean.length>LIVE_THINKING_TAIL_LIMIT)
+    ? ('…\n'+clean.slice(-LIVE_THINKING_TAIL_LIMIT))
+    : clean;
   let card = row.querySelector('.thinking-card');
   if(!card){
-    row.innerHTML=_thinkingMarkup(text, isLive);
+    row.innerHTML=_thinkingMarkup(shown, isLive);
     card = row.querySelector('.thinking-card');
   }
   if(card && isLive && !isThinkingCollapsed()){
-    card.classList.add('open');
+    // Mars: never force-open a card the user folded (data-user-toggled) or one
+    // auto-folded when the visible answer started streaming
+    // (data-auto-collapsed). Fixes the old behaviour where a manual close was
+    // undone by the next reasoning delta.
+    if(!card.hasAttribute('data-user-toggled')&&!card.hasAttribute('data-auto-collapsed')){
+      card.classList.add('open');
+    }
   }
   const pre=row.querySelector('.thinking-card-body pre');
   if(pre){
-    pre.textContent=clean;
+    pre.textContent=shown;
     _syncThinkingCardPreview(row, clean);
     const body=row.querySelector('.thinking-card-body');
     if(body && isLive && !isThinkingCollapsed()) body.scrollTop=body.scrollHeight;
     return;
   }
-  row.innerHTML=_thinkingMarkup(text, isLive);
+  row.innerHTML=_thinkingMarkup(shown, isLive);
   const newCard = row.querySelector('.thinking-card');
   if(newCard && isLive && !isThinkingCollapsed()){
-    newCard.classList.add('open');
+    if(!newCard.hasAttribute('data-user-toggled')&&!newCard.hasAttribute('data-auto-collapsed')){
+      newCard.classList.add('open');
+    }
   }
 }
 function finalizeThinkingCard(){

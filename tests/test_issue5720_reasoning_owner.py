@@ -24,6 +24,7 @@ def _run_reasoning_scene(
     stale_active_stream: bool = False,
     stale_live_turn: bool = False,
     show_thinking: bool = True,
+    tail_probe: bool = False,
 ) -> dict:
     assert NODE, "node is required for the #5720 browser-chain regression"
     env = os.environ.copy()
@@ -46,6 +47,8 @@ def _run_reasoning_scene(
         env["ISSUE5720_STALE_LIVE_TURN"] = "1"
     if not show_thinking:
         env["ISSUE5720_SHOW_THINKING"] = "0"
+    if tail_probe:
+        env["ISSUE5720_TAIL_PROBE"] = "1"
     result = subprocess.run(
         [NODE, "-e", _NODE_SCENE],
         cwd=ROOT,
@@ -67,7 +70,12 @@ def test_deepseek_reasoning_deltas_keep_one_live_row_owner():
     assert result["second_text"] == "Plan step"
     assert result["same_node"] is True
     assert result["live_reasoning_rows"] == 1
-    assert result["render_passes"] == [1, 2]
+    # Mars reasoning fast-path: the first delta paints the scene once; later
+    # live deltas sync the painted row in place (rAF) instead of re-running
+    # the full scene render — the text assertions above prove the in-place
+    # sync updated the same owner node, and the registry stays authoritative.
+    assert result["render_passes"] == [1, 1]
+    assert result["anchor_render_attempts"] == 1
     assert result["anchor_reasoning_events"] == 1
     assert result["anchor_reasoning_text"] == "Plan step"
     assert result["inflight_reasoning_text"] == "Plan step"
@@ -143,6 +151,30 @@ def test_reasoning_fallback_rebuilds_from_another_sessions_live_turn():
 
 @pytest.mark.skipif(NODE is None, reason="node not on PATH")
 @pytest.mark.parametrize("activity_mode", ["transparent_stream", "compact_worklog"])
+def test_live_reasoning_inplace_sync_tail_window_and_user_toggle(activity_mode):
+    """Mars fast-path: live deltas sync the painted row in place.
+
+    - No extra full scene render per delta (attempts delta == 0).
+    - The <pre> keeps only the tail window (O(window) layout per frame),
+      while the anchor registry retains the FULL accumulated reasoning.
+    - A card the user folded (data-user-toggled) is never force-reopened,
+      but a live un-folded card is force-opened while streaming.
+    """
+    result = _run_reasoning_scene(activity_mode=activity_mode, tail_probe=True)
+    probe = result["tail_probe"]
+
+    assert probe is not None
+    assert probe["forced_open_when_live"] is True
+    assert probe["user_toggled_kept_closed"] is True
+    assert probe["pre_starts_with_ellipsis"] is True
+    assert 0 < probe["pre_len"] <= 6000 + 2
+    assert probe["anchor_attempts_delta"] == 0
+    # Registry (authoritative source for every rebuild/persist) keeps full text.
+    assert len(result["anchor_reasoning_text"]) > 6000
+
+
+@pytest.mark.skipif(NODE is None, reason="node not on PATH")
+@pytest.mark.parametrize("activity_mode", ["transparent_stream", "compact_worklog"])
 def test_later_deferred_anchor_paint_updates_existing_reasoning_owner(activity_mode):
     result = _run_reasoning_scene(
         activity_mode=activity_mode,
@@ -155,7 +187,12 @@ def test_later_deferred_anchor_paint_updates_existing_reasoning_owner(activity_m
     assert result["live_reasoning_rows"] == 1
     assert result["fallback_rows_after_recovery"] == 0
     assert result["visible_reasoning_owners"] == 1
-    assert result["anchor_render_attempts"] == 2
+    # Mars reasoning fast-path: once the first paint owns a live row, later
+    # deltas sync it in place — the deferred second full paint never fires,
+    # so the fail-on-2 injection stays inert and no duplicate owner appears.
+    # Deferred full paints on unpainted rows are still covered by the
+    # hide_all_activity and visible-fallback scenarios below.
+    assert result["anchor_render_attempts"] == 1
     assert result["anchor_reasoning_events"] == 1
     assert result["anchor_reasoning_text"] == "Plan step"
     assert result["inflight_reasoning_text"] == "Plan step"
@@ -282,6 +319,9 @@ class FakeElement {
   }
   getAttribute(name){
     return Object.prototype.hasOwnProperty.call(this.attributes,name)?this.attributes[name]:null;
+  }
+  hasAttribute(name){
+    return Object.prototype.hasOwnProperty.call(this.attributes,String(name));
   }
   getAttributeNames(){ return Object.keys(this.attributes); }
   removeAttribute(name){
@@ -462,6 +502,11 @@ global._decorateTransparentEventRow=(row,opts)=>{
 global._rehydrateTransparentLiveRow=()=>{};
 global._sanitizeThinkingDisplayText=value=>String(value||'').trim();
 global._firstValidTimestampSeconds=()=>null;
+global.LIVE_THINKING_TAIL_LIMIT=global.LIVE_THINKING_TAIL_LIMIT||6000;
+global.CSS=global.CSS||{escape:String};
+// appendThinking (prod) pings the stream_quiet stage label; irrelevant to the
+// reasoning-scene invariants under test.
+global._marsSetCurrentStage=()=>{};
 
 eval(anchorsSrc);
 for(const name of [
@@ -472,6 +517,7 @@ for(const name of [
   '_transparentLiveRowAttributePairs','_transparentLiveRowInteractiveState',
   '_refreshTransparentThinkingLiveRow','_refreshTransparentLiveRow',
   '_thinkingMarkup','_renderThinkingInto',
+  'thinkingMode','isThinkingCollapsed','_thinkingPreviewText','_syncThinkingCardPreview',
   '_resetMismatchedLiveAssistantTurnForSession',
   '_liveAnchorReasoningRowForFallback','_updateLiveAnchorReasoningRowForFallback',
   '_anchorSceneNodeForRow','_anchorSceneWorklogGroup','_renderAnchorSceneRowsIntoWorklog',
@@ -615,6 +661,32 @@ const second=anchorReasoningRows()[0]||null;
 const secondText=reasoningText(second);
 const anchorRowsAfterRecovery=anchorReasoningRows();
 const fallbackRowsAfterRecovery=fallbackReasoningRows();
+// Mars tail-window / user-toggle probe: exercise the in-place fast path with a
+// long delta on a row marked live (as production does mid-stream).
+let tailProbe=null;
+if(process.env.ISSUE5720_TAIL_PROBE==='1'){
+  const row=anchorReasoningRows()[0]||null;
+  if(!row) throw new Error('tail probe: no painted reasoning row');
+  row.setAttribute('data-live-thinking','1');
+  const card=row.querySelector('.thinking-card');
+  const attemptsBefore=anchorRenderAttempts;
+  // Stage 1: live row without user toggle — sync may force-open the card.
+  source.emit('reasoning',{text:'live tail'});
+  const forcedOpen=!!(card&&card.classList.contains('open'));
+  // Stage 2: user collapses the card — sync must NOT re-open it.
+  if(card){ card.setAttribute('data-user-toggled','1'); card.classList.remove('open'); }
+  const long='x'.repeat((global.LIVE_THINKING_TAIL_LIMIT||6000)+500);
+  source.emit('reasoning',{text:long});
+  const pre=row.querySelector('.thinking-card-body pre');
+  const preText=pre?String(pre.textContent||''):'';
+  tailProbe={
+    forced_open_when_live:forcedOpen,
+    user_toggled_kept_closed:!!(card&&!card.classList.contains('open')),
+    pre_len:preText.length,
+    pre_starts_with_ellipsis:preText.startsWith('…\\n')||preText.startsWith('…\n'),
+    anchor_attempts_delta:anchorRenderAttempts-attemptsBefore,
+  };
+}
 const registry=window._liveAnchorRegistries&&window._liveAnchorRegistries.get('stream-1');
 const anchorReasoningEvents=registry&&registry.anchor&&Array.isArray(registry.anchor.activity_events)
   ? registry.anchor.activity_events.filter(event=>event&&event.source_event_type==='reasoning')
@@ -658,6 +730,7 @@ process.stdout.write(JSON.stringify({
   first_text:firstText,
   first_fallback_text:firstFallbackText,
   second_text:secondText,
+  tail_probe:tailProbe,
   same_node:first===second,
   live_reasoning_rows:anchorRowsAfterRecovery.length,
   fallback_rows_after_recovery:fallbackRowsAfterRecovery.length,

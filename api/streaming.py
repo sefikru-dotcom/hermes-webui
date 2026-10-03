@@ -9362,6 +9362,17 @@ def _run_agent_streaming(
 
     _success_writeback_committed = False
 
+    # Mars (perf pass 03.10): journal batching for reasoning frames was tried
+    # here and REVERTED. Reasoning SSE frames are non-idempotent appends on the
+    # frontend, and replay-after-reconnect keys off the per-frame journal
+    # event_id (Last-Event-ID cursor). Batching the journal write while
+    # delivering live frames un-id'd makes the cursor lag behind applied text,
+    # so an EventSource auto-reconnect (common on mobile PWA network switches)
+    # replays merged batches the browser already applied — duplicating thinking
+    # text in the live card AND in the persisted session history. A safe batch
+    # would need seq reservation at put() time + deferred per-frame line writes
+    # in run_journal (reserve/append split), for a negligible win (~10 small
+    # page-cached appends/sec). Do not re-attempt without that rework.
     def put(event, data):
         # If cancelled, drop all further events except the cancel event itself
         if cancel_event.is_set() and not _success_writeback_committed and event not in ('cancel', 'apperror'):
@@ -9845,8 +9856,31 @@ def _run_agent_streaming(
                 # reasoning that happens to reuse an answer phrase.
                 if len(candidate) < 80:
                     return False
-                visible_compact = _compact_for_echo_compare(visible_output)
+                visible_compact = _incremental_visible_compact()
                 return bool(visible_compact and candidate in visible_compact)
+
+            # Mars: incremental compacted mirror of STREAM_PARTIAL_TEXT for the
+            # membership check above. The raw buffer is append-only during a live
+            # stream (+= in on_text), so we compact only the NEW suffix per call
+            # instead of re-compacting the whole visible text on every reasoning
+            # delta — that was O(total²) over long turns with chunky providers.
+            # If the buffer ever shrinks (reset/truncate), rebuild from scratch;
+            # a same-length in-place mutation is not possible on this path, and
+            # worst case this heuristic only mis-classifies an echo.
+            _echo_visible_cache = {'raw_len': 0, 'compact': ''}
+
+            def _incremental_visible_compact() -> str:
+                visible_output = STREAM_PARTIAL_TEXT.get(stream_id, '')
+                prev_len = _echo_visible_cache['raw_len']
+                if len(visible_output) < prev_len:
+                    prev_len = 0
+                    _echo_visible_cache['compact'] = ''
+                if len(visible_output) > prev_len:
+                    _echo_visible_cache['compact'] += _compact_for_echo_compare(
+                        visible_output[prev_len:]
+                    )
+                    _echo_visible_cache['raw_len'] = len(visible_output)
+                return _echo_visible_cache['compact']
 
             def _strip_reasoning_output_echo(text: str) -> bool:
                 nonlocal _reasoning_segments
