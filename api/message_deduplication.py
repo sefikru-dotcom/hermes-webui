@@ -87,4 +87,3 @@ def message_identity(msg, *, message_text, strip_workspace_prefix):
         str(msg.get("tool_call_id") or ""),
         json.dumps(msg.get("tool_calls") or [], sort_keys=True, ensure_ascii=False),
     )
-
