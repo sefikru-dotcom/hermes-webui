@@ -59,6 +59,7 @@ from api.helpers import (
     _redact_text,
 )
 from api.compression_anchor import is_context_compression_marker, visible_messages_for_anchor
+from api.message_deduplication import deduplicate_context_messages, message_identity
 from api.compression_recovery import stamp_compression_exhausted_recovery
 from api.metering import meter
 from api.run_journal import RunJournalWriter
@@ -5836,68 +5837,15 @@ def _api_safe_message_positions(messages):
 
 
 def _deduplicate_context_messages(messages):
-    """Remove duplicate messages from context by identity, keeping first occurrence.
-
-    Prevents the agent from seeing the same message twice in conversation_history
-    when result_messages contain duplicates that weren't caught by display-merge.
-    Compression/reference markers are internal recovery material: keep at most
-    one canonical assistant reference so a mis-role ``user`` marker cannot become
-    the next active user instruction.
-    """
-    if not messages:
-        return messages
-    seen = set()
-    deduped = []
-    user_exact_index = {}
-    for msg in messages:
-        if _is_context_compression_marker(msg):
-            marker_key = (
-                '__context_compression_marker__',
-                " ".join(_message_text(msg.get('content', '')).split())[:500],
-            )
-            if marker_key in seen:
-                continue
-            seen.add(marker_key)
-            if isinstance(msg, dict) and msg.get('role') != 'assistant':
-                msg = copy.deepcopy(msg)
-                msg['role'] = 'assistant'
-            deduped.append(msg)
-            continue
-        if _is_compressed_context_tool_result_summary_message(msg) and not msg.get('tool_call_id'):
-            deduped.append(msg)
-            continue
-        # Context ownership is provider-facing: two rows with identical visible
-        # text but different durable ``api_content`` sidecars are distinct turns.
-        # Keep the display identity unchanged so ordinary transcript dedup still
-        # collapses the same visible row.
-        key = _message_replay_key(msg)
-        if isinstance(msg, dict) and msg.get('role') == 'user' and key is not None:
-            user_exact_key = (
-                key,
-                msg.get('timestamp'),
-                msg.get('_ts'),
-                msg.get('_source') or 'webui',
-                json.dumps(msg.get('attachments') or [], sort_keys=True, ensure_ascii=False),
-            )
-            prior_exact_idx = user_exact_index.get(user_exact_key)
-            if msg.get('_active_turn_token'):
-                if prior_exact_idx is not None:
-                    deduped[prior_exact_idx] = msg
-                    continue
-                if key in seen:
-                    deduped.append(msg)
-                    user_exact_index[user_exact_key] = len(deduped) - 1
-                    continue
-            elif prior_exact_idx is not None:
-                continue
-            user_exact_index[user_exact_key] = len(deduped)
-        if key is not None and key in seen:
-            continue
-        if key is not None:
-            seen.add(key)
-        deduped.append(msg)
-    return deduped
-
+    return deduplicate_context_messages(
+        messages,
+        is_context_compression_marker=_is_context_compression_marker,
+        message_replay_key=_message_replay_key,
+        is_compressed_context_tool_result_summary_message=(
+            _is_compressed_context_tool_result_summary_message
+        ),
+        message_text=_message_text,
+    )
 
 def _assign_stable_message_ids(result_messages, *existing_arrays):
     """Mint a stable, session-unique integer ``id`` on model-result rows lacking one.
@@ -6271,42 +6219,11 @@ def _session_context_messages(session):
 
 
 def _message_identity(msg):
-    if not isinstance(msg, dict):
-        return None
-    role = str(msg.get('role') or '')
-    content = msg.get('content', '')
-    text = _message_text(content)
-    if role == 'user':
-        # WebUI sends the model a workspace-prefixed user_message while the
-        # visible optimistic bubble contains only the human text. Treat them as
-        # the same turn for merge/dedup purposes; otherwise compaction results
-        # render two adjacent user bubbles ("Ok" and "[Workspace...]\nOk").
-        text = _strip_workspace_prefix(text, include_legacy=True)
-    if not text and not msg.get('tool_call_id') and not msg.get('tool_calls'):
-        # Empty assistant messages (e.g. _partial markers with no visible
-        # content) previously returned None, making them invisible to the
-        # merge dedup in _merge_display_messages_after_agent_result. This
-        # caused exponential accumulation: each turn's merge copied ALL
-        # prior _partial messages because they had no identity to track.
-        # Now, _partial messages with empty text get a stable identity
-        # keyed on their role + _partial flag + reasoning/tool metadata,
-        # so the merge can dedup identical empty partials.
-        if msg.get('_partial'):
-            reasoning_key = " ".join(str(msg.get('reasoning') or '').split())[:200]
-            return (
-                role,
-                '',  # empty text
-                '',  # no tool_call_id
-                '__partial__' + reasoning_key,
-            )
-        return None
-    return (
-        role,
-        " ".join(str(text or '').split())[:500],
-        str(msg.get('tool_call_id') or ''),
-        json.dumps(msg.get('tool_calls') or [], sort_keys=True, ensure_ascii=False),
+    return message_identity(
+        msg,
+        message_text=_message_text,
+        strip_workspace_prefix=_strip_workspace_prefix,
     )
-
 
 def _messages_have_prefix(messages, prefix, *, key_fn=None):
     key_fn = key_fn or _message_identity
