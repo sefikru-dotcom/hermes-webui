@@ -112,6 +112,13 @@ dependencies at call time, preserving existing monkeypatch seams for wiki path
 resolution and allowlisted entries. URL contracts and TOCTOU protections are
 unchanged. The focused wiki/read-only regression set passed 46/46.
 
+## Seventh structural slice
+
+The read-only /api/logs handler now lives in api/route_logs.py. The legacy
+api.routes._handle_logs facade remains and injects the active-profile home,
+response helpers, and logger at call time, preserving the endpoint contract and
+existing route-level seams. The focused read-only regression set passed 58/58.
+
 ## Next candidates
 
 1. Extract further narrow helpers from `api/routes.py` (~29.2k lines) one
