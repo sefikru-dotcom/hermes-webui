@@ -75,6 +75,7 @@ from api.route_readonly import handle_readonly_get
 from api.route_session_events import handle_session_events_stream
 from api.route_logs import handle_logs as _handle_logs_impl
 from api.route_cron_output import (CRON_OUTPUT_CONTENT_LIMIT as _CRON_OUTPUT_CONTENT_LIMIT, content_window as _cron_content_window, snippet as _cron_snippet, usage_metadata as _cron_usage_metadata)
+from api.route_dashboard_plugins import dashboard_plugin_enabled, webui_plugin_payload
 
 
 def _handle_logs(handler, parsed) -> bool:
@@ -11811,16 +11812,10 @@ def _plugin_visibility_payload(manager=None) -> dict:
 
 # WebUI dashboard plugins (from manifest.json discovery)
 def _dashboard_plugin_enabled(plugin_name: str) -> bool:
-    """True if a dashboard plugin is enabled in settings.
-
-    Dashboard plugins are opt-in (default off). Enforced server-side so a
-    disabled plugin's page + asset URLs are fully 404'd, not merely hidden in
-    the Settings UI.
-    """
+    """Compatibility wrapper for dashboard plugin settings checks."""
     try:
         from api.config import load_settings
-        prefs = (load_settings() or {}).get("dashboard_plugins", {}) or {}
-        return bool(prefs.get(plugin_name, False))
+        return dashboard_plugin_enabled(plugin_name, load_settings=load_settings)
     except Exception:
         return False
 
@@ -11828,7 +11823,7 @@ def _dashboard_plugin_enabled(plugin_name: str) -> bool:
 def _webui_plugin_payload() -> list[dict]:
     try:
         from api.plugins import get_plugin_metadata
-        return get_plugin_metadata()
+        return webui_plugin_payload(get_plugin_metadata=get_plugin_metadata)
     except Exception:
         return []
 
