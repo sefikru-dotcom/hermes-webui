@@ -74,6 +74,7 @@ from api.project_os_helpers import (  # noqa: F401 — re-exports for backward c
 from api.route_readonly import handle_readonly_get
 from api.route_session_events import handle_session_events_stream
 from api.route_logs import handle_logs as _handle_logs_impl
+from api.route_cron_output import (CRON_OUTPUT_CONTENT_LIMIT as _CRON_OUTPUT_CONTENT_LIMIT, content_window as _cron_content_window, snippet as _cron_snippet, usage_metadata as _cron_usage_metadata)
 
 
 def _handle_logs(handler, parsed) -> bool:
@@ -1369,39 +1370,11 @@ def _is_cron_running(job_id: str) -> tuple[bool, float]:
 
 
 def _cron_response_marker_index(text: str) -> int:
-    """Return the start index of a markdown Response heading, if present."""
-    candidates = []
-    for heading in ("## Response", "# Response"):
-        if text.startswith(heading):
-            candidates.append(0)
-        idx = text.find(f"\n{heading}")
-        if idx >= 0:
-            candidates.append(idx + 1)
-    return min(candidates) if candidates else -1
-
+    from api.route_cron_output import response_marker_index
+    return response_marker_index(text)
 
 def _cron_output_content_window(text: str, limit: int = _CRON_OUTPUT_CONTENT_LIMIT) -> str:
-    """Return a bounded cron output window that preserves useful response text.
-
-    Cron output files can contain large skill dumps in the Prompt section. The
-    UI already extracts ``## Response`` when present, so keep that section in
-    the API payload instead of blindly returning the first ``limit`` chars.
-    """
-    if limit <= 0:
-        return ""
-    if len(text) <= limit:
-        return text
-
-    response_idx = _cron_response_marker_index(text)
-    if response_idx >= 0:
-        header = text[:min(_CRON_OUTPUT_HEADER_CONTEXT, response_idx)].rstrip()
-        response = text[response_idx:].lstrip("\n")
-        content = f"{header}\n...\n{response}" if header else response
-        return content[:limit]
-
-    return text[-limit:]
-
-
+    return _cron_content_window(text, limit)
 
 
 def _cron_job_for_api(job: dict) -> dict:
@@ -20904,80 +20877,10 @@ def _handle_cron_run_detail(handler, parsed):
 
 
 def _cron_output_usage_metadata(text: str) -> dict:
-    """Extract optional token/cost metadata from a cron output markdown file."""
-    import re as _re
-
-    head = text.split("## Response", 1)[0].split("# Response", 1)[0]
-    usage: dict = {}
-
-    def _intish(value: str):
-        cleaned = _re.sub(r"[^0-9]", "", value or "")
-        return int(cleaned) if cleaned else None
-
-    def _floatish(value: str):
-        match = _re.search(r"[-+]?\d+(?:\.\d+)?", (value or "").replace(",", ""))
-        return float(match.group(0)) if match else None
-
-    for raw_line in head.splitlines():
-        line = raw_line.strip()
-        model_match = _re.match(r"\*\*(?:Model|Model Used):\*\*\s*(.+)$", line, _re.I)
-        if model_match:
-            usage["model"] = model_match.group(1).strip()
-            continue
-        provider_match = _re.match(r"\*\*Provider:\*\*\s*(.+)$", line, _re.I)
-        if provider_match:
-            usage["provider"] = provider_match.group(1).strip()
-            continue
-        cost_match = _re.match(r"\*\*(?:Estimated cost|Cost):\*\*\s*(.+)$", line, _re.I)
-        if cost_match:
-            cost = _floatish(cost_match.group(1))
-            if cost is not None:
-                usage["estimated_cost_usd"] = cost
-            continue
-        duration_match = _re.match(r"\*\*(?:Duration|Elapsed):\*\*\s*(.+)$", line, _re.I)
-        if duration_match:
-            seconds = _floatish(duration_match.group(1))
-            if seconds is not None:
-                usage["duration_seconds"] = seconds
-            continue
-        tokens_match = _re.match(r"\*\*Tokens:\*\*\s*(.+)$", line, _re.I)
-        if tokens_match:
-            value = tokens_match.group(1)
-            input_match = _re.search(r"([0-9][0-9,]*)\s*(?:input|in)\b", value, _re.I)
-            output_match = _re.search(r"([0-9][0-9,]*)\s*(?:output|out)\b", value, _re.I)
-            total_match = _re.search(r"([0-9][0-9,]*)\s*(?:total\s*)?tokens?\b", value, _re.I)
-            if input_match:
-                usage["input_tokens"] = _intish(input_match.group(1))
-            if output_match:
-                usage["output_tokens"] = _intish(output_match.group(1))
-            if total_match and "total_tokens" not in usage:
-                usage["total_tokens"] = _intish(total_match.group(1))
-
-    if "total_tokens" not in usage:
-        total = sum(int(usage.get(k) or 0) for k in ("input_tokens", "output_tokens"))
-        if total:
-            usage["total_tokens"] = total
-    return usage
-
+    return _cron_usage_metadata(text)
 
 def _cron_output_snippet(text: str, limit: int = 600) -> str:
-    """Extract the response body from a cron output .md file for preview.
-
-    Contract: cron output files use markdown front-matter followed by a
-    ``## Response`` (or ``# Response``) heading that marks the start of the
-    agent's reply.  This function locates that heading and returns everything
-    after it (up to *limit* chars).  If no heading is found the entire text
-    is returned — callers should be aware that front-matter fields (model,
-    timestamp, …) may appear in the snippet.
-    """
-    lines = text.split("\n")
-    response_idx = -1
-    for i, line in enumerate(lines):
-        if line.startswith("## Response") or line.startswith("# Response"):
-            response_idx = i
-            break
-    body = ("\n".join(lines[response_idx + 1:]) if response_idx >= 0 else "\n".join(lines)).strip()
-    return body[:limit] or "(empty)"
+    return _cron_snippet(text, limit)
 
 
 def _handle_cron_output(handler, parsed):

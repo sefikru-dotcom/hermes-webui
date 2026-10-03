@@ -152,3 +152,12 @@ passed 125/125.
 
 Supporting pure modules also include api/media_headers.py and
 api/origin_helpers.py, each re-exported from api.routes for compatibility.
+
+## Ninth structural slice
+
+Pure cron output formatting now lives in `api/route_cron_output.py`: response-window
+truncation, response snippets, and usage metadata parsing. `api/routes.py` keeps
+compatibility wrappers for the existing helper names and route-level tests. Cron
+execution, profile context, file validation, and endpoint payloads remain unchanged.
+Focused route/source checks passed 15/15; no deploy or restart was performed.
+
