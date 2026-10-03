@@ -78,10 +78,18 @@ Mars-specific policy callbacks. This keeps compression markers, workspace prefix
 provider replay sidecars and empty partial identities unchanged while reducing the
 streaming monolith.
 
+## Second completed structural slice
+
+`api/route_gateway_helpers.py` now owns the messaging identity cache and the
+profile-scoped `hermes gateway` CLI runner. `api/routes.py` keeps
+`/api/gateway/status` and `/api/gateway/{start,stop,restart}` handlers plus the
+status payload so URL/JSON contracts and existing monkeypatch tests stay stable.
+
 ## Next candidates
 
-1. Extract low-risk route/integration helpers from `api/routes.py` without changing
-   endpoints or payloads.
+1. Extract another low-risk route/integration helper from `api/routes.py`
+   without changing endpoints or payloads. Leave HTTP handlers in `routes.py`
+   when tests patch that module.
 2. Separate reasoning/anchor-scene rendering from `static/messages.js` only after
    current mobile and streaming tests are mapped.
 3. Treat profiles and streaming lifecycle as late refactor targets.
