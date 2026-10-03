@@ -104,6 +104,14 @@ patches the getter on the routes module.
 Both slices keep URL/JSON contracts unchanged; `api/routes.py` shrank from
 29,468 to 29,162 lines.
 
+## Sixth structural slice
+
+The read-only LLM Wiki status, browse, and page handlers now live in the
+dedicated api/route_wiki.py module. The read-only dispatcher passes route-level
+dependencies at call time, preserving existing monkeypatch seams for wiki path
+resolution and allowlisted entries. URL contracts and TOCTOU protections are
+unchanged. The focused wiki/read-only regression set passed 46/46.
+
 ## Next candidates
 
 1. Extract further narrow helpers from `api/routes.py` (~29.2k lines) one
