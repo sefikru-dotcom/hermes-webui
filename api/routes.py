@@ -23220,10 +23220,20 @@ def _handle_chat_start(handler, body, diag=None):
             if "model_provider" in body
             else getattr(s, "model_provider", None)
         )
-        if os.environ.get("HERMES_WEBUI_ISOLATED_PROFILE") == "1" or active_profile == "sergey" or getattr(s, "profile", None) == "sergey":
-            requested_model = "deepseek-flash"
-            requested_provider = "custom"
-        _pp_provider, _pp_default, _pp_cfg = _read_profile_model_config(s, requested_provider)
+        _locked_profile = (
+            os.environ.get("HERMES_WEBUI_ISOLATED_PROFILE") == "1"
+            or active_profile in {"office", "sergey"}
+            or getattr(s, "profile", None) in {"office", "sergey"}
+        )
+        if _locked_profile:
+            # Office and Sergey are single-model profiles. Ignore stale session
+            # state and client-supplied model/provider values; route every turn
+            # through that profile's configured model.
+            _pp_provider, _pp_default, _pp_cfg = _read_profile_model_config(s, None)
+            requested_model = _pp_default
+            requested_provider = _pp_provider
+        else:
+            _pp_provider, _pp_default, _pp_cfg = _read_profile_model_config(s, requested_provider)
         explicit_model_pick = bool(body.get("explicit_model_pick"))
         moa_config = None
         config_snapshot = get_config_snapshot()
@@ -23246,9 +23256,11 @@ def _handle_chat_start(handler, body, diag=None):
             profile_config=_pp_cfg,
             explicit_model_pick=explicit_model_pick,
         )
-        if os.environ.get("HERMES_WEBUI_ISOLATED_PROFILE") == "1" or active_profile == "sergey" or getattr(s, "profile", None) == "sergey":
-            model = "deepseek-flash"
-            model_provider = "custom"
+        if _locked_profile:
+            # Enforce the locked profile even when an old session or client sends
+            # an explicit pick. Model/provider are taken from profile config above.
+            model = requested_model
+            model_provider = requested_provider
         # #5979: record a SIGNATURE of the deliberately-picked model+provider so
         # the streaming resolver can preserve a custom-proxy vendor namespace on a
         # cold catalog — but ONLY while the routing context still matches. On a
