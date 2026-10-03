@@ -71,6 +71,10 @@ from api.project_os_helpers import (  # noqa: F401 — re-exports for backward c
     _project_os_goal_summary,
     _project_os_onboarding_context,
 )
+from api.origin_helpers import (  # noqa: F401 — re-exports for backward compat
+    _normalize_host_port,
+    _ports_match,
+)
 from api.media_headers import (  # noqa: F401 — re-exports for backward compat
     _content_disposition_value,
     _parse_range_header,
@@ -5424,44 +5428,6 @@ def _reconcile_stale_stream_state_for_session_rows(session_rows) -> bool:
 
 # ── CSRF: validate Origin/Referer on POST ────────────────────────────────────
 import re as _re
-
-
-def _normalize_host_port(value: str) -> tuple[str, str | None]:
-    """Split a host or host:port string into (hostname, port|None).
-    Handles IPv6 bracket notation, e.g. [::1]:8080."""
-    value = value.strip().lower()
-    if not value:
-        return '', None
-    if value.startswith('['):
-        end = value.find(']')
-        if end != -1:
-            host = value[1:end]
-            rest = value[end + 1 :]
-            if rest.startswith(':') and rest[1:].isdigit():
-                return host, rest[1:]
-            return host, None
-    if value.count(':') == 1:
-        host, port = value.rsplit(':', 1)
-        if port.isdigit():
-            return host, port
-    return value, None
-
-
-def _ports_match(origin_scheme: str, origin_port: str | None, allowed_port: str | None) -> bool:
-    """Return True when two ports should be considered equivalent, scheme-aware.
-
-    Treats an absent port as the scheme default: port 80 for http, port 443 for https.
-    Port 80 is NOT treated as equivalent to 443 (different protocols = different origins).
-    """
-    if origin_port == allowed_port:
-        return True
-    # Determine the default port for the origin's scheme
-    default = '443' if origin_scheme == 'https' else '80'
-    if not origin_port and allowed_port == default:
-        return True
-    if not allowed_port and origin_port == default:
-        return True
-    return False
 
 
 def _allowed_public_origins() -> set[str]:
