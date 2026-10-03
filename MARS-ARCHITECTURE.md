@@ -114,3 +114,17 @@ Both slices keep URL/JSON contracts unchanged; `api/routes.py` shrank from
 2. Separate reasoning/anchor-scene rendering from `static/messages.js` only after
    current mobile and streaming tests are mapped.
 3. Treat profiles and streaming lifecycle as late refactor targets.
+
+## Fifth structural slice
+
+api/route_readonly.py now owns the read-only system/provider GET cluster:
+Wiki browse/page/status, logs and health, model and live-model reads, dashboard
+status/config, providers, plugins, provider quota and cost history.
+api/routes.py remains the public handle_get dispatcher and supplies all
+dependencies at call time, preserving profile scoping and monkeypatch targets.
+Static route-audit markers remain in routes.py without duplicating handlers.
+The extraction reduced api/routes.py by 155 lines; focused regression suites
+passed 125/125.
+
+Supporting pure modules also include api/media_headers.py and
+api/origin_helpers.py, each re-exported from api.routes for compatibility.
