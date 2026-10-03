@@ -180,25 +180,12 @@ def test_session_events_sse_endpoint_survives_rapid_disconnect():
 
 
 def test_session_events_handler_uses_disconnect_safe_errors_tuple():
-    """
-    Source-level guard that the handler's except clause references the shared
-    _CLIENT_DISCONNECT_ERRORS tuple defined in api/routes.py. This is the
-    safety mechanism that makes the unsubscribe-on-disconnect path actually
-    fire across the full range of socket-failure modes (not just BrokenPipeError).
-    """
     from pathlib import Path
 
+    route = Path("api/route_session_events.py").read_text(encoding="utf-8")
+    assert "except disconnect_errors:" in route
+    assert "unsubscribe(q)" in route
+    assert "finally:" in route
     routes = Path("api/routes.py").read_text(encoding="utf-8")
-    handler_start = routes.find("def _handle_session_events_stream")
-    assert handler_start >= 0, "_handle_session_events_stream not found"
-    handler_end = routes.find("\ndef ", handler_start + 1)
-    if handler_end < 0:
-        handler_end = len(routes)
-    handler_body = routes[handler_start:handler_end]
-    assert "_CLIENT_DISCONNECT_ERRORS" in handler_body, (
-        "handler must catch the shared disconnect tuple to trigger unsubscribe"
-    )
-    assert "unsubscribe_session_events" in handler_body, (
-        "handler must unsubscribe in the cleanup path"
-    )
-    assert "finally:" in handler_body, "handler must use a finally block for cleanup"
+    assert "def _handle_session_events_stream(handler):" in routes
+    assert "disconnect_errors=_CLIENT_DISCONNECT_ERRORS" in routes

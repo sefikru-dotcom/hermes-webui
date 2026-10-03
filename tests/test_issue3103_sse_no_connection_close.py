@@ -34,7 +34,7 @@ def _emits_connection_close(body: str) -> bool:
 
 
 def test_session_events_stream_does_not_emit_connection_close():
-    body = _handler_body("_handle_session_events_stream")
+    body = (Path(__file__).resolve().parents[1] / "api" / "route_session_events.py").read_text(encoding="utf-8")
     assert "text/event-stream" in body, "sanity: this is the SSE handler"
     assert not _emits_connection_close(body), (
         "_handle_session_events_stream must not emit `Connection: close` — it triggers "

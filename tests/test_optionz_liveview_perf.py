@@ -235,17 +235,9 @@ def test_all_sse_endpoints_set_write_deadline():
 
 
 def test_session_events_stream_arms_write_deadline():
-    """The session-events invalidation SSE handler must arm the write deadline
-    like every other long-lived SSE endpoint — otherwise a slow/backgrounded tab
-    can pin its handler thread for up to the 30s connection timeout instead of
-    the tunable deadline."""
-    src = (REPO_ROOT / "api" / "routes.py").read_text()
-    start = src.index("def _handle_session_events_stream(")
-    end = src.index("\ndef ", start)
-    body = src[start:end]
-    assert "_sse_set_write_deadline(handler)" in body, (
-        "_handle_session_events_stream must call _sse_set_write_deadline"
-    )
+    """The global session-events route must arm the shared write deadline."""
+    src = (REPO_ROOT / "api" / "route_session_events.py").read_text()
+    assert "set_write_deadline(handler)" in src
 
 
 def test_streaming_exports_write_deadline_api():

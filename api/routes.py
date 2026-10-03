@@ -72,6 +72,7 @@ from api.project_os_helpers import (  # noqa: F401 — re-exports for backward c
     _project_os_onboarding_context,
 )
 from api.route_readonly import handle_readonly_get
+from api.route_session_events import handle_session_events_stream
 from api.profiles import (
     profile_env_for_active_request,
     profile_env_for_active_request_readonly,
@@ -18840,32 +18841,16 @@ def _handle_gateway_sse_stream(handler, parsed):
 
 
 def _handle_session_events_stream(handler):
-    """SSE endpoint for lightweight session-list invalidation events."""
-    handler.send_response(200)
-    handler.send_header('Content-Type', 'text/event-stream; charset=utf-8')
-    handler.send_header('Cache-Control', 'no-cache')
-    handler.send_header('X-Accel-Buffering', 'no')
-    # #3103: see _handle_gateway_sse_stream — `Connection: close` causes
-    # EventSource reconnect storms in browsers on long-lived SSE.
-    end_sse_headers(handler)
-    _sse_set_write_deadline(handler)  # Defect A: slow tab can't pin this thread
-
-    q = subscribe_session_events()
-    try:
-        while True:
-            try:
-                event_data = q.get(timeout=_SSE_HEARTBEAT_INTERVAL_SECONDS)
-            except queue.Empty:
-                handler.wfile.write(b': keepalive\n\n')
-                handler.wfile.flush()
-                continue
-            _sse(handler, event_data.get('type', 'sessions_changed'), event_data)
-    except _CLIENT_DISCONNECT_ERRORS:
-        pass
-    finally:
-        unsubscribe_session_events(q)
-    return True
-
+    return handle_session_events_stream(
+        handler,
+        end_sse_headers=end_sse_headers,
+        set_write_deadline=_sse_set_write_deadline,
+        sse=_sse,
+        disconnect_errors=_CLIENT_DISCONNECT_ERRORS,
+        heartbeat_interval=_SSE_HEARTBEAT_INTERVAL_SECONDS,
+        subscribe=subscribe_session_events,
+        unsubscribe=unsubscribe_session_events,
+    )
 
 def _open_file_read_fd(target: Path, anchor_root: Path | None = None) -> int:
     if anchor_root is None:
