@@ -3023,13 +3023,18 @@ function _getOptionProviderId(opt){
     return group.dataset.provider;
   }
   const value=String(opt.value||'');
-  if(value.startsWith('@') && value.includes(':')) return value.slice(1,value.lastIndexOf(':'));
-  return '';
+  return _providerFromModelValue(value);
 }
 function _providerFromModelValue(modelId){
   const value=String(modelId||'').trim();
-  if(value.startsWith('@')&&value.includes(':')) return value.slice(1,value.lastIndexOf(':'));
-  return '';
+  if(!value.startsWith('@') || !value.includes(':')) return '';
+  if(value.startsWith('@custom:')){
+    const named=value.slice('@custom:'.length);
+    const splitAt=named.indexOf(':');
+    return splitAt>=0 ? 'custom:'+named.slice(0,splitAt) : 'custom';
+  }
+  const firstColon=value.indexOf(':',1);
+  return firstColon>0 ? value.slice(1,firstColon) : '';
 }
 function _modelPickerOptionIdentity(modelId, providerId){
   let value=String(modelId||'');
@@ -3383,7 +3388,7 @@ function _findModelInDropdown(modelId, sel, preferredProviderId){
   let explicitProvider='';
   const rawModel=String(modelId||'');
   if(rawModel.startsWith('@')&&rawModel.includes(':')){
-    explicitProvider=rawModel.slice(1,rawModel.lastIndexOf(':'));
+    explicitProvider=_providerFromModelValue(rawModel);
   }
   const preferred=String(preferredProviderId||explicitProvider||'').toLowerCase();
   if(preferred){
@@ -4317,8 +4322,14 @@ let _marsReasoningOpenRow=null;                     // currently expanded row (o
 
 function _marsBareModelId(value){
   const raw=String(value||'').trim();
-  if(raw.startsWith('@')&&raw.includes(':')) return raw.slice(raw.lastIndexOf(':')+1);
-  return raw;
+  if(!raw.startsWith('@') || !raw.includes(':')) return raw;
+  if(raw.startsWith('@custom:')){
+    const named=raw.slice('@custom:'.length);
+    const splitAt=named.indexOf(':');
+    return splitAt>=0 ? named.slice(splitAt+1) : named;
+  }
+  const firstColon=raw.indexOf(':',1);
+  return firstColon>0 ? raw.slice(firstColon+1) : raw;
 }
 function _marsReasoningProvider(modelValue,providerId){
   return String(providerId||(typeof _providerFromModelValue==='function'?_providerFromModelValue(modelValue):'')||'').trim();
