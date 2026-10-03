@@ -48,6 +48,7 @@ without a visual/mobile regression check.
 These are lower-level product integrations with narrower boundaries:
 
 - `api/kanban_bridge.py` — projects/Kanban bridge to the agent database.
+- `api/kanban_route_helpers.py` — stale-client diagnostics for unmatched Kanban routes.
 - `api/dashboard_probe.py` — dashboard status probe.
 - `api/gateway_chat.py`, `api/gateway_watcher.py`, `api/gateway_restart.py` — gateway/messaging integration.
 - `api/office_documents.py` and office profile service — office workflow integration.

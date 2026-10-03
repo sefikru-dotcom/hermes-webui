@@ -2870,19 +2870,12 @@ from api.agent_health import build_agent_health_payload
 from api.gateway_chat import gateway_chat_config_status
 from api.request_diagnostics import RequestDiagnostics
 from api.system_health import build_system_health_payload
+from api.kanban_route_helpers import kanban_unknown_endpoint_message
 
 
 def _kanban_unknown_endpoint(handler, parsed, method: str) -> bool:
     """Return a Kanban-specific 404 for stale clients/obsolete endpoint shapes."""
-    return bad(
-        handler,
-        (
-            f"unknown Kanban endpoint: {method} {parsed.path}. "
-            "If this appeared after a WebUI update, your browser may be running "
-            "a stale cached bundle; use Hard refresh now, then reopen Kanban."
-        ),
-        status=404,
-    ) or True
+    return bad(handler, kanban_unknown_endpoint_message(parsed, method), status=404) or True
 
 
 # A cancelled worker that stays in ACTIVE_RUNS longer than this is treated as
