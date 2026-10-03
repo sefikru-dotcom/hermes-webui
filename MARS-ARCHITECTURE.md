@@ -85,11 +85,30 @@ profile-scoped `hermes gateway` CLI runner. `api/routes.py` keeps
 `/api/gateway/status` and `/api/gateway/{start,stop,restart}` handlers plus the
 status payload so URL/JSON contracts and existing monkeypatch tests stay stable.
 
+## Third and fourth completed structural slices
+
+`api/project_os_helpers.py` now owns the pure Project OS helpers: workspace
+read/json, truth board slugs, repo matching/resolution, goal summary and
+onboarding context. The `_handle_project_os_dashboard` HTTP handler stays in
+`api/routes.py`, which re-exports the helpers with identity preserved.
+
+`api/plugin_visibility_helpers.py` now owns the #539 plugin visibility
+constants, sanitizing/categorization helpers and the payload builder
+(`build_plugin_visibility_payload` with an injected `manager_getter`).
+`api/routes.py` keeps `_get_plugin_manager_for_visibility` and a thin
+`_plugin_visibility_payload` wrapper because `tests/test_plugins_panel.py`
+patches the getter on the routes module.
+
+Both slices keep URL/JSON contracts unchanged; `api/routes.py` shrank from
+29,468 to 29,162 lines.
+
 ## Next candidates
 
-1. Extract another low-risk route/integration helper from `api/routes.py`
-   without changing endpoints or payloads. Leave HTTP handlers in `routes.py`
-   when tests patch that module.
+1. Extract further narrow helpers from `api/routes.py` (~29.2k lines) one
+   limited diff at a time, without changing endpoints or payloads. Leave HTTP
+   handlers and monkeypatch targets (functions patched as
+   `api.routes.<name>`) in `routes.py`; inject them into extracted builders at
+   call time when needed.
 2. Separate reasoning/anchor-scene rendering from `static/messages.js` only after
    current mobile and streaming tests are mapped.
 3. Treat profiles and streaming lifecycle as late refactor targets.
