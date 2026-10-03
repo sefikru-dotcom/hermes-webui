@@ -119,6 +119,15 @@ api.routes._handle_logs facade remains and injects the active-profile home,
 response helpers, and logger at call time, preserving the endpoint contract and
 existing route-level seams. The focused read-only regression set passed 58/58.
 
+## Eighth structural slice
+
+The /api/insights read-only analytics aggregation now lives in
+api/route_insights.py. api.routes._handle_insights remains as a compatibility
+facade and injects the session directory, response helper, and logger at call
+time; state-db resolution remains runtime-patchable through api.models. The
+payload contract is unchanged. Focused insights/cache/parameter-validation
+tests passed 28/28.
+
 ## Next candidates
 
 1. Extract further narrow helpers from `api/routes.py` (~29.2k lines) one
