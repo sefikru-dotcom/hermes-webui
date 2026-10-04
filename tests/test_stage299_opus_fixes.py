@@ -14,60 +14,57 @@ These tests pin the defenses applied per Opus advisor on stage-299:
 """
 from pathlib import Path
 
-ROUTES_PY = Path(__file__).parent.parent / "api" / "routes.py"
-
-
-def _read_source():
-    return ROUTES_PY.read_text()
-
-
 def test_wiki_max_files_constant_present():
-    src = _read_source()
-    assert "_LLM_WIKI_MAX_FILES" in src
-    assert "_LLM_WIKI_FORBIDDEN_ROOTS" in src
-    # Make sure cap is reasonable (≥ a few thousand, ≤ 100k)
-    assert "10000" in src or "_LLM_WIKI_MAX_FILES = 10" in src
+    from api import routes
+
+    assert 1000 <= routes._LLM_WIKI_MAX_FILES <= 100000
 
 
-def test_count_files_has_iteration_cap():
-    src = _read_source()
-    # Locate _llm_wiki_count_files body
-    start = src.find("def _llm_wiki_count_files(")
-    end = src.find("\ndef ", start + 1)
-    body = src[start:end]
-    assert "_LLM_WIKI_MAX_FILES" in body
-    assert "_LLM_WIKI_FORBIDDEN_ROOTS" in body
-    assert "iterated > _LLM_WIKI_MAX_FILES" in body or "iterated >= _LLM_WIKI_MAX_FILES" in body
+def test_count_files_has_iteration_cap(tmp_path, monkeypatch):
+    from api import routes
+
+    root = tmp_path / "raw"
+    root.mkdir()
+    for i in range(5):
+        (root / f"{i}.md").write_text("body")
+    monkeypatch.setattr(routes, "_LLM_WIKI_MAX_FILES", 2)
+
+    assert routes._llm_wiki_count_files(root) == 2
 
 
-def test_page_files_has_iteration_cap():
-    src = _read_source()
-    start = src.find("def _llm_wiki_page_files_uncached(")
-    end = src.find("\ndef ", start + 1)
-    body = src[start:end]
-    assert "_LLM_WIKI_MAX_FILES" in body
-    assert "_LLM_WIKI_FORBIDDEN_ROOTS" in body
+def test_page_files_has_iteration_cap(tmp_path, monkeypatch):
+    from api import routes
+
+    wiki = tmp_path / "wiki"
+    section = wiki / "concepts"
+    section.mkdir(parents=True)
+    for i in range(5):
+        (section / f"{i}.md").write_text("body")
+    monkeypatch.setattr(routes, "_LLM_WIKI_MAX_FILES", 2)
+
+    assert len(routes._llm_wiki_page_files_uncached(wiki)) == 2
 
 
 def test_forbidden_roots_includes_system_paths():
-    src = _read_source()
-    # Find the constant definition
-    start = src.find("_LLM_WIKI_FORBIDDEN_ROOTS = ")
-    end = src.find(")\n", start) + 1
-    decl = src[start:end + 1]
-    for forbidden in ("/", "/etc", "/usr", "/var"):
-        assert f'"{forbidden}"' in decl, f"Forbidden root {forbidden!r} not in _LLM_WIKI_FORBIDDEN_ROOTS"
+    from api import routes
+
+    for forbidden in ("/", "/etc", "/usr", "/var", "/opt", "/sys", "/proc"):
+        assert str(Path(forbidden).resolve()) in routes._LLM_WIKI_FORBIDDEN_ROOTS
 
 
 def test_count_files_returns_zero_for_forbidden_root(tmp_path, monkeypatch):
-    """Behavioral test: walking a forbidden root returns 0 without iterating."""
-    import importlib
-    routes = importlib.import_module("api.routes")
-    
-    forbidden_root = Path("/etc")
-    if forbidden_root.exists():  # skip on systems without /etc (Windows)
-        result = routes._llm_wiki_count_files(forbidden_root)
-        assert result == 0, "Walking /etc should return 0 (forbidden root guard)"
+    from api import routes
+
+    root = tmp_path / "forbidden"
+    root.mkdir()
+    monkeypatch.setattr(routes, "_LLM_WIKI_FORBIDDEN_ROOTS", frozenset({str(root.resolve())}))
+
+    def no_walk(*args, **kwargs):
+        raise AssertionError("forbidden roots must not be walked")
+
+    monkeypatch.setattr(Path, "rglob", no_walk)
+    assert routes._llm_wiki_count_files(root) == 0
+    assert routes._llm_wiki_page_files_uncached(root) == []
 
 
 def test_render_llm_wiki_status_uses_url_scheme_guard():
