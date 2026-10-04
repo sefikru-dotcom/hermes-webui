@@ -12,6 +12,7 @@ import io
 import gzip
 import json
 from api.sse_chunked import end_sse_headers
+from api.route_files import handle_file_operations, handle_file_mutations
 import logging
 import mimetypes
 import os
@@ -13261,7 +13262,31 @@ def handle_get(handler, parsed) -> bool:
         return _handle_sessions_search(handler, parsed)
 
     if parsed.path == "/api/list":
-        return _handle_list_dir(handler, parsed)
+        result = handle_file_operations(handler, parsed, deps={
+
+            _handle_list_dir: _handle_list_dir,
+
+            _handle_escape_authorize: _handle_escape_authorize,
+
+            _handle_escape_list_dir: _handle_escape_list_dir,
+
+            _handle_escape_file_read: _handle_escape_file_read,
+
+            _handle_escape_file_raw: _handle_escape_file_raw,
+
+            _handle_file_raw: _handle_file_raw,
+
+            _handle_file_read: _handle_file_read,
+
+            bad: bad,
+
+            j: j,
+
+        })
+
+        if result is not None:
+
+            return result
 
     if parsed.path == "/api/escape/list":
         return _handle_escape_list_dir(handler, parsed)
