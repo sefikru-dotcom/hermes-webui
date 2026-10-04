@@ -9533,3 +9533,9 @@ button.send-btn:active:not(:disabled),
  .kanban-modal-actions{position:sticky;bottom:0;background:var(--surface);padding:8px 0;}
  .kanban-modal-actions .btn,.kanban-detail .btn{min-height:44px;}
 }
+
+@media(max-width:900px){
+ .mobile-workspace-navigation .btn{background:var(--input-bg);color:var(--text);border:1px solid var(--border);border-radius:8px;font:inherit;font-size:13px;}
+ .layout.mobile-workspace-split #mainChat{height:calc(45dvh - 56px);max-height:calc(45dvh - 56px);flex:0 0 auto;}
+ .layout.mobile-workspace-split #mainChat .messages{min-height:0;}
+}
