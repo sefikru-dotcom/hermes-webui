@@ -196,3 +196,50 @@ def test_tts_rate_limit_can_trust_forwarded_for_when_opted_in(monkeypatch):
     )
     routes._handle_tts(h2, None)
     assert h2.status == 400
+
+
+
+def test_tts_limiter_stays_owned_by_route_facade():
+    first = _post({"text": "hello", "voice": "invalid"})
+    routes._handle_tts(first, None)
+    limiter = routes._handle_tts._tts_limiter
+    second = _post({"text": "hello", "voice": "invalid"})
+    routes._handle_tts(second, None)
+    assert second.status == 429
+    assert routes._handle_tts._tts_limiter is limiter
+
+    del routes._handle_tts._tts_limiter
+    third = _post({"text": "hello", "voice": "invalid"})
+    routes._handle_tts(third, None)
+    assert third.status == 400
+    assert routes._handle_tts._tts_limiter is not limiter
+
+
+def test_tts_uses_current_route_body_and_prosody_helpers(monkeypatch):
+    calls = []
+    monkeypatch.setattr(routes, "read_body", lambda _handler: {"text": "hello", "voice": "invalid"})
+
+    def normalize(value, *, unit):
+        calls.append((value, unit))
+        return None if unit == "%" else ""
+
+    monkeypatch.setattr(routes, "_normalize_tts_prosody", normalize)
+    handler = _post({})
+    routes._handle_tts(handler, None)
+    assert handler.status == 400
+    assert handler.payload()["error"] == "invalid rate"
+    assert calls == [(None, "%"), (None, "Hz")]
+    assert not hasattr(routes._handle_tts, "_tts_limiter")
+
+
+def test_tts_rejects_unauthenticated_client_before_limiter(monkeypatch):
+    import api.auth as auth
+
+    monkeypatch.setattr(auth, "is_auth_enabled", lambda: True)
+    monkeypatch.setattr(auth, "parse_cookie", lambda _handler: "invalid-session")
+    monkeypatch.setattr(auth, "verify_session", lambda _cookie: False)
+    handler = _post({"text": "hello", "voice": "invalid"})
+    routes._handle_tts(handler, None)
+    assert handler.status == 401
+    assert handler.payload()["error"] == "unauthorized"
+    assert not hasattr(routes._handle_tts, "_tts_limiter")
