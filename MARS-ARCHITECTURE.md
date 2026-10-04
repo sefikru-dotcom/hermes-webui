@@ -128,16 +128,20 @@ time; state-db resolution remains runtime-patchable through api.models. The
 payload contract is unchanged. Focused insights/cache/parameter-validation
 tests passed 28/28.
 
-## Next candidates
+## Refactoring rules and remaining boundaries
 
-1. Extract further narrow helpers from `api/routes.py` (~28.2k lines) one
-   limited diff at a time, without changing endpoints or payloads. Leave HTTP
-   handlers and monkeypatch targets (functions patched as
-   `api.routes.<name>`) in `routes.py`; inject them into extracted builders at
-   call time when needed.
-2. Separate reasoning/anchor-scene rendering from `static/messages.js` only after
-   current mobile and streaming tests are mapped.
-3. Treat profiles and streaming lifecycle as late refactor targets.
+- `api/routes.py` remains the entry dispatcher and compatibility facade. New
+  implementations own one domain, not a copied route namespace.
+- Inject route-owned functions, policy constants, caches, and locks explicitly at
+  call time. Do not synchronize module globals or capture active-profile values at
+  import time. Existing `api.routes.<name>` monkeypatch seams remain supported.
+- Preserve state ownership: moving a function must not duplicate its cache or
+  lock, reset a limiter, or change where the active profile is resolved.
+- Source-location checks must follow the actual implementation or become behavior
+  tests; do not add placeholder source markers to make a check pass.
+- Profiles, streaming lifecycle, session hydration, and anchor-scene reconciliation
+  remain later refactor targets. Do not combine structural extraction with runtime
+  cleanup or upstream merges.
 
 ## Fifth structural slice
 
@@ -196,3 +200,41 @@ shipped Mars UI: Edge is the settings-panel TTS fallback; reasoning labels are
 `Off` and `Dynamic` rather than inherited `None` and `Default`. The reasoning
 label test executes the actual formatter, including aliases, instead of matching
 source strings. No product defaults or labels were changed by this release.
+
+## Wiki discovery and status domain — 2026-10-04
+
+`api/route_wiki_helpers.py` owns Wiki location discovery, environment/config
+precedence, bounded filesystem walks, cached page allowlists, inode-checked status
+files, last-writer detection, and the private-safe status payload. The existing
+`api/route_wiki.py` owns read-only HTTP browse/page dispatch.
+
+`api/routes.py` preserves helper names and passes current policy constants,
+scanner callbacks, and the route-owned allowlist cache/lock on every call. TTL
+changes, active-profile changes, and test substitutions continue to take effect.
+All 16 original helper bodies remain AST-equivalent. Tests now execute the walk
+limit and forbidden-root guards instead of depending on their location in a
+monolithic source file. Four additional compatibility tests cover resolver
+precedence, cache ownership/current scanners, status dependencies, and allowlists.
+
+## Memory and project context domain — 2026-10-04
+
+`api/route_memory.py` owns profile memory read/write and project context discovery,
+frontmatter removal, source priority, shadowed-file metadata, and context limits.
+It does not own profile switching or session lifecycle. Active profile lookup
+remains lazy; request-time configuration snapshots, trusted workspace resolution,
+redaction, and response helpers come through the existing route facades.
+
+All seven original function bodies remain AST-equivalent. Four additional tests
+cover profile changes between calls, changed configuration permissions, trusted
+workspace resolution, and current context scanner/limit callbacks. Existing tests
+retain symlink-write protection, read-only errors, secret redaction, non-git walk
+boundaries, and cross-profile configuration isolation.
+
+## Domain navigation
+
+| Work area | Implementation | Stable entry surface |
+|---|---|---|
+| Wiki location, scans, cache, status | `api/route_wiki_helpers.py` | `api.routes._llm_wiki_*`, `_build_llm_wiki_status` |
+| Wiki browse/page HTTP | `api/route_wiki.py` | `api.routes.handle_get`, `api/route_readonly.py` |
+| Memory read/write and project context | `api/route_memory.py` | `api.routes._handle_memory_*`, `_project_context_*` |
+| Speech synthesis | `api/route_tts.py` | `api.routes._handle_tts` |
