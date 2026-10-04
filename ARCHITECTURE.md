@@ -67,6 +67,10 @@ actions. The topbar remains focused on conversation context and the workspace/fi
       route_wiki.py        Read-only Wiki HTTP browse/page routes
       route_wiki_helpers.py Wiki discovery, bounded allowlists/cache, and private-safe status
       route_memory.py      Profile memory read/write and read-only project context
+      route_git.py         Workspace Git handlers, guards, and commit-message requests
+      route_skills.py      Skill discovery/views/mutations and profile disabled state
+      route_files.py       File/folder/escape operations and workspace registration
+      file_response_helpers.py Anchored FD reads, ETag snapshots, ranges, HTML previews
       route_tts.py         Speech synthesis with route-owned limiter/network seams
       startup.py           Startup helpers: auto_install_agent_deps()
       state_sync.py        /insights sync — message_count to the agent's state.db

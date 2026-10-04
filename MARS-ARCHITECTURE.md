@@ -238,3 +238,70 @@ boundaries, and cross-profile configuration isolation.
 | Wiki browse/page HTTP | `api/route_wiki.py` | `api.routes.handle_get`, `api/route_readonly.py` |
 | Memory read/write and project context | `api/route_memory.py` | `api.routes._handle_memory_*`, `_project_context_*` |
 | Speech synthesis | `api/route_tts.py` | `api.routes._handle_tts` |
+
+## Workspace Git domain — 2026-10-04
+
+`api/route_git.py` owns all 21 workspace Git route helpers and handlers, including
+session/workspace lookup, destructive-action and active-stream guards, Git error
+sanitization, stage/unstage/discard/commit/checkout/remote requests, and LLM commit
+message generation. `api/workspace_git.py` remains the lower-level Git engine.
+HTTP dispatch and route-level monkeypatch names remain in `api/routes.py`.
+The active-stream lookup and Agent runtime check retain their original lazy
+imports. No Git subprocess semantics, permissions, or payloads changed.
+
+All 21 original function bodies are AST-equivalent; 98 original Git and workspace
+panel tests pass, plus four new call-time seam tests. Agent-runtime tests still
+exercise both commit-message routes; inherited English restart-text assertions
+fail against Mars's already shipped Russian diagnostics before and after this
+refactor, and were not weakened.
+
+## Skills domain — 2026-10-04
+
+`api/route_skills.py` owns all 20 helpers for profile-scoped skills discovery,
+category resolution, disabled-state normalization, lookup, views/linked files,
+save/delete/toggle, and names-list normalization. Agent skill-utils imports remain
+lazy. `_skill_path_within` is re-exported with function identity preserved for
+Wiki callers. Config path, loaders, reload callback, config lock and stats cache
+remain current at call time through the route facade.
+
+All 20 original bodies are AST-equivalent. Additional tests cover per-call
+profile config, bounded missing-skill listings, the route-owned lock/cache and
+reload outside the lock, and containment function identity. Agent-dependent tests
+are reported as skipped where the isolated test runner cannot discover the Agent.
+
+## Files and anchored responses — 2026-10-04
+
+`api/route_files.py` owns 27 file/folder/escape-access and workspace registration
+helpers/handlers. It covers directory listing, escape authorization, file reads
+and mutations, office saves, ZIP collection/download, path/reveal/VS Code actions,
+and workspace add/remove/rename/reorder. It does not own session creation,
+profile switching, media-access policy, TTS, or the HTTP method dispatchers.
+
+`api/file_response_helpers.py` owns eight lower-level file response helpers:
+anchored FD opening/closure, immutable ETag snapshots, byte/range responses,
+HTML base-target injection/preview, and bounded anchored reads. Existing caps,
+MIME policy, sanitization, CSRF and anchored filesystem functions come through
+call-time facade dependencies; no duplicate caches/locks or namespace copying.
+
+All 35 original bodies are AST-equivalent. Existing security/source audits now
+inspect the real modules while route-registration checks stay on `api/routes.py`.
+Five new behavior tests cover anchored saves, raw-route resolver/sender seams,
+current ETag cap/digest, workspace storage callbacks, and ZIP limits/symlink escape
+exclusion. The focused files/Git/skills seam gate passes 329 tests.
+
+## Current structural result
+
+The 2026-10-04 combined structural pass moves 99 original functions into six
+cohesive implementation modules. `api/routes.py` shrinks from 28,174 to 26,260
+lines (1,914 fewer; about 6.8%). Compatible wrappers intentionally remain: callers
+and monkeypatch tests do not need to migrate at the same time as implementations.
+The result is navigable domain boundaries, not a performance or memory-use claim.
+
+Additional domain entry points:
+
+| Work area | Implementation | Stable entry surface |
+|---|---|---|
+| Workspace Git | `api/route_git.py` | `api.routes._git_*`, `_handle_git_*` |
+| Skills discovery/views/mutations | `api/route_skills.py` | Existing skill helper/handler names in `api.routes` |
+| File/folder/escape/workspace operations | `api/route_files.py` | Existing file/workspace handler names in `api.routes` |
+| Anchored reads, ETag/ranges, HTML preview | `api/file_response_helpers.py` | Existing file response helper names in `api.routes` |
