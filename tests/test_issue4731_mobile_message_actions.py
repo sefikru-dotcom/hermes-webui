@@ -14,7 +14,7 @@ def _mobile_block():
 
 def test_mobile_block_enlarges_msg_action_buttons():
     block = _mobile_block()
-    assert ".msg-action-btn{min-width:40px;min-height:40px;padding:8px;display:inline-flex;align-items:center;justify-content:center;}" in block
+    assert ".msg-action-btn{min-width:44px;min-height:44px;padding:8px;display:inline-flex;align-items:center;justify-content:center;}" in block
 
 
 def test_mobile_block_widens_msg_actions_gap():
