@@ -51,7 +51,14 @@ def _project_context_git_root(start: Path) -> Path | None:
 
 
 
-def _project_context_candidates(workspace: Path, *, _PROJECT_CONTEXT_CURSOR_RULES_GLOB, _PROJECT_CONTEXT_CWD_NAMES, _PROJECT_CONTEXT_HERMES_NAMES, _project_context_git_root) -> list[Path]:
+def _project_context_candidates(
+    workspace: Path,
+    *,
+    _PROJECT_CONTEXT_CURSOR_RULES_GLOB,
+    _PROJECT_CONTEXT_CWD_NAMES,
+    _PROJECT_CONTEXT_HERMES_NAMES,
+    _project_context_git_root,
+) -> list[Path]:
     """Mirror the agent's first-match project context file priority.
 
     #4164: in a non-git workspace the agent's ``_find_hermes_md`` walks all
@@ -99,7 +106,14 @@ def _project_context_candidates(workspace: Path, *, _PROJECT_CONTEXT_CURSOR_RULE
 
 
 
-def _memory_project_context_workspace(parsed, *, get_last_workspace, get_session, logger, resolve_trusted_workspace) -> Path | None:
+def _memory_project_context_workspace(
+    parsed,
+    *,
+    get_last_workspace,
+    get_session,
+    logger,
+    resolve_trusted_workspace,
+) -> Path | None:
     qs = parse_qs(parsed.query or "") if parsed is not None else {}
     sid = qs.get("session_id", [""])[0]
     if sid:
@@ -126,7 +140,14 @@ def _memory_project_context_workspace(parsed, *, get_last_workspace, get_session
 
 
 
-def _read_active_project_context(workspace: Path | None, *, _PROJECT_CONTEXT_MAX_BYTES, _project_context_candidates, _strip_project_context_frontmatter, logger) -> dict:
+def _read_active_project_context(
+    workspace: Path | None,
+    *,
+    _PROJECT_CONTEXT_MAX_BYTES,
+    _project_context_candidates,
+    _strip_project_context_frontmatter,
+    logger,
+) -> dict:
     payload = {
         "content": "",
         "path": "",
@@ -199,7 +220,18 @@ def _read_active_project_context(workspace: Path | None, *, _PROJECT_CONTEXT_MAX
 
 
 
-def _handle_memory_read(handler, parsed=None, *, _external_notes_sources_enabled, _memory_project_context_workspace, _read_active_project_context, _redact_text, _webui_truthy, get_config_snapshot, j):
+def _handle_memory_read(
+    handler,
+    parsed=None,
+    *,
+    _external_notes_sources_enabled,
+    _memory_project_context_workspace,
+    _read_active_project_context,
+    _redact_text,
+    _webui_truthy,
+    get_config_snapshot,
+    j,
+):
     try:
         from api.profiles import get_active_hermes_home
 

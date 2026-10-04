@@ -79,7 +79,12 @@ _wiki_allowlist_cache: dict[str, dict[str, object]] = {}
 _wiki_allowlist_cache_lock = threading.Lock()
 
 
-def _llm_wiki_resolve_path(*, _llm_wiki_active_hermes_home, _llm_wiki_config_path, _llm_wiki_env_file_path) -> tuple[Path, str, bool]:
+def _llm_wiki_resolve_path(
+    *,
+    _llm_wiki_active_hermes_home,
+    _llm_wiki_config_path,
+    _llm_wiki_env_file_path,
+) -> tuple[Path, str, bool]:
     hermes_home = _llm_wiki_active_hermes_home()
     raw = os.getenv("WIKI_PATH") or _llm_wiki_env_file_path(hermes_home)
     source = "WIKI_PATH" if raw else "default"
@@ -150,7 +155,13 @@ def _llm_wiki_page_files_cache_signature(wiki_path: Path, *, _LLM_WIKI_PAGE_DIRS
     return tuple(sig)
 
 
-def _llm_wiki_page_files_uncached(wiki_path: Path, *, _LLM_WIKI_FORBIDDEN_ROOTS, _LLM_WIKI_MAX_FILES, _LLM_WIKI_PAGE_DIRS) -> list[Path]:
+def _llm_wiki_page_files_uncached(
+    wiki_path: Path,
+    *,
+    _LLM_WIKI_FORBIDDEN_ROOTS,
+    _LLM_WIKI_MAX_FILES,
+    _LLM_WIKI_PAGE_DIRS,
+) -> list[Path]:
     pages: list[Path] = []
     # Defense in depth: refuse forbidden system roots, and resolve the wiki root
     # ONCE as the single trust base for all containment checks below.
@@ -213,7 +224,15 @@ def _llm_wiki_page_files_uncached(wiki_path: Path, *, _LLM_WIKI_FORBIDDEN_ROOTS,
     return pages
 
 
-def _llm_wiki_page_files(wiki_path: Path, *, _WIKI_ALLOWLIST_TTL, _llm_wiki_page_files_cache_signature, _llm_wiki_page_files_uncached, _wiki_allowlist_cache, _wiki_allowlist_cache_lock) -> list[Path]:
+def _llm_wiki_page_files(
+    wiki_path: Path,
+    *,
+    _WIKI_ALLOWLIST_TTL,
+    _llm_wiki_page_files_cache_signature,
+    _llm_wiki_page_files_uncached,
+    _wiki_allowlist_cache,
+    _wiki_allowlist_cache_lock,
+) -> list[Path]:
     """Return all allowlisted wiki page paths under *wiki_path*.
 
     Trust boundary: the allowlist uses ``(st_dev, st_ino)`` inode identity.
@@ -260,7 +279,11 @@ def _llm_wiki_clear_page_files_cache(*, _wiki_allowlist_cache, _wiki_allowlist_c
         _wiki_allowlist_cache.clear()
 
 
-def _llm_wiki_allowlisted_entries(wiki_path: Path, *, _llm_wiki_page_files) -> dict[str, tuple[Path, tuple[int, int]]]:
+def _llm_wiki_allowlisted_entries(
+    wiki_path: Path,
+    *,
+    _llm_wiki_page_files,
+) -> dict[str, tuple[Path, tuple[int, int]]]:
     """Return listed relpaths mapped to resolved targets plus stable identity."""
     try:
         wiki_real = wiki_path.resolve()
@@ -320,7 +343,12 @@ def _llm_wiki_status_file_entry_stat(wiki_path: Path, path: Path) -> os.stat_res
     return st_entry
 
 
-def _llm_wiki_verified_status_file_stat(wiki_path: Path, path: Path, *, _llm_wiki_status_file_entry_stat) -> os.stat_result | None:
+def _llm_wiki_verified_status_file_stat(
+    wiki_path: Path,
+    path: Path,
+    *,
+    _llm_wiki_status_file_entry_stat,
+) -> os.stat_result | None:
     """Return identity-checked metadata for a top-level wiki status file."""
     st_entry = _llm_wiki_status_file_entry_stat(wiki_path, path)
     if st_entry is None:
@@ -455,7 +483,16 @@ def _llm_wiki_last_writer(
     return "ai-agent"
 
 
-def _build_llm_wiki_status(*, _LLM_WIKI_DOCS_URL, _llm_wiki_allowlisted_entries, _llm_wiki_count_files, _llm_wiki_last_writer, _llm_wiki_resolve_path, _llm_wiki_safe_iso, _llm_wiki_verified_status_file_stat) -> dict:
+def _build_llm_wiki_status(
+    *,
+    _LLM_WIKI_DOCS_URL,
+    _llm_wiki_allowlisted_entries,
+    _llm_wiki_count_files,
+    _llm_wiki_last_writer,
+    _llm_wiki_resolve_path,
+    _llm_wiki_safe_iso,
+    _llm_wiki_verified_status_file_stat,
+) -> dict:
     """Return private-safe LLM Wiki status metadata without reading page bodies."""
     try:
         wiki_path, path_source, path_configured = _llm_wiki_resolve_path()
