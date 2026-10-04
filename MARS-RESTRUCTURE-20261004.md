@@ -28,6 +28,15 @@ or restarted. The production checkout stays on `8fdcebfc` and health remains OK.
 
 Navigation and ownership rules are in `MARS-ARCHITECTURE.md`.
 
+## Follow-up structural slice — anchor activity scenes
+
+The next extraction moved the pure anchor-activity scene domain into
+api/anchor_activity_scene.py: message/content normalization, activity-row projection,
+tool matching/merging, live-row settlement, and persisted-scene hydration. The route-level
+persistence handler, session materialization, visibility checks, and compatibility facades
+remain in api/routes.py. This was a mechanical boundary change only; no UI, provider,
+streaming lifecycle, session ownership, or inherited baseline failure was changed.
+
 ## Verification
 
 Tests use `./scripts/test.sh`, isolated state/home/ports from `tests/conftest.py`.

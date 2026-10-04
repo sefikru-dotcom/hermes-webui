@@ -289,7 +289,17 @@ Five new behavior tests cover anchored saves, raw-route resolver/sender seams,
 current ETag cap/digest, workspace storage callbacks, and ZIP limits/symlink escape
 exclusion. The focused files/Git/skills seam gate passes 329 tests.
 
-## Current structural result
+## Twelfth structural slice — anchor activity scenes
+
+api/anchor_activity_scene.py now owns anchor-activity scene normalization, message/content
+row projection, tool-row matching/merging, live-row settlement, and persisted-scene hydration.
+The HTTP persistence handler, session materialization, profile visibility guard, and message-ref
+facade remain in api/routes.py; the facade injects the route-owned message-ref callback at
+call time. This keeps scene behavior isolated without moving session lifecycle or security policy.
+
+The scene module preserves the existing payload and row contracts. Its policy limits and digest
+implementation are local to the domain; no caches, profile state, or namespace copies are
+created at import time.
 
 The 2026-10-04 combined structural pass moves 99 original functions into six
 cohesive implementation modules. `api/routes.py` shrinks from 28,174 to 26,260
