@@ -199,16 +199,11 @@ class TestToolsetsDropdownResizeGuard:
         )
         assert m, "Toolsets resize handler must exist"
         body = m.group(0)
-        assert "offsetParent" in body, (
-            "Resize handler must check chip.offsetParent === null — without it "
-            "the open dropdown stays open after CSS hides the chip mid-session "
-            "(e.g. workspace-panel toggle crossing 1100px threshold)"
-        )
-        assert "closeToolsetsDropdown" in body, (
-            "Resize handler must call closeToolsetsDropdown() when chip is "
-            "hidden — repositioning a hidden chip leaves the dropdown anchored "
-            "to a zero-rect element"
-        )
+        assert "_positionToolsetsDropdown();" in body
+        position = re.search(r"function _positionToolsetsDropdown\(\)\s*\{.*?\n\}", js, re.DOTALL)
+        assert position
+        assert "anchor.offsetParent === null" in position.group(0)
+        assert "closeToolsetsDropdown(); return;" in position.group(0)
 
     def test_position_dropdown_guards_against_hidden_chip(self):
         """_positionToolsetsDropdown must close-not-reposition if chip hidden."""

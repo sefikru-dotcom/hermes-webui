@@ -9058,6 +9058,13 @@ html.mars-transparent-stream #marsTurnFoldBtn:not([hidden]){display:flex;}
   background: rgba(255, 255, 255, 0.02);
 }
 
+@media (max-width: 640px) {
+  #composerMobileConfigBtn{display:inline-flex!important;}
+  #btnSend{width:44px!important;height:44px!important;min-width:44px!important;min-height:44px!important;}
+  .composer-left > .composer-model-wrap{display:none!important;}
+  .composer-mobile-config-panel{max-height:min(56dvh,420px);overflow-y:auto;overscroll-behavior:contain;}
+}
+
 /* 4. Умное скрытие чипсов над полем ввода */
 .quick-chips-bar {
   display: flex;

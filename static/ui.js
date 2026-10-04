@@ -22401,6 +22401,11 @@ function _showFileContextMenu(e, item){
       window.location.href=new URL(rel.slice(1), document.baseURI||location.href).href;
     };
     menu.appendChild(dlItem);
+  }else{
+    menu.appendChild(_workspaceContextMenuItem(t('media_download'),()=>{
+      menu.remove();
+      downloadFile(item.path);
+    }));
   }
 
   if(!isReadOnlyEscape){
