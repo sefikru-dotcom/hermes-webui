@@ -305,3 +305,21 @@ Additional domain entry points:
 | Skills discovery/views/mutations | `api/route_skills.py` | Existing skill helper/handler names in `api.routes` |
 | File/folder/escape/workspace operations | `api/route_files.py` | Existing file/workspace handler names in `api.routes` |
 | Anchored reads, ETag/ranges, HTML preview | `api/file_response_helpers.py` | Existing file response helper names in `api.routes` |
+
+## Combined verification — 2026-10-04
+
+Detailed scope, cleanup and the exact original failure list:
+`MARS-RESTRUCTURE-20261004.md`.
+
+The large comparison covered 3,248 final tests: 3,116 passed, 74 failed and 58
+skipped. The same 74 node IDs fail on baseline `8fdcebfc` (3,100 passed, 74 failed,
+58 skipped). There are zero new failure node IDs after source-audit adaptation.
+A separate gate deselecting only those 74 confirmed original failures reports
+3,116 passed, 58 skipped, 74 deselected. AST equivalence covers all 99 moved
+functions; legacy facade signatures/exports and zero `static/` changes were also
+verified. All six new modules and five new test modules pass Ruff; the diff-scoped
+gate reports zero new violations.
+
+Changes are committed on `mars-restructure-20261004`; production remains on
+`8fdcebfc` without a restart or deploy. Worker scratch worktrees and session
+artifacts were removed; existing runtime data/backups were not touched.
