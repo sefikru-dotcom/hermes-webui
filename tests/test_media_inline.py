@@ -595,7 +595,7 @@ class TestMediaEndpointUnit(unittest.TestCase):
             )
 
     def test_media_endpoints_advertise_byte_range_support(self):
-        routes_src = (REPO_ROOT / "api" / "routes.py").read_text(encoding="utf-8")
+        routes_src = (REPO_ROOT / "api" / "file_response_helpers.py").read_text(encoding="utf-8")
         self.assertIn("Accept-Ranges", routes_src)
         self.assertIn("Content-Range", routes_src)
         self.assertIn("206", routes_src)
