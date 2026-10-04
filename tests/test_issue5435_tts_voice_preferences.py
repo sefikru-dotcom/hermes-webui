@@ -416,7 +416,7 @@ def test_settings_panel_persists_speech_fields_and_keeps_immediate_cache_writes(
         "hermes-raw-audio-mode",
     ]:
         assert storage_key in panel_block or storage_key in payload_block
-    assert "_speechSetting('tts_engine','hermes-tts-engine','browser')" in panel_block
+    assert "_speechSetting('tts_engine','hermes-tts-engine','edge')" in panel_block
     assert "function _speechPreferencesPayloadFromUi()" in PANELS_JS
     assert "savedRate||'1'" not in panel_block
     assert "savedPitch||'1'" not in panel_block

@@ -2,7 +2,7 @@
 
 > Working map for the Mars product, built on the Hermes WebUI base.
 > This is a product boundary document, not a claim that every inherited module is removable.
-> Updated 2026-10-03.
+> Updated 2026-10-04.
 
 ## Product rule
 
@@ -130,7 +130,7 @@ tests passed 28/28.
 
 ## Next candidates
 
-1. Extract further narrow helpers from `api/routes.py` (~29.2k lines) one
+1. Extract further narrow helpers from `api/routes.py` (~28.2k lines) one
    limited diff at a time, without changing endpoints or payloads. Leave HTTP
    handlers and monkeypatch targets (functions patched as
    `api.routes.<name>`) in `routes.py`; inject them into extracted builders at
@@ -170,3 +170,29 @@ HTTP routing, and server-side enable gates remain unchanged. Focused plugin
 helper tests passed 4/4. The broader shard still has two pre-existing static
 failures unrelated to this slice (index text and system-health source marker).
 
+
+
+## Eleventh structural slice
+
+The POST `/api/tts` handler now lives in `api/route_tts.py`, covering Edge,
+ElevenLabs and OpenAI speech synthesis without changing request, error or audio
+response contracts. `api.routes._handle_tts` remains the facade and owns its
+`_tts_limiter` attribute; body/prosody, network opener, buffering and URL-validation
+seams are injected at call time. Auth, configuration and profile imports remain
+lazy, and pinned-address/no-redirect protections stay in the existing helpers.
+The extraction reduces `api/routes.py` by 303 lines (28,477 to 28,174).
+
+All 59 original focused tests pass. Three additional behavioral tests cover
+facade-owned limiter persistence/reset, current body/prosody dependencies and
+auth rejection before limiter creation. The broader speech/media/upload and
+model-picker verification covers 244 tests. Handler AST equivalence and Ruff
+checks pass.
+
+## Release compatibility checks — 2026-10-04
+
+All three model-dropdown row paths tolerate an unavailable optional Mars
+reasoning decorator. Existing test expectations were aligned with the already
+shipped Mars UI: Edge is the settings-panel TTS fallback; reasoning labels are
+`Off` and `Dynamic` rather than inherited `None` and `Default`. The reasoning
+label test executes the actual formatter, including aliases, instead of matching
+source strings. No product defaults or labels were changed by this release.

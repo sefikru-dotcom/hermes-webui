@@ -149,12 +149,23 @@ class TestReasoningChipNoneState:
         )
 
     def test_none_and_default_have_visible_labels(self):
-        assert "if(effort==='none') return 'None';" in UI_JS, (
-            "the disabled reasoning state must render a visible 'None' label"
+        import json
+        import subprocess
+
+        match = re.search(
+            r"function\s+_formatReasoningEffortLabel\b[\s\S]*?^}",
+            UI_JS,
+            re.MULTILINE,
         )
-        assert "if(!effort) return 'Default';" in UI_JS, (
-            "the unset reasoning state must render a visible 'Default' label"
+        assert match, "_formatReasoningEffortLabel not found in ui.js"
+        efforts = ["none", "off", "", "dynamic", "default", "low", "high"]
+        script = match.group(0) + chr(10) + "console.log(JSON.stringify(" + json.dumps(efforts) + ".map(_formatReasoningEffortLabel)));"
+        result = subprocess.run(
+            ["node", "-e", script], check=True, capture_output=True, text=True,
         )
+        assert json.loads(result.stdout) == [
+            "Off", "Off", "Dynamic", "Dynamic", "Dynamic", "Low", "High",
+        ]
 
     def test_none_and_default_are_visually_inactive_not_missing(self):
         fn = self.get_apply_reasoning_chip()
