@@ -92,7 +92,7 @@ def test_media_html_inline_keeps_csp_sandbox():
 
 def test_sandboxed_file_responses_do_not_send_x_frame_options():
     """X-Frame-Options: DENY would block the sandbox iframe preview."""
-    body = _function_body(ROUTES_PY, "_serve_file_bytes")
+    body = _function_body((REPO / "api" / "file_response_helpers.py").read_text(encoding="utf-8"), "_serve_file_bytes")
     csp_branch = body[body.find("if csp:") : body.find("else:", body.find("if csp:"))]
     assert "Content-Security-Policy" in csp_branch
     assert 'send_header("X-Frame-Options"' not in csp_branch

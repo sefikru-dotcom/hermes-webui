@@ -28,14 +28,12 @@ def _active_skills_dir() -> Path:
             return Path(os.getenv("HERMES_HOME", str(Path.home() / ".hermes"))).expanduser() / "skills"
 
 
-
 def _skill_path_within(base_dir: Path, candidate: Path) -> bool:
     try:
         candidate.resolve().relative_to(base_dir.resolve())
         return True
     except (OSError, ValueError):
         return False
-
 
 
 def _skill_category_from_path(
@@ -70,7 +68,6 @@ def _skill_category_from_path(
     return None
 
 
-
 def _active_skill_search_dirs(skills_dir: Path) -> list[Path]:
     dirs = [skills_dir]
     try:
@@ -80,7 +77,6 @@ def _active_skill_search_dirs(skills_dir: Path) -> list[Path]:
     except Exception:
         pass
     return [p for p in dirs if p.exists()]
-
 
 
 def _active_profile_config_path(*, _get_config_path) -> Path:
@@ -102,8 +98,12 @@ def _active_profile_config_path(*, _get_config_path) -> Path:
         return _get_config_path()
 
 
-
-def _get_disabled_skill_names_for_profile(*, _active_profile_config_path, _load_yaml_config_file, _normalize_disabled_set) -> set:
+def _get_disabled_skill_names_for_profile(
+    *,
+    _active_profile_config_path,
+    _load_yaml_config_file,
+    _normalize_disabled_set,
+) -> set:
     """Read disabled skill names from the active profile's config.yaml.
 
     Unlike ``tools.skills_tool._get_disabled_skill_names`` which reads from
@@ -129,7 +129,6 @@ def _get_disabled_skill_names_for_profile(*, _active_profile_config_path, _load_
     if isinstance(platform_disabled, dict) and "webui" in platform_disabled:
         return _normalize_disabled_set(platform_disabled["webui"])
     return _normalize_disabled_set(skills_cfg.get("disabled"))
-
 
 
 def _parse_config_string_list(value) -> list:
@@ -172,7 +171,6 @@ def _parse_config_string_list(value) -> list:
     return []
 
 
-
 def _normalize_disabled_set(values, *, _parse_config_string_list) -> set:
     """Normalize a YAML disabled list into a set of stripped strings."""
     if values is None:
@@ -182,8 +180,15 @@ def _normalize_disabled_set(values, *, _parse_config_string_list) -> set:
     return {str(v).strip() for v in values if str(v).strip()}
 
 
-
-def _skills_list_from_dir(skills_dir: Path, category: str | None=None, *, _active_skill_search_dirs, _get_disabled_skill_names_for_profile, _skill_category_from_path, logger) -> dict:
+def _skills_list_from_dir(
+    skills_dir: Path,
+    category: str | None=None,
+    *,
+    _active_skill_search_dirs,
+    _get_disabled_skill_names_for_profile,
+    _skill_category_from_path,
+    logger,
+) -> dict:
     """List skills using an explicit local skills directory.
 
     This mirrors ``tools.skills_tool.skills_list`` closely, but keeps the local
@@ -270,8 +275,12 @@ def _skills_list_from_dir(skills_dir: Path, category: str | None=None, *, _activ
     return result
 
 
-
-def _find_skill_in_dirs(name: str, skills_dirs: list[Path], *, _skill_path_within) -> tuple[Path | None, Path | None]:
+def _find_skill_in_dirs(
+    name: str,
+    skills_dirs: list[Path],
+    *,
+    _skill_path_within,
+) -> tuple[Path | None, Path | None]:
     """Resolve a WebUI skill name inside explicit skills directories."""
     from agent.skill_utils import iter_skill_index_files
     from tools.skills_tool import _EXCLUDED_SKILL_DIRS, _parse_frontmatter
@@ -320,14 +329,18 @@ def _find_skill_in_dirs(name: str, skills_dirs: list[Path], *, _skill_path_withi
     return None, None
 
 
-
 def _find_skill_in_dir(name: str, skills_dir: Path, *, _find_skill_in_dirs) -> tuple[Path | None, Path | None]:
     """Resolve a WebUI skill name inside an explicit skills directory."""
     return _find_skill_in_dirs(name, [skills_dir])
 
 
-
-def _skill_not_found_payload(name: str, skills_dir: Path, *, _SKILL_NOT_FOUND_LIST_LIMIT, _skills_list_from_dir) -> dict:
+def _skill_not_found_payload(
+    name: str,
+    skills_dir: Path,
+    *,
+    _SKILL_NOT_FOUND_LIST_LIMIT,
+    _skills_list_from_dir,
+) -> dict:
     all_names = [s["name"] for s in _skills_list_from_dir(skills_dir).get("skills", [])]
     total = len(all_names)
     available = all_names[:_SKILL_NOT_FOUND_LIST_LIMIT]
@@ -343,7 +356,6 @@ def _skill_not_found_payload(name: str, skills_dir: Path, *, _SKILL_NOT_FOUND_LI
         "total_skills": total,
         "hint": hint,
     }
-
 
 
 def _linked_files_for_skill(skill_dir: Path | None) -> dict:
@@ -382,7 +394,6 @@ def _linked_files_for_skill(skill_dir: Path | None) -> dict:
     return linked_files
 
 
-
 def _skill_view_from_file(skill_dir: Path | None, skill_md: Path, *, _linked_files_for_skill) -> dict:
     from tools.skills_tool import _parse_frontmatter, _parse_tags, skill_matches_platform
 
@@ -415,8 +426,15 @@ def _skill_view_from_file(skill_dir: Path | None, skill_md: Path, *, _linked_fil
     }
 
 
-
-def _skill_view_from_active_dir(name: str, *, _active_skill_search_dirs, _active_skills_dir, _find_skill_in_dirs, _skill_not_found_payload, _skill_view_from_file) -> dict:
+def _skill_view_from_active_dir(
+    name: str,
+    *,
+    _active_skill_search_dirs,
+    _active_skills_dir,
+    _find_skill_in_dirs,
+    _skill_not_found_payload,
+    _skill_view_from_file,
+) -> dict:
     from tools.skills_tool import skill_view as _skill_view
 
     skills_dir = _active_skills_dir()
@@ -441,7 +459,6 @@ def _skill_view_from_active_dir(name: str, *, _active_skill_search_dirs, _active
                 pass
         return _skill_not_found_payload(name, skills_dir)
     return _skill_view_from_file(skill_dir, skill_md)
-
 
 
 def _handle_skill_save(handler, body, *, _SKILLS_STATS_CACHE, _active_skills_dir, bad, j, require):
@@ -475,7 +492,6 @@ def _handle_skill_save(handler, body, *, _SKILLS_STATS_CACHE, _active_skills_dir
     return j(handler, {"ok": True, "name": skill_name, "path": str(skill_file)})
 
 
-
 def _handle_skill_delete(handler, body, *, _SKILLS_STATS_CACHE, _active_skills_dir, bad, j, require):
     try:
         require(body, "name")
@@ -496,7 +512,6 @@ def _handle_skill_delete(handler, body, *, _SKILLS_STATS_CACHE, _active_skills_d
     return j(handler, {"ok": True, "name": body["name"]})
 
 
-
 def _normalize_names_list(names, *, _parse_config_string_list) -> list[str]:
     """Normalize a config value (None/str/list) into a deduplicated str list."""
     if names is None:
@@ -506,7 +521,6 @@ def _normalize_names_list(names, *, _parse_config_string_list) -> list[str]:
     elif not isinstance(names, list):
         names = list(names) if names else []
     return list(dict.fromkeys(str(d).strip() for d in names if str(d).strip()))
-
 
 
 def _toggle_name_in_list(names, name: str, enabled: bool, *, _normalize_names_list) -> list[str]:
@@ -519,8 +533,24 @@ def _toggle_name_in_list(names, name: str, enabled: bool, *, _normalize_names_li
     return names
 
 
-
-def _handle_skill_toggle(handler, body, *, _SKILLS_STATS_CACHE, _active_profile_config_path, _active_skill_search_dirs, _active_skills_dir, _cfg_lock, _find_skill_in_dirs, _load_yaml_config_file, _save_yaml_config_file, _toggle_name_in_list, bad, j, reload_config, require):
+def _handle_skill_toggle(
+    handler,
+    body,
+    *,
+    _SKILLS_STATS_CACHE,
+    _active_profile_config_path,
+    _active_skill_search_dirs,
+    _active_skills_dir,
+    _cfg_lock,
+    _find_skill_in_dirs,
+    _load_yaml_config_file,
+    _save_yaml_config_file,
+    _toggle_name_in_list,
+    bad,
+    j,
+    reload_config,
+    require,
+):
     """Toggle a skill's enabled/disabled state in the active profile's config.yaml.
 
     Writes through to ``skills.platform_disabled.webui`` when that key exists

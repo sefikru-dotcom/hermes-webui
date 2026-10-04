@@ -13,7 +13,6 @@ def _git_session(handler, session_id: str, *, bad, get_session):
         return None
 
 
-
 def _git_session_workspace(handler, session_id: str, *, Path, _git_session):
     session = _git_session(handler, session_id)
     if session is None:
@@ -21,13 +20,11 @@ def _git_session_workspace(handler, session_id: str, *, Path, _git_session):
     return Path(session.workspace)
 
 
-
 def _git_session_and_workspace(handler, session_id: str, *, Path, _git_session):
     session = _git_session(handler, session_id)
     if session is None:
         return None, None
     return session, Path(session.workspace)
-
 
 
 def _git_locked_by_active_stream(session) -> bool:
@@ -41,7 +38,6 @@ def _git_locked_by_active_stream(session) -> bool:
             return stream_id in STREAMS
     except Exception:
         return False
-
 
 
 def _git_reject_destructive_if_unsafe(handler, session, *, _git_bad, _git_locked_by_active_stream) -> bool:
@@ -74,7 +70,6 @@ def _git_reject_destructive_if_unsafe(handler, session, *, _git_bad, _git_locked
     return False
 
 
-
 def _handle_git_status(handler, parsed, *, _git_bad, _git_session_workspace, j, parse_qs):
     qs = parse_qs(parsed.query)
     workspace = _git_session_workspace(handler, qs.get("session_id", [""])[0])
@@ -88,7 +83,6 @@ def _handle_git_status(handler, parsed, *, _git_bad, _git_session_workspace, j, 
         return _git_bad(handler, e)
 
 
-
 def _handle_git_branches(handler, parsed, *, _git_bad, _git_session_workspace, j, parse_qs):
     qs = parse_qs(parsed.query)
     workspace = _git_session_workspace(handler, qs.get("session_id", [""])[0])
@@ -100,7 +94,6 @@ def _handle_git_branches(handler, parsed, *, _git_bad, _git_session_workspace, j
         return j(handler, {"branches": git_branches(workspace)})
     except GitWorkspaceError as e:
         return _git_bad(handler, e)
-
 
 
 def _handle_git_diff(handler, parsed, *, _git_bad, _git_session_workspace, bad, j, parse_qs):
@@ -120,7 +113,6 @@ def _handle_git_diff(handler, parsed, *, _git_bad, _git_session_workspace, bad, 
         return _git_bad(handler, e)
 
 
-
 def _git_bad(handler, err, status: int=400, *, _sanitize_error, j):
     return j(
         handler,
@@ -130,7 +122,6 @@ def _git_bad(handler, err, status: int=400, *, _sanitize_error, j):
         },
         status=status,
     )
-
 
 
 def _git_paths_from_body(body) -> list[str]:
@@ -144,8 +135,18 @@ def _git_paths_from_body(body) -> list[str]:
     return [str(path) for path in raw_paths]
 
 
-
-def _handle_git_stage(handler, body, *, _git_bad, _git_paths_from_body, _git_reject_destructive_if_unsafe, _git_session_and_workspace, bad, j, require):
+def _handle_git_stage(
+    handler,
+    body,
+    *,
+    _git_bad,
+    _git_paths_from_body,
+    _git_reject_destructive_if_unsafe,
+    _git_session_and_workspace,
+    bad,
+    j,
+    require,
+):
     try:
         require(body, "session_id")
         paths = _git_paths_from_body(body)
@@ -163,8 +164,18 @@ def _handle_git_stage(handler, body, *, _git_bad, _git_paths_from_body, _git_rej
         return _git_bad(handler, e)
 
 
-
-def _handle_git_unstage(handler, body, *, _git_bad, _git_paths_from_body, _git_reject_destructive_if_unsafe, _git_session_and_workspace, bad, j, require):
+def _handle_git_unstage(
+    handler,
+    body,
+    *,
+    _git_bad,
+    _git_paths_from_body,
+    _git_reject_destructive_if_unsafe,
+    _git_session_and_workspace,
+    bad,
+    j,
+    require,
+):
     try:
         require(body, "session_id")
         paths = _git_paths_from_body(body)
@@ -182,8 +193,18 @@ def _handle_git_unstage(handler, body, *, _git_bad, _git_paths_from_body, _git_r
         return _git_bad(handler, e)
 
 
-
-def _handle_git_discard(handler, body, *, _git_bad, _git_paths_from_body, _git_reject_destructive_if_unsafe, _git_session_and_workspace, bad, j, require):
+def _handle_git_discard(
+    handler,
+    body,
+    *,
+    _git_bad,
+    _git_paths_from_body,
+    _git_reject_destructive_if_unsafe,
+    _git_session_and_workspace,
+    bad,
+    j,
+    require,
+):
     try:
         require(body, "session_id")
         paths = _git_paths_from_body(body)
@@ -211,8 +232,16 @@ def _handle_git_discard(handler, body, *, _git_bad, _git_paths_from_body, _git_r
         return _git_bad(handler, e)
 
 
-
-def _llm_git_commit_message(system_prompt: str, user_prompt: str, session=None, *, ensure_agent_runtime_current, logger, require_ai_agent_class, uuid) -> str:
+def _llm_git_commit_message(
+    system_prompt: str,
+    user_prompt: str,
+    session=None,
+    *,
+    ensure_agent_runtime_current,
+    logger,
+    require_ai_agent_class,
+    uuid,
+) -> str:
     from api import profiles as profiles_api
 
     active_profile = profiles_api.get_active_profile_name() or "default"
@@ -307,8 +336,22 @@ def _llm_git_commit_message(system_prompt: str, user_prompt: str, session=None, 
         return str(result.get("final_response") or "").strip()
 
 
-
-def _handle_git_commit_message(handler, body, *, AgentRuntimeChangedError, Path, _git_bad, _llm_git_commit_message, _sanitize_error, agent_runtime_stale_payload, bad, get_session, j, logger, require):
+def _handle_git_commit_message(
+    handler,
+    body,
+    *,
+    AgentRuntimeChangedError,
+    Path,
+    _git_bad,
+    _llm_git_commit_message,
+    _sanitize_error,
+    agent_runtime_stale_payload,
+    bad,
+    get_session,
+    j,
+    logger,
+    require,
+):
     from api.workspace_git import (
         GitWorkspaceError,
         clean_generated_commit_message,
@@ -340,8 +383,23 @@ def _handle_git_commit_message(handler, body, *, AgentRuntimeChangedError, Path,
         return bad(handler, _sanitize_error(e), 500)
 
 
-
-def _handle_git_commit_message_selected(handler, body, *, AgentRuntimeChangedError, Path, _git_bad, _git_paths_from_body, _llm_git_commit_message, _sanitize_error, agent_runtime_stale_payload, bad, get_session, j, logger, require):
+def _handle_git_commit_message_selected(
+    handler,
+    body,
+    *,
+    AgentRuntimeChangedError,
+    Path,
+    _git_bad,
+    _git_paths_from_body,
+    _llm_git_commit_message,
+    _sanitize_error,
+    agent_runtime_stale_payload,
+    bad,
+    get_session,
+    j,
+    logger,
+    require,
+):
     from api.workspace_git import (
         GitWorkspaceError,
         clean_generated_commit_message,
@@ -374,8 +432,17 @@ def _handle_git_commit_message_selected(handler, body, *, AgentRuntimeChangedErr
         return bad(handler, _sanitize_error(e), 500)
 
 
-
-def _handle_git_commit(handler, body, *, _git_bad, _git_reject_destructive_if_unsafe, _git_session_and_workspace, bad, j, require):
+def _handle_git_commit(
+    handler,
+    body,
+    *,
+    _git_bad,
+    _git_reject_destructive_if_unsafe,
+    _git_session_and_workspace,
+    bad,
+    j,
+    require,
+):
     try:
         require(body, "session_id", "message")
         session, workspace = _git_session_and_workspace(handler, body["session_id"])
@@ -392,8 +459,18 @@ def _handle_git_commit(handler, body, *, _git_bad, _git_reject_destructive_if_un
         return _git_bad(handler, e)
 
 
-
-def _handle_git_commit_selected(handler, body, *, _git_bad, _git_paths_from_body, _git_reject_destructive_if_unsafe, _git_session_and_workspace, bad, j, require):
+def _handle_git_commit_selected(
+    handler,
+    body,
+    *,
+    _git_bad,
+    _git_paths_from_body,
+    _git_reject_destructive_if_unsafe,
+    _git_session_and_workspace,
+    bad,
+    j,
+    require,
+):
     try:
         require(body, "session_id", "message")
         paths = _git_paths_from_body(body)
@@ -411,8 +488,18 @@ def _handle_git_commit_selected(handler, body, *, _git_bad, _git_paths_from_body
         return _git_bad(handler, e)
 
 
-
-def _handle_git_remote_action(handler, body, action: str, *, _git_bad, _git_reject_destructive_if_unsafe, _git_session_and_workspace, bad, j, require):
+def _handle_git_remote_action(
+    handler,
+    body,
+    action: str,
+    *,
+    _git_bad,
+    _git_reject_destructive_if_unsafe,
+    _git_session_and_workspace,
+    bad,
+    j,
+    require,
+):
     try:
         require(body, "session_id")
         session, workspace = _git_session_and_workspace(handler, body["session_id"])
@@ -434,8 +521,17 @@ def _handle_git_remote_action(handler, body, action: str, *, _git_bad, _git_reje
         return _git_bad(handler, e)
 
 
-
-def _handle_git_checkout(handler, body, *, _git_bad, _git_reject_destructive_if_unsafe, _git_session_and_workspace, bad, j, require):
+def _handle_git_checkout(
+    handler,
+    body,
+    *,
+    _git_bad,
+    _git_reject_destructive_if_unsafe,
+    _git_session_and_workspace,
+    bad,
+    j,
+    require,
+):
     try:
         require(body, "session_id", "ref", "mode")
         session, workspace = _git_session_and_workspace(handler, body["session_id"])
@@ -469,8 +565,17 @@ def _handle_git_checkout(handler, body, *, _git_bad, _git_reject_destructive_if_
         return _git_bad(handler, e)
 
 
-
-def _handle_git_stash_checkout(handler, body, *, _git_bad, _git_reject_destructive_if_unsafe, _git_session_and_workspace, bad, j, require):
+def _handle_git_stash_checkout(
+    handler,
+    body,
+    *,
+    _git_bad,
+    _git_reject_destructive_if_unsafe,
+    _git_session_and_workspace,
+    bad,
+    j,
+    require,
+):
     try:
         require(body, "session_id", "ref", "mode")
         session, workspace = _git_session_and_workspace(handler, body["session_id"])

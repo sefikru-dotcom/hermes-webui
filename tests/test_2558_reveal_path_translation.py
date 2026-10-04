@@ -10,15 +10,16 @@ import re
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 ROUTES = ROOT / "api" / "routes.py"
+FILES = ROOT / "api" / "route_files.py"
 
 
 class TestRevealPathTranslation:
     def test_handler_supports_path_prefix_mapping(self):
         """_handle_file_reveal must contain container_path_prefix / host_path_prefix
         so Docker users get the same path translation as _handle_file_open_vscode."""
-        src = ROUTES.read_text(encoding="utf-8")
+        src = FILES.read_text(encoding="utf-8")
         m = re.search(
-            r"def _handle_file_reveal\(handler, body\):.*?(?=\ndef )",
+            r"def _handle_file_reveal\(\s*handler,\s*body[^)]*\):.*?(?=\ndef )",
             src,
             re.DOTALL,
         )
@@ -29,9 +30,9 @@ class TestRevealPathTranslation:
 
     def test_handler_uses_target_str_in_subprocess(self):
         """The subprocess dispatch must use the translated string, not str(target)."""
-        src = ROUTES.read_text(encoding="utf-8")
+        src = FILES.read_text(encoding="utf-8")
         m = re.search(
-            r"def _handle_file_reveal\(handler, body\):.*?(?=\ndef )",
+            r"def _handle_file_reveal\(\s*handler,\s*body[^)]*\):.*?(?=\ndef )",
             src,
             re.DOTALL,
         )
