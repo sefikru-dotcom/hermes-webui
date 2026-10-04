@@ -21,8 +21,8 @@ def test_toggle_path_registered():
 
 def test_skills_list_includes_disabled_flag():
     """Each skill dict in the API response must have a 'disabled' boolean field."""
-    routes_source = (Path(__file__).resolve().parent.parent / "api" / "routes.py").read_text("utf-8")
-    assert '"disabled": name in disabled' in routes_source
+    implementation = (Path(__file__).resolve().parent.parent / "api" / "route_skills.py").read_text("utf-8")
+    assert '"disabled": name in disabled' in implementation
 
 
 def test_i18n_keys_added():
