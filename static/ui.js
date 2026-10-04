@@ -4050,7 +4050,11 @@ function syncModelChip(){
   if(mobileLabel) mobileLabel.textContent=displayText;
   chip.title=gatewayRouting?`${sel.value||'Conversation model'} ${_gatewayRoutingLabel(gatewayRouting)}`:(sel.value||'Conversation model');
   chip.classList.toggle('active',!!(dd&&dd.classList.contains('open')));
-  if(mobileAction) mobileAction.classList.toggle('active',!!(dd&&dd.classList.contains('open')));
+  if(mobileAction) {
+    const open=!!(dd&&dd.classList.contains('open'));
+    mobileAction.classList.toggle('active',open);
+    mobileAction.setAttribute('aria-expanded',open?'true':'false');
+  }
 }
 
 // Remembers where #composerModelDropdown lives in the composer-footer so the
@@ -5172,7 +5176,7 @@ async function toggleModelDropdown(){
   if(activeRow&&typeof activeRow.scrollIntoView==='function') activeRow.scrollIntoView({block:'nearest'});
   chip.classList.add('active');
   const mobileAction=$('composerMobileModelAction');
-  if(mobileAction) mobileAction.classList.add('active');
+  if(mobileAction){mobileAction.classList.add('active');mobileAction.setAttribute('aria-expanded','true');}
 }
 
 function closeModelDropdown(){
@@ -5181,7 +5185,7 @@ function closeModelDropdown(){
   const mobileAction=$('composerMobileModelAction');
   if(dd) dd.classList.remove('open');
   if(chip) chip.classList.remove('active');
-  if(mobileAction) mobileAction.classList.remove('active');
+  if(mobileAction){mobileAction.classList.remove('active');mobileAction.setAttribute('aria-expanded','false');}
   // If the phone path reparented the menu onto <body>, put it back in the
   // footer and clear the fixed-position inline styles so the DOM returns to its
   // baseline shape and the next desktop open anchors correctly (#6080).
@@ -5786,6 +5790,8 @@ function _applyToolsetsChip(toolsets) {
   const wrap = $('composerToolsetsWrap');
   const label = $('composerToolsetsLabel');
   const chip = $('composerToolsetsChip');
+  const mobileLabel = $('composerMobileToolsetsLabel');
+  const mobileAction = $('composerMobileToolsetsAction');
   if (!wrap || !label) return;
   // Visibility is controlled entirely by responsive CSS — the chip shows only
   // at wide composer-footer widths (>= 1100px container query). At narrower
@@ -5804,10 +5810,12 @@ function _applyToolsetsChip(toolsets) {
   if (hasCustom) {
     const stagedSuffix = isStaged ? ' (staged)' : '';
     label.textContent = toolsets.join(', ') + stagedSuffix;
+    if (mobileLabel) mobileLabel.textContent = toolsets.join(', ') + stagedSuffix;
     chip.classList.add('has-custom');
     chip.title = t('session_toolsets') + ': ' + toolsets.join(', ') + stagedSuffix;
   } else {
     label.textContent = t('session_toolsets_profile_defaults');
+    if (mobileLabel) mobileLabel.textContent = t('session_toolsets_profile_defaults');
     chip.classList.remove('has-custom');
     chip.title = t('session_toolsets') + ': ' + t('session_toolsets_profile_defaults');
   }
@@ -5963,13 +5971,16 @@ function _populateToolsetsDropdown() {
 function _positionToolsetsDropdown() {
   const dd = $('composerToolsetsDropdown');
   const chip = $('composerToolsetsChip');
+  const mobileAction = $('composerMobileToolsetsAction');
   const footer = document.querySelector('.composer-footer');
-  if (!dd || !chip || !footer) return;
-  // Defense: if the chip has been hidden by responsive CSS (e.g. resize across
-  // 1100px container threshold while dropdown was open), don't try to anchor
-  // to a zero-rect element — close the dropdown instead. (#1431)
-  if (chip.offsetParent === null) { closeToolsetsDropdown(); return; }
-  const chipRect = chip.getBoundingClientRect();
+  if (!dd || !footer) return;
+  const panel = $('composerMobileConfigPanel');
+  const anchor = panel && panel.classList.contains('open') && mobileAction ? mobileAction : chip;
+  if (!anchor) return;
+  // The desktop chip is intentionally hidden at narrow widths. The mobile
+  // command-center action is the authoritative anchor on phones.
+  if (anchor.offsetParent === null) { closeToolsetsDropdown(); return; }
+  const chipRect = anchor.getBoundingClientRect();
   const footerRect = footer.getBoundingClientRect();
   let left = chipRect.left - footerRect.left;
   const maxLeft = Math.max(0, footer.clientWidth - dd.offsetWidth);
@@ -5980,10 +5991,13 @@ function _positionToolsetsDropdown() {
 function toggleToolsetsDropdown() {
   const dd = $('composerToolsetsDropdown');
   const chip = $('composerToolsetsChip');
-  if (!dd || !chip) return;
-  // Don't open when the chip itself is hidden by responsive CSS (#1431).
-  // offsetParent === null catches display:none on the element or any ancestor.
-  if (chip.offsetParent === null) return;
+  const mobileAction = $('composerMobileToolsetsAction');
+  if (!dd || (!chip && !mobileAction)) return;
+  const panel = $('composerMobileConfigPanel');
+  const anchor = panel && panel.classList.contains('open') && mobileAction ? mobileAction : chip;
+  // Allow the mobile command center to open toolsets even while the desktop
+  // chip is hidden by the narrow composer CSS.
+  if (!anchor || anchor.offsetParent === null) return;
   const open = dd.classList.contains('open');
   if (open) { closeToolsetsDropdown(); return; }
   if (typeof closeProfileDropdown === 'function') closeProfileDropdown();
@@ -6002,7 +6016,9 @@ function toggleToolsetsDropdown() {
   });
   dd.classList.add('open');
   _positionToolsetsDropdown();
-  chip.classList.add('active');
+  chip && chip.classList.add('active');
+  mobileAction && mobileAction.classList.add('active');
+  mobileAction && mobileAction.setAttribute('aria-expanded','true');
   // Focus the input after a tick so the layout has settled
   setTimeout(() => { const inp = $('toolsetsInput'); if (inp) inp.focus(); }, 50);
 }
@@ -6010,8 +6026,13 @@ function toggleToolsetsDropdown() {
 function closeToolsetsDropdown() {
   const dd = $('composerToolsetsDropdown');
   const chip = $('composerToolsetsChip');
+  const mobileAction = $('composerMobileToolsetsAction');
   if (dd) dd.classList.remove('open');
   if (chip) chip.classList.remove('active');
+  if (mobileAction) {
+    mobileAction.classList.remove('active');
+    mobileAction.setAttribute('aria-expanded','false');
+  }
 }
 
 function _applySessionToolsets(toolsets) {
@@ -6053,6 +6074,7 @@ function _applySessionToolsets(toolsets) {
 document.addEventListener('click', function(e) {
   if (
     !e.target.closest('#composerToolsetsChip') &&
+    !e.target.closest('#composerMobileToolsetsAction') &&
     !e.target.closest('#composerToolsetsDropdown')
   ) closeToolsetsDropdown();
   // Active profile defaults button
@@ -6107,8 +6129,6 @@ document.addEventListener('change', function(e) {
 window.addEventListener('resize', () => {
   const dd = $('composerToolsetsDropdown');
   if (!dd || !dd.classList.contains('open')) return;
-  const chip = $('composerToolsetsChip');
-  if (!chip || chip.offsetParent === null) { closeToolsetsDropdown(); return; }
   _positionToolsetsDropdown();
 });
 
@@ -6121,7 +6141,17 @@ function _syncMobileComposerConfigButton(open){
 
 function closeMobileComposerConfig(){
   const panel=$('composerMobileConfigPanel');
-  if(panel) panel.classList.remove('open');
+  if(!panel || !panel.classList.contains('open')) return;
+  panel.classList.remove('open');
+  panel.inert=true;
+  panel.setAttribute('aria-hidden','true');
+  closeModelDropdown();
+  closeReasoningDropdown();
+  closeToolsetsDropdown();
+  const prompts=document.getElementById("savedPromptsPopup");
+  if(prompts){prompts.style.display='none';prompts.classList.remove('saved-prompts-open');}
+  const promptsAction=document.getElementById("composerMobileSavedPromptsAction");
+  if(promptsAction) promptsAction.setAttribute('aria-expanded','false');
   _syncMobileComposerConfigButton(false);
   if(typeof closeWsDropdown==='function') closeWsDropdown();
 }
@@ -6134,6 +6164,8 @@ function openMobileComposerConfig(){
   closeModelDropdown();
   closeReasoningDropdown();
   if(typeof closeToolsetsDropdown==='function') closeToolsetsDropdown();
+  panel.inert=false;
+  panel.setAttribute('aria-hidden','false');
   panel.classList.add('open');
   _syncMobileComposerConfigButton(true);
 }
@@ -6173,7 +6205,9 @@ document.addEventListener('click',function(e){
     e.target.closest('#composerMobileConfigPanel') ||
     e.target.closest('#composerWsDropdown') ||
     e.target.closest('#composerModelDropdown') ||
-    e.target.closest('#composerReasoningDropdown')
+    e.target.closest('#composerReasoningDropdown') ||
+    e.target.closest('#composerToolsetsDropdown') ||
+    e.target.closest('#savedPromptsPopup')
   ) return;
   closeMobileComposerConfig();
 });
@@ -21946,11 +21980,51 @@ function _renderTreeItems(container, entries, depth){
     el.style.paddingLeft=(8+depth*16)+'px';
     el.setAttribute('draggable','true');
     el.dataset.wsType=item.type;
+    let _fileLongPressTimer=null;
+    let _fileLongPressPoint=null;
+    let _fileLongPressConsumed=false;
+    el.addEventListener('click',(e)=>{
+      if(!_fileLongPressConsumed)return;
+      _fileLongPressConsumed=false;
+      e.preventDefault();e.stopImmediatePropagation();
+    },true);
+    const _clearFileLongPress=()=>{
+      if(_fileLongPressTimer){clearTimeout(_fileLongPressTimer);_fileLongPressTimer=null;}
+      el.classList.remove('file-long-pressing');
+      _fileLongPressPoint=null;
+    };
+    el.onpointerdown=(e)=>{
+      if(e.pointerType==='mouse') return;
+      if(e.target.closest('button,input,a')) return;
+      _clearFileLongPress();
+      _fileLongPressConsumed=false;
+      _fileLongPressPoint={clientX:e.clientX,clientY:e.clientY};
+      el.classList.add('file-long-pressing');
+      _fileLongPressTimer=setTimeout(()=>{
+        _fileLongPressTimer=null;
+        const grant=typeof _workspaceEscapeGrantForPath==='function' ? _workspaceEscapeGrantForPath(item.path) : null;
+        const isDirRow=item.type==='dir'||(item.type==='symlink'&&item.is_dir);
+        if(grant&&!isDirRow) return _clearFileLongPress();
+        const point=_fileLongPressPoint||e;
+        _fileLongPressConsumed=true;
+        _showFileContextMenu({clientX:point.clientX,clientY:point.clientY,mobileSheet:true},item);
+      },450);
+    };
+    el.onpointermove=(e)=>{
+      if(!_fileLongPressPoint) return;
+      if(Math.abs(e.clientX-_fileLongPressPoint.clientX)>10||Math.abs(e.clientY-_fileLongPressPoint.clientY)>10) _clearFileLongPress();
+    };
+    el.onpointerup=_clearFileLongPress;
+    el.onpointercancel=_clearFileLongPress;
     el.oncontextmenu=(e)=>{
       const grant=typeof _workspaceEscapeGrantForPath==='function' ? _workspaceEscapeGrantForPath(item.path) : null;
       const isDirRow=item.type==='dir'||(item.type==='symlink'&&item.is_dir);
       if(grant&&!isDirRow){e.preventDefault();e.stopPropagation();return;}
-      e.preventDefault();e.stopPropagation();_showFileContextMenu(e,item);
+      e.preventDefault();e.stopPropagation();
+      const mobileSheet=e.pointerType==='touch'||e.pointerType==='pen';
+      _clearFileLongPress();
+      if(mobileSheet)_fileLongPressConsumed=true;
+      _showFileContextMenu({clientX:e.clientX,clientY:e.clientY,mobileSheet},item);
     };
     el.ondragstart=(e)=>{_setWsDragData(e,item);e.dataTransfer.effectAllowed='copy';el.classList.add('dragging');};
     el.ondragend=()=>{el.classList.remove('dragging');_clearWorkspaceMoveDragOver();_clearWsDragData();};
@@ -22199,12 +22273,22 @@ async function deleteWorkspaceDir(relPath, name){
 function _showFileContextMenu(e, item){
   document.querySelectorAll('.file-ctx-menu').forEach(el=>el.remove());
   const menu=document.createElement('div');
-  menu.className='file-ctx-menu';
+  const mobileSheet=!!e.mobileSheet;
+  menu.className='file-ctx-menu'+(mobileSheet?' file-ctx-menu-mobile':'');
+  menu.setAttribute('role','menu');
+  menu.setAttribute('aria-label',item.name||t('workspace_files_tab'));
   menu.style.cssText='position:fixed;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:6px 0;z-index:9999;min-width:140px;box-shadow:0 4px 16px rgba(0,0,0,.35);';
-  // Keep menu within viewport
+  // Keep menu within viewport; touch long-press uses a bottom-sheet layout.
   const vw=window.innerWidth,vh=window.innerHeight;
-  menu.style.left=(e.clientX+140>vw?e.clientX-150:e.clientX)+'px';
-  menu.style.top=(e.clientY+100>vh?e.clientY-100:e.clientY)+'px';
+  if(mobileSheet){
+    menu.style.left='8px';
+    menu.style.right='8px';
+    menu.style.bottom='calc(8px + env(safe-area-inset-bottom, 0px))';
+    menu.style.top='auto';
+  }else{
+    menu.style.left=(e.clientX+140>vw?e.clientX-150:e.clientX)+'px';
+    menu.style.top=(e.clientY+100>vh?e.clientY-100:e.clientY)+'px';
+  }
   const isDirLike=item.type==='dir'||(item.type==='symlink'&&item.is_dir);
   const targetDir=isDirLike ? item.path : _workspaceParentDir(item.path);
   const isReadOnlyEscape=typeof _workspaceEscapeGrantForPath==='function' ? !!_workspaceEscapeGrantForPath(item.path) : false;

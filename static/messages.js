@@ -846,15 +846,20 @@ async function _loadSavedPrompts(){
 async function toggleSavedPromptsPopup(){
   const popup=(typeof $==='function'&&$('savedPromptsPopup'))||document.getElementById('savedPromptsPopup');
   const btn=(typeof $==='function'&&$('btnSavedPrompts'))||document.getElementById('btnSavedPrompts');
+  const mobileBtn=(typeof $==='function'&&$('composerMobileSavedPromptsAction'))||document.getElementById('composerMobileSavedPromptsAction');
   if(!popup)return;
   if(popup.style.display!=='none'){
     popup.style.display='none';
+    popup.classList.remove('saved-prompts-open');
     if(btn)btn.setAttribute('aria-expanded','false');
+    if(mobileBtn)mobileBtn.setAttribute('aria-expanded','false');
     return;
   }
   popup.innerHTML='<div class="saved-prompts-loading">Loading…</div>';
   popup.style.display='flex';
+  popup.classList.add('saved-prompts-open');
   if(btn)btn.setAttribute('aria-expanded','true');
+  if(mobileBtn)mobileBtn.setAttribute('aria-expanded','true');
   const prompts=await _loadSavedPrompts();
   popup.innerHTML='';
   if(!prompts.length){
@@ -874,7 +879,9 @@ async function toggleSavedPromptsPopup(){
       row.onclick=()=>{
         insertSavedPromptIntoComposer(p.text);
         popup.style.display='none';
+    popup.classList.remove('saved-prompts-open');
         if(btn)btn.setAttribute('aria-expanded','false');
+        if(mobileBtn)mobileBtn.setAttribute('aria-expanded','false');
       };
       const del=document.createElement('button');
       del.className='saved-prompt-delete';
@@ -912,7 +919,9 @@ async function toggleSavedPromptsPopup(){
     }
     _savedPromptsCache=null;
     popup.style.display='none';
+    popup.classList.remove('saved-prompts-open');
     if(btn)btn.setAttribute('aria-expanded','false');
+    if(mobileBtn)mobileBtn.setAttribute('aria-expanded','false');
     if(typeof showToast==='function') showToast((typeof t==='function'&&t('saved_prompts_saved'))||'Prompt saved',1600);
   };
   addRow.appendChild(saveBtn);
@@ -922,10 +931,13 @@ async function toggleSavedPromptsPopup(){
 document.addEventListener('click',(e)=>{
   const popup=(typeof $==='function'&&$('savedPromptsPopup'))||document.getElementById('savedPromptsPopup');
   const btn=(typeof $==='function'&&$('btnSavedPrompts'))||document.getElementById('btnSavedPrompts');
+  const mobileBtn=(typeof $==='function'&&$('composerMobileSavedPromptsAction'))||document.getElementById('composerMobileSavedPromptsAction');
   if(!popup||popup.style.display==='none')return;
-  if(!popup.contains(e.target)&&e.target!==btn&&!(btn&&btn.contains(e.target))){
+  if(!popup.contains(e.target)&&e.target!==btn&&!(btn&&btn.contains(e.target))&&e.target!==mobileBtn&&!(mobileBtn&&mobileBtn.contains(e.target))){
     popup.style.display='none';
+    popup.classList.remove('saved-prompts-open');
     if(btn)btn.setAttribute('aria-expanded','false');
+    if(mobileBtn)mobileBtn.setAttribute('aria-expanded','false');
   }
 },{capture:false});
 function _addNamedContextBlock(text){
