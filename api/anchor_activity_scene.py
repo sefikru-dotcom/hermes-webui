@@ -1069,7 +1069,7 @@ def _hydrate_anchor_activity_scenes(messages, records, *, message_offset=0, tool
         record = by_ref.get(_msg_ref) if _ref_counts.get(_msg_ref, 0) <= 1 else None
         if not record:
             candidate = by_index.get(absolute_idx)
-            if candidate and _anchor_scene_candidate_matches_scene(message, candidate.get("scene") or {}, _assistant_anchor_scene_message_ref=_assistant_anchor_scene_message_ref):
+            if candidate and _anchor_scene_candidate_matches_scene(message, candidate.get("scene") or {}):
                 record = candidate
         if not record:
             continue

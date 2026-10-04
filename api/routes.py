@@ -3786,7 +3786,7 @@ _anchor_scene_int_or_none = _anchor_scene_module._anchor_scene_int_or_none
 _anchor_scene_message_index_from_request = _anchor_scene_module._anchor_scene_message_index_from_request
 
 def _anchor_scene_candidate_matches_scene(message, scene):
-    return _anchor_scene_module._anchor_scene_candidate_matches_scene(message, scene, _assistant_anchor_scene_message_ref=_assistant_anchor_scene_message_ref)
+    return _anchor_scene_module._anchor_scene_candidate_matches_scene(message, scene)
 
 
 _normalize_anchor_scene_message_ref = _anchor_scene_module._normalize_anchor_scene_message_ref

@@ -173,3 +173,15 @@ new regressions without blanket skip markers in the suite.
 - `tests.test_workspace_stale_recovery::test_session_new_keeps_deleted_unverified_workspace_strict[explicit-request]`
 - `tests.test_workspace_stale_recovery::test_session_new_keeps_deleted_unverified_workspace_strict[foreign-previous-session]`
 - `tests.test_workspace_stale_recovery::test_session_new_keeps_deleted_unverified_workspace_strict[stored-workspace-mismatch]`
+
+
+## Python 3.12 verification correction — 2026-10-04
+
+The first full 3.12.14 run reported 14,422 passed, 757 failed, 285 skipped, 2 xfailed and 1 xpassed. Those failures have NOT all been proven upstream-only. Anchor-focused verification exposed five real runtime failures introduced by passing an unsupported dependency keyword to the scene-candidate matcher, and one source-location assertion still aimed at routes.py. Both call sites and the assertion owner were corrected; existing behavior tests provide regression coverage.
+
+The supported local gate is now `bash scripts/mars-test.sh`; its manifest covers structural domains and anchor, workspace, media and authentication neighbors. This narrower gate does not reproduce the former 3,116-test comparison and must not be presented as full-product certification. Production was not deployed.
+
+### Extraction lesson
+- ❌ Inferring that all full-suite failures are inherited from a small green subset.
+- ✅ Run the moved domain's behavior tests and compare the full baseline before classifying failures.
+- 💡 Explicit dependency forwarding must match the callee signature at every facade and internal call site.
