@@ -2734,7 +2734,9 @@ function _kanbanRenderBoard(){
     board.innerHTML = _kanbanEmptyBoardHtml();
     return;
   }
-  board.classList.toggle('kanban-board-consolidated', !_kanbanLanesByProfile);
+  const mobileList=window.matchMedia('(max-width:700px), (pointer:coarse) and (max-width:1024px)').matches;
+  board.classList.toggle('kanban-board-mobile-list',mobileList);
+  board.classList.toggle('kanban-board-consolidated', !mobileList&&!_kanbanLanesByProfile);
   const columns = _kanbanVisibleTasks();
   const total = columns.reduce((n, col) => n + (col.tasks || []).length, 0);
   if ($('kanbanSummary')) $('kanbanSummary').textContent = String(t('kanban_visible_tasks')).replace('{0}', total);
@@ -2744,7 +2746,12 @@ function _kanbanRenderBoard(){
     board.innerHTML = unfilteredTotal > 0 ? _kanbanHiddenByFiltersHtml() : _kanbanEmptyBoardHtml();
     return;
   }
-  board.innerHTML = _kanbanLanesByProfile ? _kanbanRenderProfileLanes(columns) : columns.map(_kanbanRenderColumn).join('');
+  if(mobileList){
+    board.innerHTML=columns.map(col=>`<section class="kanban-mobile-section"><h3>${esc(_kanbanColumnLabel(col.name))} · ${(col.tasks||[]).length}</h3>${(col.tasks||[]).map(task=>`<div class="kanban-mobile-row">${_kanbanCard(task,col.name)}<button type="button" class="btn secondary" onclick="openKanbanEdit(${jsArg(task.id)})">${esc(t('edit'))} / ${esc(t('kanban_status'))}</button></div>`).join('')}</section>`).join('');
+    board.querySelectorAll('[draggable]').forEach(card=>card.draggable=false);
+  }else{
+    board.innerHTML = _kanbanLanesByProfile ? _kanbanRenderProfileLanes(columns) : columns.map(_kanbanRenderColumn).join('');
+  }
 }
 
 function _kanbanCard(task, status){

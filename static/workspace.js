@@ -990,7 +990,9 @@ function updateEditBtn(){
   btn.innerHTML = editing ? `&#128190; ${t('save')}` : `&#9998; ${t('edit')}`;
   btn.title = editing ? t('save_title') : t('edit_title');
   btn.style.color = editing ? 'var(--blue)' : '';
-  if(_previewDirty) btn.innerHTML = '&#128190; Save*';
+  if(_previewDirty) btn.innerHTML = '&#128190; '+t('save')+'*';
+  const cancel=$('btnCancelFileEdit');
+  if(cancel)cancel.hidden=!editing;
 }
 
 async function toggleEditMode(){
@@ -1098,6 +1100,11 @@ function _prismLanguageForPath(path){
 
 async function openFile(path, opts={}){
   if(!S.session)return;
+  if(_previewDirty){
+    const discard=await showConfirmDialog({title:t('unsaved_confirm'),message:'',confirmLabel:'Discard',danger:true,focusCancel:true});
+    if(!discard)return;
+    cancelEditMode();
+  }
   const ext=fileExt(path);
   const bustCache=!!(opts&&opts.bustCache);
   const forceRichMarkdown=!!(opts&&opts.forceRichMarkdown);

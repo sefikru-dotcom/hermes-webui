@@ -8759,6 +8759,7 @@ function renderSessionListFromCache(){
       if(readOnly) return;
       e.preventDefault();
       e.stopPropagation();
+      if(e.pointerType==='touch'||e.pointerType==='pen') return;
       clearTimeout(_tapTimer);
       _tapTimer=null;
       _lastTapTime=0;

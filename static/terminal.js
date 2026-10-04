@@ -255,7 +255,8 @@ function _terminalDimensions(){
 function _terminalHeightBounds(){
   const mobile=window.matchMedia&&window.matchMedia('(max-width: 700px)').matches;
   const min=mobile?TERMINAL_MOBILE_HEIGHT_MIN:TERMINAL_HEIGHT_MIN;
-  const maxByViewport=Math.floor(window.innerHeight*(mobile?0.44:0.5));
+  const viewportHeight=window.visualViewport?window.visualViewport.height:window.innerHeight;
+  const maxByViewport=Math.floor(viewportHeight*(mobile?0.44:0.5));
   const hardMax=mobile?TERMINAL_MOBILE_HEIGHT_MAX:TERMINAL_HEIGHT_MAX;
   return {
     min,
@@ -295,7 +296,6 @@ function _resetTerminalHeightForViewport(){
 }
 
 function _startTerminalHeightResize(ev){
-  if(ev.pointerType==='touch')return;
   const {inner,handle}= _terminalEls();
   if(!inner||!handle)return;
   ev.preventDefault();
@@ -475,6 +475,13 @@ function syncTerminalButton(){
 
 function focusComposerTerminalInput(){
   if(TERMINAL_UI.term)TERMINAL_UI.term.focus();
+}
+
+function sendComposerTerminalKey(key){
+  const keys={escape:'\u001b',tab:'\t',interrupt:'\u0003',up:'\u001b[A',down:'\u001b[B',enter:'\r'};
+  if(!Object.prototype.hasOwnProperty.call(keys,key)||!TERMINAL_UI.open||TERMINAL_UI.collapsed||!TERMINAL_UI.term)return;
+  TERMINAL_UI.term.input(keys[key],true);
+  focusComposerTerminalInput();
 }
 
 function _connectTerminalOutput(){
@@ -782,6 +789,12 @@ window.addEventListener('resize',()=>{
   }
   _resetTerminalHeightForViewport();
 });
+
+if(window.visualViewport){
+  window.visualViewport.addEventListener('resize',()=>{
+    if(TERMINAL_UI.open&&!TERMINAL_UI.collapsed)_resetTerminalHeightForViewport();
+  });
+}
 
 if(window.MutationObserver){
   new MutationObserver(()=>syncComposerTerminalAppearance()).observe(document.documentElement,{

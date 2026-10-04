@@ -7112,7 +7112,7 @@ main.main > .main-view:not([id="mainChat"]):not([id="mainSettings"]) .main-view-
   .assistant-turn .msg-foot{opacity:1;}
   .msg-actions{opacity:1;}
   .msg-actions{gap:4px;}
-  .msg-action-btn{min-width:40px;min-height:40px;padding:8px;display:inline-flex;align-items:center;justify-content:center;}
+  .msg-action-btn{min-width:44px;min-height:44px;padding:8px;display:inline-flex;align-items:center;justify-content:center;}
 }
 
 /* ── /btw ephemeral side-question bubble ── */
@@ -9488,4 +9488,48 @@ button.send-btn:active:not(:disabled),
   .composer-footer .composer-toolsets-dropdown.open{display:block;position:fixed;left:4vw!important;right:4vw;bottom:auto;top:50%;width:auto;min-width:0;max-width:none;max-height:min(70dvh,560px);transform:translateY(-50%);z-index:260;box-sizing:border-box;overflow-y:auto;}
   .saved-prompts-popup .saved-prompt-row,.saved-prompts-popup .saved-prompt-save-btn{min-height:44px;}
   .saved-prompts-popup .saved-prompt-delete{min-width:44px;min-height:44px;}
+}
+
+/* Touch terminal controls share the existing terminal input path. */
+.terminal-touch-keys{display:none;}
+@media(max-width:700px),(pointer:coarse) and (max-height:500px){
+ .terminal-touch-keys{display:flex;gap:4px;overflow-x:auto;padding:4px 8px;flex-shrink:0;}
+ .terminal-touch-keys .composer-terminal-action{min-width:44px;min-height:44px;flex:1 0 auto;}
+ .composer-terminal-header{flex-wrap:wrap;gap:4px;}
+ .composer-terminal-header .composer-terminal-actions{width:100%;overflow-x:auto;}
+ .composer-terminal-actions .composer-terminal-action{min-height:44px;padding:6px 10px;font-size:11px;}
+ .composer-terminal-resize-handle{height:20px;touch-action:none;}
+ .composer-terminal-inner{min-height:140px;max-height:min(300px,44dvh);}
+}
+
+@media (pointer:coarse) and (max-height:500px){
+ .msg-actions{opacity:1;flex-wrap:wrap;}
+ .msg-action-btn{min-width:44px;min-height:44px;}
+ .composer-footer{flex-wrap:wrap;}
+ .modal-overlay,.kanban-modal-overlay{padding:8px;}
+ .modal,.kanban-modal{max-height:calc(100dvh - 16px);overflow-y:auto;}
+}
+
+.mobile-workspace-navigation{display:none;}
+.kanban-board-mobile-list{display:flex!important;flex-direction:column!important;overflow-y:auto;overflow-x:hidden;}
+.kanban-mobile-section{width:100%;min-width:0;}
+.kanban-mobile-section h3{font-size:13px;color:var(--muted);padding:8px 0;}
+.kanban-mobile-row{display:flex;flex-direction:column;gap:4px;margin-bottom:12px;}
+.kanban-mobile-row .btn{min-height:44px;}
+@media(max-width:900px){
+ .mobile-workspace-navigation{display:flex;gap:8px;padding:8px;flex-shrink:0;}
+ .mobile-workspace-navigation .btn{min-height:44px;flex:1;}
+ .rightpanel.mobile-open{--mobile-rightpanel-width:100vw;}
+ .preview-path{flex-wrap:wrap;flex-shrink:0;}
+ .preview-path #previewPathText{flex-basis:100%;overflow-wrap:anywhere;}
+ .preview-path .panel-icon-btn{min-height:44px;min-width:44px;}
+ #btnCancelFileEdit[hidden]{display:none!important;}
+ #previewEditArea{font-size:16px!important;min-height:120px;box-sizing:border-box;}
+ .layout.mobile-workspace-split .rightpanel.mobile-open{top:45dvh!important;bottom:var(--keyboard-bottom-inset,0px);padding-top:0;}
+ .layout.mobile-workspace-split #mainChat{max-height:45dvh;}
+}
+@media(max-width:700px),(pointer:coarse) and (max-width:1024px){
+ .kanban-modal-row input,.kanban-modal-row select,.kanban-modal-row textarea{font-size:16px;min-height:44px;}
+ .kanban-modal-actions{position:sticky;bottom:0;background:var(--surface);padding:8px 0;}
+ .kanban-modal-actions .btn,.kanban-detail .btn{min-height:44px;}
 }

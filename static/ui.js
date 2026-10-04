@@ -6167,6 +6167,8 @@ function openMobileComposerConfig(){
   panel.inert=false;
   panel.setAttribute('aria-hidden','false');
   panel.classList.add('open');
+  const terminalAction=$('composerMobileTerminalAction');
+  if(terminalAction)terminalAction.disabled=!(S.session&&S.session.workspace)||!!S.terminalRemoteBackend;
   _syncMobileComposerConfigButton(true);
 }
 

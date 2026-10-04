@@ -704,6 +704,14 @@ window._marsFallbackActivityCycle=function(btn){
               <button type="button" class="composer-terminal-action" id="btnTerminalClose" onclick="closeComposerTerminal()" data-i18n="terminal_close">Close</button>
             </div>
           </div>
+          <div class="terminal-touch-keys" role="toolbar" aria-label="Terminal keyboard shortcuts">
+            <button type="button" class="composer-terminal-action" onclick="sendComposerTerminalKey('escape')">Esc</button>
+            <button type="button" class="composer-terminal-action" onclick="sendComposerTerminalKey('tab')">Tab</button>
+            <button type="button" class="composer-terminal-action" onclick="sendComposerTerminalKey('interrupt')" aria-label="Interrupt command">Ctrl+C</button>
+            <button type="button" class="composer-terminal-action" onclick="sendComposerTerminalKey('up')" aria-label="Previous command">↑</button>
+            <button type="button" class="composer-terminal-action" onclick="sendComposerTerminalKey('down')" aria-label="Next command">↓</button>
+            <button type="button" class="composer-terminal-action" onclick="sendComposerTerminalKey('enter')">Enter</button>
+          </div>
           <div class="composer-terminal-viewport" id="terminalViewport" onclick="focusComposerTerminalInput()">
             <div class="composer-terminal-surface" id="terminalSurface" aria-label="Workspace terminal"></div>
           </div>
@@ -910,6 +918,9 @@ window._marsFallbackActivityCycle=function(btn){
             <button class="composer-mobile-config-action" id="composerMobileToolsetsAction" type="button" onclick="toggleToolsetsDropdown()" title="Session toolsets" data-i18n-title="session_toolsets" aria-label="Session toolsets" data-i18n-aria-label="session_toolsets" aria-haspopup="true" aria-expanded="false" aria-controls="composerToolsetsDropdown">
               <span class="composer-toolsets-icon" aria-hidden="true">⚒</span>
               <span class="composer-mobile-config-copy"><span class="composer-mobile-config-kicker" data-i18n="composer_control_toolsets">Toolsets</span><span class="composer-mobile-config-value" id="composerMobileToolsetsLabel">Global</span></span>
+            </button>
+            <button class="composer-mobile-config-action" id="composerMobileTerminalAction" type="button" onclick="closeMobileComposerConfig();toggleComposerTerminal(true)" aria-label="Open terminal">
+              <span aria-hidden="true">⌨</span><span class="composer-mobile-config-copy"><span class="composer-mobile-config-value" data-i18n="terminal_title">Terminal</span></span>
             </button>
             <div class="composer-mobile-config-action composer-mobile-context-action" id="composerMobileContextAction" role="group" aria-label="Context window" style="display:none">
               <span class="composer-mobile-config-copy composer-mobile-context-copy">
@@ -1895,6 +1906,10 @@ window._marsFallbackActivityCycle=function(btn){
       </div>
     </div>
     <input type="file" id="workspaceFileInput" class="file-input-visually-hidden" multiple accept="image/*,text/*,.pdf,.json,.csv,.md,.py,.js,.ts,.yaml,.yml,.toml,.zip,.tar,.gz,.tgz,.bz2,.xz">
+    <div class="mobile-workspace-navigation">
+      <button type="button" class="btn secondary" onclick="closeWorkspacePanel()">← <span data-i18n="tab_chat">Chat</span></button>
+      <button type="button" class="btn secondary" id="btnWorkspaceSplit" onclick="toggleMobileWorkspaceSplit()" aria-pressed="false">Split view</button>
+    </div>
     <div class="workspace-panel-tabs" role="tablist" aria-label="Workspace panel views" data-i18n-aria-label="workspace_panel_views">
       <button class="workspace-panel-tab active" id="workspaceFilesTab" type="button" onclick="switchWorkspacePanelTab('files')" role="tab" aria-selected="true" data-i18n="workspace_files_tab">Files</button>
       <button class="workspace-panel-tab" id="workspaceArtifactsTab" type="button" onclick="switchWorkspacePanelTab('artifacts')" role="tab" aria-selected="false"><span data-i18n="workspace_artifacts_tab">Artifacts</span> <span id="workspaceArtifactsCount" class="workspace-artifacts-count">0</span></button>
@@ -1914,6 +1929,7 @@ window._marsFallbackActivityCycle=function(btn){
         <button id="btnRenderMarkdownAnyway" class="panel-icon-btn" style="font-size:12px;width:auto;padding:2px 8px;display:none;align-items:center;gap:4px" onclick="forceRenderMarkdownPreview()" title="Render this large file as rich Markdown"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M16 3h3a2 2 0 0 1 2 2v3"/><path d="M8 21H5a2 2 0 0 1-2-2v-3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/><path d="M7 8h10"/><path d="M7 12h10"/><path d="M7 16h6"/></svg> Render as markdown anyway</button>
         <button id="btnDownloadFile" class="panel-icon-btn" style="margin-left:auto;font-size:12px;width:auto;padding:2px 8px;display:inline-flex;align-items:center;gap:4px" onclick="downloadFile(_previewCurrentPath)" title="Download file to your computer"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Download</button>
         <button id="btnEditFile" class="panel-icon-btn" style="font-size:12px;width:auto;padding:2px 8px;display:none;align-items:center;gap:4px" onclick="toggleEditMode()"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg> Edit</button>
+        <button id="btnCancelFileEdit" type="button" class="panel-icon-btn" hidden onclick="cancelEditMode()" data-i18n="cancel">Cancel</button>
       </div>
       <pre class="preview-code" id="previewCode"></pre>
       <div class="preview-img-wrap" id="previewImgWrap" style="display:none"><img class="preview-img" id="previewImg" src="" alt=""></div>

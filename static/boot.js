@@ -305,7 +305,11 @@ function ensureWorkspacePreviewVisible(){
   else syncWorkspacePanelUI();
 }
 
-function handleWorkspaceClose(){
+async function handleWorkspaceClose(){
+  if(typeof _previewDirty!=='undefined'&&_previewDirty){
+    const discard=await showConfirmDialog({title:t('unsaved_confirm'),message:'',confirmLabel:'Discard',danger:true,focusCancel:true});
+    if(!discard)return;
+  }
   if(_hasWorkspacePreviewVisible()){
     clearPreview();
     return;
@@ -602,8 +606,18 @@ function expandSidebar(){
 function toggleMobileFiles(){
   toggleWorkspacePanel();
 }
+function toggleMobileWorkspaceSplit(){
+  const layout=document.querySelector('.layout');
+  if(!layout)return;
+  const split=layout.classList.toggle('mobile-workspace-split');
+  const button=$('btnWorkspaceSplit');
+  if(button)button.setAttribute('aria-pressed',String(split));
+  if(split)openWorkspacePanel(_hasWorkspacePreviewVisible()?'preview':'browse');
+}
 function closeMobileWorkspacePanelFromChat(e){
   if(!_isCompactWorkspaceViewport()||_workspacePanelMode==='closed') return;
+  const layout=document.querySelector('.layout');
+  if(layout&&layout.classList.contains('mobile-workspace-split'))return;
   const panel=document.querySelector('.rightpanel');
   if(panel&&panel.contains(e.target)) return;
   closeWorkspacePanel();
