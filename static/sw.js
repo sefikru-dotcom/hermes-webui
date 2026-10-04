@@ -8,7 +8,7 @@
 // Cache version is injected by the server at request time (routes.py /sw.js handler).
 // Bumps automatically whenever the git commit changes — no manual edits needed.
 // MANUAL BUMP: mars-thinkfast-v25 — reasoning stream fast-path (in-place rAF sync, live tail window, incremental echo cache).
-const CACHE_NAME = 'hermes-shell-__WEBUI_VERSION__-mars-thinkfast-v25';
+const CACHE_NAME = 'hermes-shell-__WEBUI_VERSION__-mars-thinkfast-v26-workers';
 
 // Static assets that form the app shell.
 //
@@ -21,7 +21,7 @@ const CACHE_NAME = 'hermes-shell-__WEBUI_VERSION__-mars-thinkfast-v25';
 // either the authenticated app shell or login code, and stale cached responses
 // can make valid password submits fail until the user clears browser cache.
 // Navigations populate './' only after a successful non-redirect network load.
-const VQ = '?v=__WEBUI_VERSION__-mars-thinkfast-v25';
+const VQ = '?v=__WEBUI_VERSION__-mars-thinkfast-v26-workers';
 const SHELL_ASSETS = [
   './static/style.css' + VQ,
   './static/pwa-startup.js' + VQ,

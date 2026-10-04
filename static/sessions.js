@@ -8366,11 +8366,29 @@ function renderSessionListFromCache(){
       const openChildSession=async(childSession)=>{
         await _openSidebarSession(childSession, {skipLineageResolve:true});
       };
+      const childWorkerStatus=(child)=>{
+        const raw=child&&child.worker_status&&child.worker_status.status;
+        return ['running','completed','failed','stopped','interrupted'].includes(raw)?raw:'unknown';
+      };
+      const childWorkerStatusLabel=(child)=>{
+        const labels={running:'Working',completed:'Completed',failed:'Error',stopped:'Interrupted',interrupted:'Interrupted',unknown:'Status unknown'};
+        const status=childWorkerStatus(child);
+        return (typeof t==='function'&&t(`worker_status_${status}`))||labels[status];
+      };
       const childLabelFor=(child)=>{
-        const childTitle=_sessionDisplayTitle(child)||'Untitled child session';
-        const childTime=_formatRelativeSessionTime(_sessionTimestampMs(child));
+        const ws=child.worker_status;
+        const childTitle=ws&&ws.goal?ws.goal.slice(0,64):(_sessionDisplayTitle(child)||'Untitled child session');
+        const age=_formatRelativeSessionTime(_sessionTimestampMs(child));
+        const duration=Number(child&&child.worker_status&&child.worker_status.duration_seconds);
         const parentNote=child._parent_segment_title?` via ${child._parent_segment_title}`:'';
-        return `-> ${childTitle}${parentNote} - ${childTime}`;
+        if(!ws && !['subagent'].includes(child.raw_source||child.source||child.source_tag)) return `-> ${childTitle}${parentNote} - ${age}`;
+        const status=childWorkerStatus(child);
+        const ru=typeof t==='function'&&t('worker_status_running')==='Работает';
+        const seconds=status==='running'&&ws&&ws.started_at?Math.max(0,Date.now()/1000-ws.started_at):duration;
+        const elapsed=Number.isFinite(seconds)&&seconds>0?(seconds<60?`${Math.round(seconds)}${ru?'с':'s'}`:`${Math.floor(seconds/60)}${ru?'м':'m'} ${Math.round(seconds%60)}${ru?'с':'s'}`):'';
+        const icon={running:'◌',completed:'✓',failed:'✕',stopped:'■',interrupted:'■',unknown:'?'}[status];
+        const timing=status==='running'?(elapsed?` · ${ru?'работает':'running for'} ${elapsed}`:''):(elapsed?` · ${ru?'выполнено за':'duration'} ${elapsed}`:'');
+        return `${icon} ${childWorkerStatusLabel(child)} · ${childTitle}${parentNote}${timing}${status==='running'&&ws&&ws.last_action?' · '+ws.last_action:''}`;
       };
       const installForkChildSwipe=(rowEl, childSession, actionsEl)=>{
         let _pointerDownX=0;
@@ -8567,6 +8585,7 @@ function renderSessionListFromCache(){
           row.className='session-child-session session-child-session-fork'
             +(childIsActive?' active':'')
             +(childStreaming?' streaming':'')
+            +(child.worker_status?' worker-'+childWorkerStatus(child):'')
             +(childHasUnread?' unread':'')
             +(childAttention?' needs-attention':'')
             +childAttentionClass;
@@ -8656,7 +8675,7 @@ function renderSessionListFromCache(){
         row.type='button';
         row.className='session-child-session'+(activeSidForSidebar&&child.session_id===activeSidForSidebar?' active':'');
         row.textContent=childLabelFor(child);
-        row.title='Open child session';
+        row.title=child.worker_status?(child.worker_status.goal||'')+'\n'+childWorkerStatusLabel(child):'Open child session';
         row.onclick=async(e)=>{
           e.stopPropagation();
           await openChildSession(child);

@@ -97,6 +97,7 @@ _SIDEBAR_SESSION_RESPONSE_FIELDS = {
     "_parent_lineage_root_id",
     "_parent_lineage_tip_id",
     "_cross_surface_child_session",
+    "worker_status",
     "match_type",
     "match_preview",
     # Preserved so the sidebar can suppress rename / action-menu / swipe on

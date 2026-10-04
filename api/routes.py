@@ -2542,6 +2542,12 @@ def _build_session_list_cache_payload(
 def _session_list_payload_to_response(payload: dict) -> dict:
     safe_merged = []
     runtime_rows = _session_list_cache_overlay_runtime_rows(payload.get("sessions", []) or [])
+    try:
+        from api.worker_status import attach_worker_status
+        attach_worker_status(runtime_rows, payload.get("active_profile"))
+        attach_worker_status(payload.get("sidebar_reference_sessions", []) or [], payload.get("active_profile"))
+    except Exception:
+        logger.debug("Failed to attach worker status", exc_info=True)
     # Read the redaction setting ONCE for the whole response and thread it through
     # every row, instead of letting each row's _redact_text() re-read settings.json
     # from disk (per title). The _sidebar_session_response_item -> _redact_text(_enabled=...)

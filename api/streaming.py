@@ -9988,6 +9988,14 @@ def _run_agent_streaming(
                 # #4729: a tool boundary closes/reorders the live reasoning stream — flush
                 # any buffered reasoning tail first so it isn't stranded behind the tool event.
                 _flush_reasoning_buffer()
+                if cb_args and str(cb_args[0] or '') in {'subagent.start', 'subagent.tool', 'subagent.complete'}:
+                    try:
+                        from api.worker_status import update_worker_status
+                        update_worker_status(event_type=cb_args[0], child_session_id=cb_kwargs.get('child_session_id'), delegation_id=cb_kwargs.get('delegation_id'), goal=cb_kwargs.get('goal'), status=cb_kwargs.get('status'), duration_seconds=cb_kwargs.get('duration_seconds'), failure_reason=cb_kwargs.get('failure_reason'), profile=_resolved_profile_name, last_action=cb_args[1] if len(cb_args)>1 and cb_args[0]=='subagent.tool' else None)
+                        from api.session_events import publish_session_list_changed
+                        publish_session_list_changed('worker_status_changed', session_id=cb_kwargs.get('child_session_id'))
+                    except Exception:
+                        logger.debug('Failed to persist worker status', exc_info=True)
                 event_type = None
                 name = None
                 preview = None
