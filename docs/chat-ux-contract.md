@@ -1,24 +1,23 @@
 # Mobile chat UX contract
 
 This contract is the acceptance matrix for the mobile stability shard. It
-covers the existing three-panel chat shape and does not change message,
-locale, or i18n contracts.
+covers the existing production shell and does not change message, locale, or
+i18n contracts.
 
 ## Acceptance matrix
 
 | Area | 320 px | 360 px | 393 px | Evidence |
 |---|---|---|---|---|
-| Composer controls | Send/config controls remain at least 44×44; compact gutters may reduce spacing, never targets | Same | Same | `tests/test_mobile_layout.py`; Playwright fixture smoke |
-| Keyboard / short viewport | Focused composer remains inside viewport after height reduction | Same | Same | Playwright fixture smoke; isolated runtime smoke when `MARS_MOBILE_SMOKE_URL` is set |
-| Safe area | Titlebar/composer use safe-area variables without changing touch target size | Same | Same | CSS inspection + Playwright fixture |
-| Chat scroll | `.messages-inner` must not create an accidental inner vertical scroller; transcript remains scrollable while streaming | Same | Same | mobile layout shard + browser smoke |
-| Music → chat | Music/sidebar navigation opens a full-screen mobile sidebar and Chat closes it | Same | Same | browser smoke; runtime/manual evidence required for live server |
-| New / session | New and Session preserve their respective navigation/session actions | Same | Same | browser smoke fixture; live runtime is separate |
-| Command center | Attach, Prompts, and Toolsets are reachable from the mobile command center | Same | Same | browser smoke fixture; runtime smoke where available |
-| Command center close | Close removes command center and its backdrop | Same | Same | browser smoke |
+| Keyboard / short viewport | Focused composer remains inside viewport after height reduction | Same | Same | Playwright production shell |
+| Safe area | Titlebar/composer use safe-area variables without changing touch target size | Same | Same | CSS inspection + Chromium shell run |
+| Chat scroll | `.messages-inner` must not create an accidental inner vertical scroller; transcript remains scrollable while streaming | Same | Same | mobile layout shard + shell test |
+| Music → chat | Music/sidebar navigation opens mobile drawer; selecting Chat returns to chat | Same | Same | production shell Chromium smoke |
+| New / session | New and Session preserve their respective navigation/session actions | Same | Same | production shell test; mocked API |
+| Command center | Attach, Prompts, and Toolsets are reachable and meet target dimensions | Same | Same | production shell Chromium smoke |
+| Command center close | Escape clears mobile command-center open and accessibility state | Same | Same | production shell Chromium smoke |
 | Sidebar overlay | Full-screen sidebar does not require the generic panel backdrop; closing sidebar removes sidebar state only | Same | Same | `static/boot.js` review + layout tests |
-| Other panels | Right workspace panel and command center retain their own backdrop/close behavior; sidebar close must not hide those backdrops | Same | Same | browser fixture + panel runtime tests |
-| Streaming + scroll | User can scroll existing transcript while stream content is appended | Same | Same | browser smoke fixture; live SSE not exercised |
+| Other panels | Right workspace panel and command center retain their own backdrop/close behavior; sidebar close must not hide those backdrops | Same | Same | panel tests + implementation review |
+| Streaming + scroll | User can scroll existing transcript while stream content is appended | Same | Same | shell scroll structure only; live SSE not exercised |
 
 ## Overlay ownership
 
@@ -30,17 +29,19 @@ leave the full-screen sidebar open.
 
 ## Test boundary
 
-`tests/test_mobile_browser_smoke.py` is an executable Playwright run against an
-offline deterministic DOM fixture. It proves Chromium layout and interaction
+`tests/test_mobile_browser_smoke.py` is an executable Playwright run against the
+checked-in production `static/index.html` and its real CSS/JS. A localhost
+harness serves those assets unchanged; only API responses and the music iframe
+are deterministic mocked data. It proves Chromium layout and interaction
 wiring for 320/360/393 widths, keyboard-like focus/short viewport behavior,
-safe-area CSS application, navigation, command-center controls, close behavior,
-and scrolling. It does **not** prove live API/session creation, real SSE
-streaming, device IME behavior, or production browser/device rendering.
+touch targets, overflow, navigation, command-center controls, close behavior,
+and scrolling. This is not live API/session or SSE verification, device IME
+behavior, or production browser/device rendering.
 
 `tests/test_mobile_runtime_acceptance.py` is the existing opt-in real-browser
 harness. It runs only with `MARS_MOBILE_SMOKE_URL` pointed at an isolated test
-server; it must never target production. Its results are reported separately
-from the offline fixture results.
+server; it must never target production. No live runtime or production server
+was used for this smoke.
 
 ## Scope guard
 
