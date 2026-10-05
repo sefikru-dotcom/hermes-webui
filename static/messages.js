@@ -2903,9 +2903,11 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
   function _anchorSceneActiveMode(){
     const normalize=value=>{
       if(value==='transparent_stream'||value==='compact_worklog'||value==='hide_all_activity') return value;
-      if(value==='stream_full') return 'stream_full';
-      if(value==='stream_quiet') return 'stream_quiet';
-      if(value==='stream_window') return 'stream_window';
+      // Canonical settings are normalized at this boundary; the anchor
+      // projection/render consumers intentionally keep their legacy vocabulary.
+      if(value==='stream_full') return 'transparent_stream';
+      if(value==='stream_quiet') return 'hide_all_activity';
+      if(value==='stream_window') return 'compact_worklog';
       return '';
     };
     if(typeof window!=='undefined'){

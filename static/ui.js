@@ -13452,8 +13452,8 @@ function ensureLiveWorklogContainer(blocks, opts){
     : null;
   if(!worklog) worklog=blocks.querySelector('.live-worklog[data-live-worklog-shell="1"][data-live-activity-current="1"]');
   let shell = null;
+  const isWindow = chatActivityMode() === 'stream_window';
   if(!worklog){
-    const isWindow = chatActivityMode() === 'stream_window';
     worklog = document.createElement('div');
     if (isWindow) {
       worklog.className = 'mars-process-window';
@@ -14717,11 +14717,8 @@ function _renderLiveAnchorActivitySceneForStream(streamId, sessionId, opts){
     if(m === 'stream_window') return 'compact_worklog';
     return m;
   };
-  const mode = _norm(activeMode) === 'hide_all_activity'
-    ? 'hide_all_activity'
-    : (requestedMode === 'compact_worklog' || requestedMode === 'transparent_stream' || requestedMode === 'hide_all_activity'
-    ? requestedMode
-    : _norm(activeMode));
+  // The canonical user mode is authoritative; opts.mode is legacy input only.
+  const mode = _norm(activeMode);
   const scene=_projectLiveAnchorActivitySceneForStream(streamId,mode);
   if(!scene) return false;
   return renderLiveAnchorActivityScene(streamId,scene,{...(opts||{}),sessionId});
