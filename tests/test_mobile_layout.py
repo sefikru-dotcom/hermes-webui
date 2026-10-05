@@ -452,7 +452,7 @@ def test_mobile_overlay_present():
     assert "mobile-overlay" in CSS, \
         ".mobile-overlay CSS rule missing from style.css"
     mobile_css = "\n".join(_max_width_media_blocks(640))
-    assert re.search(r'\.mobile-overlay\.visible\{[^}]*display:\s*none', mobile_css), (
+    assert re.search(r'\.mobile-overlay\.visible\s*\{[^}]*display:\s*none', mobile_css), (
         "Full-screen mobile sidebar must not dim the PWA status/safe-area with a backdrop"
     )
 
@@ -657,7 +657,10 @@ def test_mobile_sidebar_open_syncs_panel_from_visible_detail_view():
     assert "'todos'" not in main_view_panels, (
         "Todos is a sidebar-only panel; adding showing-todos makes main-view sync ambiguous"
     )
-    assert "const MAIN_VIEW_SIDEBAR_PANEL_FALLBACKS = { plugin: 'settings' }" in panels_js
+    fallback_match = re.search(r"const MAIN_VIEW_SIDEBAR_PANEL_FALLBACKS\s*=\s*\{([^}]*)\}", panels_js)
+    assert fallback_match, "main-view sidebar fallback map must exist"
+    assert re.search(r"plugin\s*:\s*['\"]settings['\"]", fallback_match.group(1)), \
+        "extension/plugin views must return to settings when no native sidebar panel exists"
     for panel_id in [
         "panelSettings",
         "panelSkills",
@@ -1166,7 +1169,7 @@ def test_legacy_320px_composer_tightens_spacing_without_shrinking_targets():
         "320px left controls need compact gutters to fit config before the fixed send button"
     assert wrap.get("padding-left") == "8px!important", \
         "320px composer should reclaim a little side padding without shrinking touch targets"
-    assert ".send-btn{width:44px;height:44px;" in _composer_phone_media_block(), \
+    assert re.search(r"send-btn\s*\{[^}]*width:44px;height:44px;", _composer_phone_media_block()), \
         "narrow spacing override must not shrink the 44px send button"
     assert ".composer-mobile-config-btn{box-sizing:border-box;position:relative;display:inline-flex!important;width:44px;height:44px" in _composer_phone_media_block(), \
         "narrow spacing override must not shrink the 44px mobile config button"
@@ -1337,11 +1340,8 @@ def test_context_details_live_in_mobile_overflow_panel():
     sync_end = ui_js.index("// ── Touch support", sync_start)
     sync_body = ui_js[sync_start:sync_end]
     for expected in (
-        "DEFAULT_CTX=128*1024",
-        "hasExplicitCtx",
-        "hasPromptTok",
-        "rawPct",
-        "overflowed",
+        "state.hasPromptTok",
+        "state.pct",
         "composerMobileContextUsage",
         "composerMobileContextTokens",
         "composerMobileCtxCompressBtn",
@@ -1462,8 +1462,8 @@ def test_reasoning_chip_updates_desktop_and_mobile_controls():
         "composerMobileReasoningAction",
         "composerReasoningLabel",
         "composerMobileReasoningLabel",
-        "label.textContent=text",
-        "mobileLabel.textContent=text",
+        "label.textContent=displayLabel",
+        "mobileLabel) mobileLabel.textContent=displayLabel",
     ):
         assert expected in chip_body, \
             f"_applyReasoningChip must update desktop and mobile reasoning UI ({expected})"
