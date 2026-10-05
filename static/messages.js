@@ -2178,6 +2178,8 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
   let assistantText='';
   let reasoningText='';
   if(S.session&&S.session.session_id===activeSid&&S.activeStreamId===streamId&&typeof ensureLiveWorklogShell==='function') ensureLiveWorklogShell();
+  const _activityAdapter=typeof ActivityWindow==='function'?new ActivityWindow({sessionId:activeSid,streamId,root:document}):null;
+  if(_activityAdapter) _activityAdapter.bind();
   const existingLive=LIVE_STREAMS[activeSid];
   if(
     existingLive&&existingLive.streamId===streamId&&existingLive.source&&
@@ -5984,6 +5986,7 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
       const d=JSON.parse(e.data);
       const text=d.text||'';
       reasoningText += text;
+      if(_activityAdapter) _activityAdapter.thinkingUpdate(_liveThinkingText());
       liveReasoningText += text;
       if(d.text&&S.session&&S.session.session_id===activeSid) _completeAutomaticCompressionOnLiveProgress(activeSid);
       syncInflightAssistantMessage();
@@ -6012,6 +6015,7 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
       _cancelLiveReasoningDomSync();
       _completeAutomaticCompressionOnLiveProgress(activeSid);
       const tc=upsertLiveToolCall(d,'start');
+      if(_activityAdapter) _activityAdapter.toolUpdate(d);
       if(!tc) return;
       const pendingDisplayTextBeforeTool=segmentStart===0
         ? (_parseStreamState().displayText||'')
@@ -6048,6 +6052,7 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
       if(d.name==='clarify') return;
       _completeAutomaticCompressionOnLiveProgress(activeSid);
       const tc=upsertLiveToolCall(d,'complete');
+      if(_activityAdapter) _activityAdapter.toolUpdate(d);
       if(!tc) return;
       tc.is_error=!!d.is_error;
       const pendingDisplayTextBeforeComplete=segmentStart===0
@@ -6279,6 +6284,7 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
       const _doneData=JSON.parse(e.data);
       const _doneEvent=e;
       const _finishDone=()=>{
+        if(_activityAdapter) _activityAdapter.complete(_doneData.summary||_doneData.status||'Completed');
         // Bug A fix: cancel any pending rAF and mark stream finalized before
         // the DOM is settled by renderMessages, so no trailing token/reasoning rAF
         // can reintroduce a stale thinking card or duplicate content.
