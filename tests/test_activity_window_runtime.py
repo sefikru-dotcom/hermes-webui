@@ -1,38 +1,29 @@
-"""Runtime coverage for the dependency-free ActivityWindow component."""
-import pathlib
-import shutil
+"""Runtime matrix for the renderer-owned activity adapter."""
 import subprocess
-
-REPO = pathlib.Path(__file__).parent.parent
-JS = REPO / "static" / "chat_activity.js"
-NODE = shutil.which("node")
-
+from pathlib import Path
+ROOT = Path(__file__).resolve().parents[1]
 
 def test_activity_window_modes_and_reconnect_runtime():
-    assert NODE, "node is required"
-    source = JS.read_text(encoding="utf-8")
     script = r'''
-const assert=require('assert');
-class ClassList { constructor(){this.s=new Set()} toggle(k,v){if(v===undefined?v=!this.s.has(k):v){this.s.add(k)}else this.s.delete(k)} }
-class E { constructor(tag='div'){this.tagName=tag;this.children=[];this.parentNode=null;this.attrs={};this.classList=new ClassList();this.style={};this.scrollTop=0;this.scrollHeight=0;this.clientHeight=100;this.textContent='';this.innerHTML=''}
- appendChild(x){x.parentNode=this;this.children.push(x);this.scrollHeight=this.children.length*20;return x}
- querySelector(sel){if(sel.includes('[data-activity-window="1"]')) return this.children.find(x=>x.attrs['data-activity-window']==='1')||null; if(sel.includes('.activity-window-events')) return this.children.find(x=>x.attrs._events)||null; if(sel.includes('.mars-process-window-state')) return this.children.find(x=>x.attrs._state)||null; return null}
- setAttribute(k,v){this.attrs[k]=String(v)} getAttribute(k){return this.attrs[k]||null}
- addEventListener(){}
- querySelectorAll(sel){return sel.includes('[data-activity-window="1"]')?this.children.filter(x=>x.attrs['data-activity-window']==='1'):[]}
- }
-const doc={createElement:()=>new E(),};
-const store=new Map(); const storage={getItem:k=>store.get(k)||null,setItem:(k,v)=>store.set(k,v)};
-const ctx={document:doc,sessionStorage:storage,__DEV__:true}; ctx.window=ctx; global.window=ctx; global.document=doc;
-const {ActivityWindow}=require(process.argv[1]);
-for(const mode of ['stream_full','stream_window','stream_quiet']){
- const root=new E(); const w=new ActivityWindow({document:doc,root,sessionId:'s',turnId:'t-'+mode,mode,storage});
- if(mode==='stream_quiet'){assert.strictEqual(w.ensure(),null);continue}
- assert(w.ensure()); assert.strictEqual(w.apply({id:'a',type:'thinking',text:'preview'}),true); assert.strictEqual(w.apply({id:'a',type:'thinking',text:'duplicate'}),false); assert.strictEqual(w.addTool({id:'tool-1',name:'read_file'}),true); assert.strictEqual(w.reconnect({events:[{id:'tool-1',type:'tool'},{id:'tool-2',type:'tool',name:'write'}]}),1); assert.strictEqual(w.eventOrder.length,3);
- w.toggleDisclosure(true); const restored=new ActivityWindow({document:doc,root,sessionId:'s',turnId:'t-'+mode,mode,storage}); restored.ensure(); assert.strictEqual(restored._findWindow().getAttribute('data-disclosure-open'),'true'); restored.complete('done');
-}
-console.log('[activity-window] matrix/reconnect PASS');
+const assert=require('assert');global.__DEV__=true;
+const {ActivityWindow}=require('./static/chat_activity.js');
+const values=new Map(),handlers={};let writes=0;
+const store={getItem:k=>values.get(k)||null,setItem:(k,v)=>values.set(k,v)};
+const header={attrs:{'aria-expanded':'true'},getAttribute(k){return this.attrs[k]||null},setAttribute(k,v){this.attrs[k]=v},addEventListener(k,f){handlers[k]=f}};
+const frame={attrs:{'data-tool-worklog-key':'live:stream'},getAttribute(k){return this.attrs[k]||null},setAttribute(k,v){this.attrs[k]=v},querySelector(){return header},classList:{toggle(k,v){frame.collapsed=v}}};
+const container={querySelectorAll(){return [frame]},appendChild(){writes++}};
+for(const mode of ['stream_full','stream_quiet'])assert.strictEqual(new ActivityWindow({root:container,streamId:'stream',mode}).bind(),null);
+const a=new ActivityWindow({root:container,sessionId:'sid',streamId:'stream',storage:store});
+assert.strictEqual(a.bind(),frame);assert.strictEqual(a.thinkingUpdate('secret'),true);assert.strictEqual(a.thinkingUpdate('secret'),false);
+assert.notStrictEqual(a.thinking,'secret');assert.strictEqual(writes,0);
+assert(a.toolUpdate({tid:'t',status:'running'}));assert(!a.toolUpdate({tid:'t',status:'running'}));assert(a.toolUpdate({tid:'t',status:'done'}));
+header.attrs['aria-expanded']='false';handlers.click();assert.strictEqual(values.get(a.key),'false');
+delete header.attrs['data-activity-adapter-bound'];const b=new ActivityWindow({root:container,sessionId:'sid',streamId:'stream',storage:store});b.bind();assert(frame.collapsed);
+for(let i=0;i<300;i++){a.toolUpdate({tid:String(i)});a._record('x')};assert(a.seen.size<=128);assert(a.telemetry().length<=128);
+assert(a.complete('done'));assert.strictEqual(frame.attrs['data-complete'],'1');assert.strictEqual(writes,0);
+global.__DEV__=false;const c=new ActivityWindow();c._record('x');assert.strictEqual(c.telemetry().length,0);
+console.log('PASS');
 '''
-    result = subprocess.run([NODE, "-e", script, str(JS)], capture_output=True, text=True)
-    assert result.returncode == 0, result.stderr
-    assert "PASS" in result.stdout
+    result=subprocess.run(['node','-e',script],cwd=ROOT,text=True,capture_output=True)
+    assert result.returncode == 0,result.stderr
+    assert 'PASS' in result.stdout

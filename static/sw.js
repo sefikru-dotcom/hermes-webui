@@ -29,6 +29,7 @@ const SHELL_ASSETS = [
   './static/assistant_turn_anchors.js' + VQ,
   './static/ui.js' + VQ,
   './static/messages.js' + VQ,
+  './static/chat_activity.js' + VQ,
   './static/sessions.js' + VQ,
   './static/panels.js' + VQ,
   './static/commands.js' + VQ,

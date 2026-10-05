@@ -2178,7 +2178,7 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
   let assistantText='';
   let reasoningText='';
   if(S.session&&S.session.session_id===activeSid&&S.activeStreamId===streamId&&typeof ensureLiveWorklogShell==='function') ensureLiveWorklogShell();
-  const _activityAdapter=typeof ActivityWindow==='function'?new ActivityWindow({sessionId:activeSid,streamId,root:document}):null;
+  const _activityAdapter=typeof ActivityWindow==='function'?new ActivityWindow({sessionId:activeSid,streamId,root:document,mode:typeof chatActivityMode==='function'?chatActivityMode():'stream_window'}):null;
   if(_activityAdapter) _activityAdapter.bind();
   const existingLive=LIVE_STREAMS[activeSid];
   if(

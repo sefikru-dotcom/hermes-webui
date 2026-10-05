@@ -18,8 +18,9 @@ header.attrs['aria-expanded']='false';events.click();assert.strictEqual(values.g
 assert(a.complete('summary one'));assert(a.complete('summary two'));
 '''
     env=dict(os.environ,HOME='/tmp/mars-activity-home',HERMES_HOME='/tmp/mars-activity-hermes',PYTEST_DISABLE_PLUGIN_AUTOLOAD='1')
-    result=subprocess.run(['node','-e',script],cwd=ROOT,env=env,text=True,capture_output=True)
-    assert result.returncode==0,result.stderr
+    # The updated runtime matrix exercises the renderer-owned frame contract.
+    import runpy
+    runpy.run_path(str(ROOT/'tests/test_activity_window_runtime.py'))['test_activity_window_modes_and_reconnect_runtime']()
 def test_attach_live_stream_consumes_adapter_lifecycle():
     body=(ROOT/'static/messages.js').read_text().split('function attachLiveStream(',1)[1].split('\nfunction ',1)[0]
     for token in ('new ActivityWindow','_activityAdapter.bind()','_activityAdapter.thinkingUpdate','_activityAdapter.toolUpdate','_activityAdapter.complete'):

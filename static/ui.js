@@ -7134,9 +7134,10 @@ function _activityStatusNode({kind='info',label='',detail='',status='done',ts=nu
   const row=document.createElement('div');
   row.className=`agent-activity-status agent-activity-status-${kind} agent-activity-status-${status}`;
   if(id) row.setAttribute('data-activity-event-id',id);
-  row.setAttribute('role','status');
-  row.setAttribute('aria-live','polite');
-  row.setAttribute('aria-atomic','true');
+  // Event details may contain reasoning: never announce the whole row.
+  row.setAttribute('role','group');
+  row.setAttribute('aria-live','off');
+  row.setAttribute('aria-atomic','false');
   row.setAttribute('aria-label',t('activity_status_announcement'));
   const iconMap={run:li('play',13),model:li('bot',13),waiting:'<span class="tool-card-running-dot"></span>',thinking:li('lightbulb',13),tool:li('wrench',13),done:li('check',13),warning:li('alert-triangle',13)};
   row.innerHTML=`<span class="agent-activity-status-icon">${iconMap[kind]||li('clock',13)}</span><span class="agent-activity-status-copy"><span class="agent-activity-status-label">${esc(label)}</span>${detail?`<span class="agent-activity-status-detail">${esc(detail)}</span>`:''}</span><span class="agent-activity-status-time">${esc(_activityClockLabel(ts))}</span>`;
@@ -13513,7 +13514,8 @@ function ensureLiveWorklogContainer(blocks, opts){
   if(opts.anchor) _syncWorklogReasonFromAnchor(worklog, opts.anchor);
   _migrateLegacyLiveActivityGroupsToWorklog(blocks, worklog);
   _syncToolCallGroupSummary(worklog);
-  return isWindow ? worklog.querySelector('.live-worklog') : worklog;
+  return isWindow && !worklog.classList.contains('live-worklog')
+    ? worklog.querySelector('.live-worklog') : worklog;
 }
 function _migrateLegacyLiveActivityGroupsToWorklog(blocks, worklog){
   if(!blocks||!worklog) return;
