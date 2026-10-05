@@ -7212,7 +7212,7 @@ function _clearActivityElapsedTimer(){
   _activityElapsedTimerGroup=null;
 }
 
-const _MOBILE_CONFIG_BASE_LABEL='Workspace, model, quota, reasoning, and context settings';
+const _MOBILE_CONFIG_BASE_LABEL=t('mobile_config_context_settings');
 
 function _setCtxCompressButton(btn,text){
   if(!btn)return;
@@ -7385,13 +7385,13 @@ function _syncCtxIndicator(usage){
       ring.style.strokeDashoffset=String(circumference);
     }
     if(center) center.textContent='·';
-    if(usageLine) usageLine.textContent=ctxWindow?`Usage: not available yet · window ${_fmtTokens(ctxWindow)}`:'Usage: not available yet';
-    if(tokensLine) tokensLine.textContent=ctxWindow?`Context window: ${_fmtTokens(ctxWindow)}`:'Context window: not resolved yet';
+    if(usageLine) usageLine.textContent=ctxWindow?t('context_usage_not_available_window',_fmtTokens(ctxWindow)):t('context_usage_not_available');
+    if(tokensLine) tokensLine.textContent=ctxWindow?t('context_window_size',_fmtTokens(ctxWindow)):t('context_window_not_resolved');
     const threshold=Number(usage.threshold_tokens)||0;
     let thresholdText='';
     if(thresholdLine){
       if(threshold&&ctxWindow){
-        thresholdText=`Auto-compress at ${_fmtTokens(threshold)} (${Math.round(threshold/ctxWindow*100)}%)`;
+        thresholdText=t('context_auto_compress_at',_fmtTokens(threshold),Math.round(threshold/ctxWindow*100));
         thresholdLine.style.display='';
         thresholdLine.textContent=thresholdText;
       }else{
@@ -7408,7 +7408,7 @@ function _syncCtxIndicator(usage){
       visible:true,
       hasPromptTok:false,
       pct:0,
-      label:ctxWindow?`Context window ${_fmtTokens(ctxWindow)}; usage not available yet`:'Context window; usage not available yet',
+      label:ctxWindow?t('context_window_usage_unavailable',_fmtTokens(ctxWindow)):t('context_usage_unavailable_no_window'),
       usageText:ctxWindow?`Usage: not available yet · window ${_fmtTokens(ctxWindow)}`:'Usage: not available yet',
       tokensText:ctxWindow?`Context window: ${_fmtTokens(ctxWindow)}`:'Context window: not resolved yet',
       thresholdText:thresholdText,
@@ -7464,21 +7464,21 @@ function _syncCtxIndicator(usage){
   _setCtxCompressButton(compressBtn,compressText);
   const cacheHitPct=usage.cache_hit_percent;
   const cacheText=cacheHitPct!=null?t('usage_cache_hit_detail',cacheHitPct,_fmtTokens(cacheReadTok),_fmtTokens(cacheWriteTok)):'';
-  const contextLabel=hasPostCompressionEstimate?'Estimated next model context':'Context window';
-  let label=hasUsablePrompt?`${contextLabel} ${pct}% used`:(hasObservedPrompt?'Context usage pending model window':`${_fmtTokens(totalTok)} tokens used`);
-  if(!hasExplicitCtx&&hasObservedPrompt) label+=' (window not resolved)';
+  const contextLabel=t(hasPostCompressionEstimate?'context_estimated_next_model':'context_window_label');
+  let label=hasUsablePrompt?t('context_percentage_used',contextLabel,pct):(hasObservedPrompt?t('context_usage_pending_window'):`${_fmtTokens(totalTok)} ${t('activity_tokens')} ${t('used')}`);
+  if(!hasExplicitCtx&&hasObservedPrompt) label+=` (${t('context_window_not_resolved')})`;
   if(cost) label+=` \u00b7 $${cost<0.01?cost.toFixed(4):cost.toFixed(2)}`;
   if(cacheText) label+=` \u00b7 ${cacheText}`;
   el.setAttribute('aria-label',label);
-  const usageText=hasUsablePrompt?(overflowed?`${contextLabel}: ${rawPct}% used (context exceeded)`:`${contextLabel}: ${pct}% used (${100-pct}% left)`):(hasObservedPrompt?'Context usage pending model window':`${_fmtTokens(totalTok)} tokens used`);
-  const tokensText=hasUsablePrompt?`${contextLabel}: ${_fmtTokens(contextPromptTok)} / ${_fmtTokens(ctxWindow)} tokens used`:(hasObservedPrompt?`Context tokens: ${_fmtTokens(contextPromptTok)} · window not resolved`:`In: ${_fmtTokens(usage.input_tokens||0)} · Out: ${_fmtTokens(usage.output_tokens||0)}`);
+  const usageText=hasUsablePrompt?(overflowed?t('context_exceeded',contextLabel,rawPct):t('context_usage_percent_left',contextLabel,pct,100-pct)):(hasObservedPrompt?t('context_usage_pending_window'):`${_fmtTokens(totalTok)} ${t('activity_tokens')} ${t('used')}`);
+  const tokensText=hasUsablePrompt?t('context_tokens_used',contextLabel,_fmtTokens(contextPromptTok),_fmtTokens(ctxWindow)):(hasObservedPrompt?t('context_tokens_window_unresolved',_fmtTokens(contextPromptTok)):`${t('input_short')}: ${_fmtTokens(usage.input_tokens||0)} · ${t('output_short')}: ${_fmtTokens(usage.output_tokens||0)}`);
   if(usageLine) usageLine.textContent=usageText;
   if(tokensLine) tokensLine.textContent=tokensText;
   const threshold=usage.threshold_tokens||0;
   let thresholdText='';
   if(thresholdLine){
     if(threshold&&ctxWindow){
-      thresholdText=`Auto-compress at ${_fmtTokens(threshold)} (${Math.round(threshold/ctxWindow*100)}%)`;
+      thresholdText=t('context_auto_compress_at',_fmtTokens(threshold),Math.round(threshold/ctxWindow*100));
       thresholdLine.style.display='';
       thresholdLine.textContent=thresholdText;
     }else{
@@ -7489,7 +7489,7 @@ function _syncCtxIndicator(usage){
   let costText='';
   if(costLine){
     if(cost){
-      costText=`Estimated cost: $${cost<0.01?cost.toFixed(4):cost.toFixed(2)}`;
+      costText=t('context_estimated_cost',`$${cost<0.01?cost.toFixed(4):cost.toFixed(2)}`);
       if(cacheText) costText+=` \u00b7 ${cacheText}`;
       costLine.style.display='';
       costLine.textContent=costText;
