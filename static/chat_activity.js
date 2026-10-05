@@ -35,7 +35,7 @@
       const parsed=safeJson(raw);
       return parsed&&typeof parsed==='object'?parsed:{};
     }
-    _saveDisclosure(value){try{if(this.storage)this.storage.setItem(this.disclosureKey,JSON.stringify(!!value));}catch(_){} }
+    _saveDisclosure(value){try{if(this.storage)this.storage.setItem(this.disclosureKey,JSON.stringify({open:!!value}));}catch(_){} }
     _findWindow(){
       if(!this.root||!this.root.querySelector)return null;
       const windows=this.root.querySelectorAll?Array.from(this.root.querySelectorAll('[data-activity-window="1"]')):[];

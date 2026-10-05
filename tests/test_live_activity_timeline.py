@@ -38,9 +38,9 @@ def test_run_activity_group_has_observable_baseline_events():
     assert "function _ensureLiveActivityBaseline(group)" in UI_JS
     assert "function ensureRunActivityGroup(inner, opts)" in UI_JS
     assert "data-run-activity-group" in UI_JS
-    assert "Run started" in UI_JS
-    assert "Observable activity will appear here as the agent works." in UI_JS
-    assert "Model: ${modelLabel}" in UI_JS
+    assert "label:t('activity_run_started')" in UI_JS
+    assert "detail:t('activity_run_started_detail')" in UI_JS
+    assert "t('activity_model',modelLabel)" in UI_JS
     assert "_ensureLiveActivityBaseline(group);" in UI_JS
     assert "ensureActivityGroup(inner, opts)" in UI_JS
 
