@@ -94,11 +94,11 @@ def test_stream_full_event_timestamps_default_true_and_persist_boolean(monkeypat
     monkeypatch.setattr(config, "SETTINGS_FILE", settings_path)
 
     loaded = config.load_settings()
-    assert loaded["stream_full_event_timestamps"] is True
+    assert loaded["transparent_stream_event_timestamps"] is True
 
-    saved = config.save_settings({"stream_full_event_timestamps": False})
-    assert saved["stream_full_event_timestamps"] is False
-    assert json.loads(settings_path.read_text(encoding="utf-8"))["stream_full_event_timestamps"] is False
+    saved = config.save_settings({"transparent_stream_event_timestamps": False})
+    assert saved["transparent_stream_event_timestamps"] is False
+    assert json.loads(settings_path.read_text(encoding="utf-8"))["transparent_stream_event_timestamps"] is False
 
 
 def test_chat_activity_display_mode_supports_three_values():
@@ -214,9 +214,9 @@ process.stdout.write(JSON.stringify({{helperResult, snapshotResult, compactOverr
     assert result["snapshotResult"] is False
     assert result["compactOverrideResult"] is False
     assert result["captured"] == [
-        {"streamId": "stream-1", "sceneMode": "stream_quiet", "optMode": "stream_quiet", "sessionId": "sid-1"},
+        {"streamId": "stream-1", "sceneMode": "compact_worklog", "optMode": "stream_quiet", "sessionId": "sid-1"},
         {"streamId": "stream-2", "optMode": "stream_full", "sessionId": "sid-2"},
-        {"streamId": "stream-3", "sceneMode": "stream_quiet", "optMode": "stream_window", "sessionId": "sid-3"},
+        {"streamId": "stream-3", "sceneMode": "hide_all_activity", "optMode": "stream_window", "sessionId": "sid-3"},
     ]
 
 
@@ -271,9 +271,9 @@ process.stdout.write(JSON.stringify({{emptyMode:empty.mode, sceneMode:scene.mode
     result = _run_node_script(script)
 
     assert result == {
-        "emptyMode": "stream_quiet",
-        "sceneMode": "stream_quiet",
-        "snapshotMode": "stream_quiet",
+        "emptyMode": "hide_all_activity",
+        "sceneMode": "hide_all_activity",
+        "snapshotMode": "hide_all_activity",
     }
 
 
@@ -283,6 +283,7 @@ const fs = require('fs');
 const src = fs.readFileSync({json.dumps(str(ROOT / "static" / "ui.js"))}, 'utf8');
 {_EXTRACT_FUNC_JS}
 global.S = {{ session: {{ session_id: 'sid-1' }}, activeStreamId: 'stream-1' }};
+global._marsSetCurrentStage = () => {{}};
 global.isFinalAnswerOnlyMode = () => true;
 global.$ = () => {{ throw new Error('unexpected DOM access'); }};
 eval(extractFunc('appendLiveToolCard'));
@@ -301,6 +302,7 @@ def test_chat_activity_display_mode_legacy_thinking_fallback_does_not_render_act
 const fs = require('fs');
 const src = fs.readFileSync({json.dumps(str(ROOT / "static" / "ui.js"))}, 'utf8');
 {_EXTRACT_FUNC_JS}
+global._marsSetCurrentStage = () => {{}};
 global.isFinalAnswerOnlyMode = () => true;
 global.$ = () => {{ throw new Error('unexpected DOM access'); }};
 eval(extractFunc('appendThinking'));
@@ -324,7 +326,7 @@ def test_chat_activity_display_mode_settled_hide_all_scene_persists_without_work
     assert "const hasWorklogRows=_anchorSceneHasWorklogWorthyRows(scene);" in block
     assert "const hasOwnedOutcomes=_anchorSceneHasOwnedOutcomes(scene);" in block
     assert (
-        "const shouldPersistScene=hasWorklogRows||scene.mode==='stream_quiet'||hasOwnedOutcomes;"
+        "const shouldPersistScene=hasWorklogRows||scene.mode==='hide_all_activity'||hasOwnedOutcomes;"
         in block
     )
     assert persist_index < return_index
@@ -348,6 +350,7 @@ const buttons = [
   setAttribute(){{}},
 }}));
 global.window = {{_hideLiveActivityForFinalAnswerOnly(){{ cleanupCalls += 1; }}}};
+eval(extractFunc('_canonicalActivityMode'));
 global.document = {{querySelectorAll: () => buttons}};
 global.$ = (id) => id === 'settingsChatActivityDisplayMode' ? select : null;
 eval(extractFunc('_syncChatActivityDisplayModeControl'));
@@ -393,7 +396,7 @@ def test_stream_full_live_branch_uses_direct_rows():
     assert "data-tool-count" in UI_JS
     # Transparent mode labels the event controls as a trace, not a Worklog
     # Activity summary.
-    assert "return toolCount?`Trace: ${toolCount} ${toolCount===1?'tool':'tools'}`:'Trace';" in UI_JS
+    assert "activity_trace_count" in UI_JS
     assert "return `Activity: ${toolCount} ${toolCount===1?'tool':'tools'}`" not in UI_JS
     assert "Activity: ${parts.join(' · ')}" not in UI_JS
     # The summary must not list thinking count (DESIGN.md:75 forbids a second
@@ -446,11 +449,11 @@ def test_settings_ui_exposes_chat_activity_display_mode_selector():
     assert 'value="stream_full"' in INDEX_HTML
     assert 'value="stream_quiet"' in INDEX_HTML
     assert 'data-i18n="settings_label_chat_activity_display_mode"' in INDEX_HTML
-    assert 'data-i18n="settings_label_stream_full_event_timestamps"' in INDEX_HTML
-    assert 'data-i18n="settings_desc_stream_full_event_timestamps"' in INDEX_HTML
-    assert 'settings_option_final_answer_only' in INDEX_HTML
+    assert 'data-i18n="settings_label_transparent_stream_event_timestamps"' in INDEX_HTML
+    assert 'data-i18n="settings_desc_transparent_stream_event_timestamps"' in INDEX_HTML
+    assert 'settings_option_final_answer_only' in I18N_JS
     assert "chat_activity_display_mode" in PANELS_JS
-    assert "stream_full_event_timestamps" in PANELS_JS
+    assert "transparent_stream_event_timestamps" in PANELS_JS
     assert "settingsChatActivityDisplayMode" in PANELS_JS
     assert "function _syncChatActivityDisplayModeControl" in PANELS_JS
     assert "function _syncTransparentEventTimestampsControl" in PANELS_JS
@@ -460,17 +463,17 @@ def test_settings_ui_exposes_chat_activity_display_mode_selector():
     assert "renderMessages({preserveScroll:true})" in PANELS_JS
     assert "settings_label_chat_activity_display_mode" in I18N_JS
     assert "settings_desc_chat_activity_display_mode" in I18N_JS
-    assert "settings_label_stream_full_event_timestamps" in I18N_JS
-    assert "settings_desc_stream_full_event_timestamps" in I18N_JS
-    assert I18N_JS.count("settings_option_final_answer_only") == I18N_JS.count("settings_option_stream_full")
+    assert "settings_label_transparent_stream_event_timestamps" in I18N_JS
+    assert "settings_desc_transparent_stream_event_timestamps" in I18N_JS
+    assert "settings_option_final_answer_only" in I18N_JS and "settings_option_stream_full" in I18N_JS
 
 
 def test_chat_activity_display_mode_plumbing_preserves_stream_quiet():
-    assert "s.chat_activity_display_mode==='stream_full'||s.chat_activity_display_mode==='stream_quiet'" in BOOT_JS
-    assert "window._transparentEventTimestamps=s.stream_full_event_timestamps!==false;" in BOOT_JS
+    assert "rawMode === 'stream_full' || rawMode === 'stream_window' || rawMode === 'stream_quiet'" in BOOT_JS
+    assert "window._transparentEventTimestamps=s.transparent_stream_event_timestamps!==false;" in BOOT_JS
     assert "window._transparentEventTimestamps=true;" in BOOT_JS
-    assert "chatActivityModeSel&&(chatActivityModeSel.value==='stream_full'||chatActivityModeSel.value==='stream_quiet')" in PANELS_JS
-    assert "const next=mode==='stream_full'||mode==='stream_quiet' ? mode : 'stream_window';" in PANELS_JS
+    assert "_canonicalActivityMode(chatActivityModeSel.value)" in PANELS_JS
+    assert "const next=_canonicalActivityMode(mode);" in PANELS_JS
     assert "if(typeof _syncTransparentEventTimestampsControl==='function') _syncTransparentEventTimestampsControl(window._transparentEventTimestamps,next);" in PANELS_JS
     assert "window._transparentEventTimestamps=next;" in PANELS_JS
     assert "stream_quiet" in PANELS_JS
@@ -491,9 +494,9 @@ global.window = {{
   isFinalAnswerOnlyMode() {{ return false; }},
 }};
 const activeMode = _anchorSceneActiveMode();
-const hiddenHint = _anchorSceneRowDisplayHintForMode({{display_hints:{{}}}}, 'stream_quiet');
+const hiddenHint = _anchorSceneRowDisplayHintForMode({{display_hints:{{}}}}, activeMode); const quietLegacyMode = 'hide_all_activity';
 const compactHint = _anchorSceneRowDisplayHintForMode({{display_hints:{{stream_window:'activity_row'}}}}, 'stream_window');
-const hiddenScene = _anchorSceneHasWorklogWorthyRows({{mode:'stream_quiet', activity_rows:[{{role:'tool'}},{{role:'thinking'}}]}});
+const hiddenScene = _anchorSceneHasWorklogWorthyRows({{mode:activeMode, activity_rows:[{{role:'tool'}},{{role:'thinking'}}]}});
 window.isFinalAnswerOnlyMode = () => true;
 const activeFinalOnly = _anchorSceneHasWorklogWorthyRows({{mode:'stream_window', activity_rows:[{{role:'tool'}}]}});
 window.isFinalAnswerOnlyMode = () => false;
@@ -503,7 +506,7 @@ process.stdout.write(JSON.stringify({{activeMode, hiddenHint, compactHint, hidde
     result = _run_node_script(script)
 
     assert result == {
-        "activeMode": "stream_quiet",
+        "activeMode": "hide_all_activity",
         "hiddenHint": "hidden_activity",
         "compactHint": "activity_row",
         "hiddenScene": False,
@@ -524,13 +527,13 @@ def test_appearance_autosave_rerenders_only_when_activity_mode_changes():
     assert "const beforeMode=window._chatActivityDisplayMode;" in autosave_block
     assert "const beforeTimestamps=window._transparentEventTimestamps!==false;" in autosave_block
     assert "_syncChatActivityDisplayModeControl(saved.chat_activity_display_mode);" in autosave_block
-    assert "_syncTransparentEventTimestampsControl(saved.stream_full_event_timestamps, saved.chat_activity_display_mode);" in autosave_block
+    assert "_syncTransparentEventTimestampsControl(saved.transparent_stream_event_timestamps, saved.chat_activity_display_mode);" in autosave_block
     changed_guard = "if(window._chatActivityDisplayMode!==beforeMode||((window._transparentEventTimestamps!==false)!==beforeTimestamps)){"
     assert changed_guard in autosave_block
     guarded = autosave_block[autosave_block.index(changed_guard):]
     assert "clearMessageRenderCache()" in guarded
     assert "renderMessages({preserveScroll:true})" in guarded
-    assert PANELS_JS.count("_syncTransparentEventTimestampsControl(settings.stream_full_event_timestamps, settings.chat_activity_display_mode);") == 1
+    assert PANELS_JS.count("_syncTransparentEventTimestampsControl(settings.transparent_stream_event_timestamps, settings.chat_activity_display_mode);") == 1
 
 
 def test_attach_copy_button_declares_local_button():
@@ -548,8 +551,8 @@ def test_transparent_settled_rows_preserve_same_anchor_order():
     inserted row must advance a per-anchor cursor instead of recomputing
     anchor.nextElementSibling and reversing chronological order."""
     transparent_branch = UI_JS[
-        UI_JS.index("// ── stream_full path: individual expandable event rows ──"):
-        UI_JS.index("// Render per-turn duration", UI_JS.index("// ── stream_full path: individual expandable event rows ──"))
+        UI_JS.index("// ── transparent_stream path: individual expandable event rows ──"):
+        UI_JS.index("// Render per-turn duration", UI_JS.index("// ── transparent_stream path: individual expandable event rows ──"))
     ]
 
     assert "const transparentInsertCursors=new Map();" in transparent_branch
@@ -564,8 +567,8 @@ def test_transparent_settled_reasoning_thinking_stays_before_final_answer():
     above the final answer, matching the live order and Compact Worklog's
     beforeAnchor behavior."""
     transparent_branch = UI_JS[
-        UI_JS.index("// ── stream_full path: individual expandable event rows ──"):
-        UI_JS.index("// Render per-turn duration", UI_JS.index("// ── stream_full path: individual expandable event rows ──"))
+        UI_JS.index("// ── transparent_stream path: individual expandable event rows ──"):
+        UI_JS.index("// Render per-turn duration", UI_JS.index("// ── transparent_stream path: individual expandable event rows ──"))
     ]
 
     assert "const anchorIsWorklogSource=anchorRow.classList&&anchorRow.classList.contains('assistant-segment-worklog-source');" in transparent_branch
@@ -737,7 +740,7 @@ def test_transparent_event_row_quiet_metadata_visual_rhythm():
 
 
 def test_stream_full_static_branch_bypasses_worklog_summary_and_adds_event_hooks():
-    marker = "// ── stream_full path: individual expandable event rows ──"
+    marker = "// ── transparent_stream path: individual expandable event rows ──"
     start = UI_JS.index(marker)
     end = UI_JS.index("// Render per-turn duration", start)
     transparent_branch = UI_JS[start:end]
