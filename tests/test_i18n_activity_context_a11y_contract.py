@@ -37,6 +37,12 @@ def test_context_indicator_requires_backend_usage_for_numeric_data():
     assert "context_length" in UI
 
 
+def test_activity_renderers_use_real_localized_interpolation():
+    assert '" + t("activity_status_running") + "' not in UI
+    assert '" + t("activity_tokens") + "' not in UI
+    assert 'static/chat_activity.js' in (ROOT / "static" / "index.html").read_text(encoding="utf-8")
+
+
 def test_a11y_contract_has_disclosures_and_prompt_live_regions_but_no_token_stream_live_region():
     # Existing activity/tool disclosures and prompt dialogs must remain named.
     assert "tool-call-group-summary" in UI
