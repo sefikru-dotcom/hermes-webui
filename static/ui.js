@@ -7134,7 +7134,10 @@ function _activityStatusNode({kind='info',label='',detail='',status='done',ts=nu
   const row=document.createElement('div');
   row.className=`agent-activity-status agent-activity-status-${kind} agent-activity-status-${status}`;
   if(id) row.setAttribute('data-activity-event-id',id);
-  if(ts) row.setAttribute('data-activity-at',String(ts));
+  row.setAttribute('role','status');
+  row.setAttribute('aria-live','polite');
+  row.setAttribute('aria-atomic','true');
+  row.setAttribute('aria-label',t('activity_status_announcement'));
   const iconMap={run:li('play',13),model:li('bot',13),waiting:'<span class="tool-card-running-dot"></span>',thinking:li('lightbulb',13),tool:li('wrench',13),done:li('check',13),warning:li('alert-triangle',13)};
   row.innerHTML=`<span class="agent-activity-status-icon">${iconMap[kind]||li('clock',13)}</span><span class="agent-activity-status-copy"><span class="agent-activity-status-label">${esc(label)}</span>${detail?`<span class="agent-activity-status-detail">${esc(detail)}</span>`:''}</span><span class="agent-activity-status-time">${esc(_activityClockLabel(ts))}</span>`;
   return row;
@@ -7156,9 +7159,9 @@ function _ensureLiveActivityBaseline(group){
   const started=_activityElapsedStartedAt(group)||_activityNowSeconds();
   if(!group.getAttribute('data-turn-started-at')) group.setAttribute('data-turn-started-at',String(started));
   if(!group.getAttribute('data-last-activity-at')) group.setAttribute('data-last-activity-at',String(started));
-  _appendActivityEvent(group,{id:'run-started',kind:'run',label:'Run started',detail:'Observable activity will appear here as the agent works.',status:'done',ts:started});
+  _appendActivityEvent(group,{id:'run-started',kind:'run',label:t('activity_run_started'),detail:t('activity_run_started_detail'),status:'done',ts:started});
   const modelLabel=(S.session&&S.session.model)?getModelLabel(S.session.model):'';
-  if(modelLabel)_appendActivityEvent(group,{id:'run-model',kind:'model',label:`Model: ${modelLabel}`,detail:S.activeProfile&&S.activeProfile!=='default'?`Profile: ${S.activeProfile}`:'',status:'done',ts:started});
+  if(modelLabel)_appendActivityEvent(group,{id:'run-model',kind:'model',label:t('activity_model',modelLabel),detail:S.activeProfile&&S.activeProfile!=='default'?t('activity_profile',S.activeProfile):'',status:'done',ts:started});
 }
 function _setActivityElapsedStartedAt(group){
   if(!group||group.getAttribute('data-live-tool-call-group')!=='1')return;
@@ -7409,8 +7412,8 @@ function _syncCtxIndicator(usage){
       hasPromptTok:false,
       pct:0,
       label:ctxWindow?t('context_window_usage_unavailable',_fmtTokens(ctxWindow)):t('context_usage_unavailable_no_window'),
-      usageText:ctxWindow?`Usage: not available yet · window ${_fmtTokens(ctxWindow)}`:'Usage: not available yet',
-      tokensText:ctxWindow?`Context window: ${_fmtTokens(ctxWindow)}`:'Context window: not resolved yet',
+      usageText:t('context_usage_not_available'),
+      tokensText:t('context_window_not_resolved'),
       thresholdText:thresholdText,
       costText:'',
       compressText:''
@@ -13443,6 +13446,13 @@ function _syncWorklogReasonFromAnchor(group, anchor, displayTextOverride){
     anchor.hidden=true;
   }
 }
+function _toggleActivityWindow(header){
+  const windowEl=header&&header.closest?header.closest('.mars-process-window'):null;
+  if(!windowEl) return;
+  const collapsed=windowEl.classList.toggle('is-collapsed');
+  header.setAttribute('aria-expanded',collapsed?'false':'true');
+}
+
 function ensureLiveWorklogContainer(blocks, opts){
   opts=opts||{};
   if(!blocks) return null;
@@ -13458,15 +13468,13 @@ function ensureLiveWorklogContainer(blocks, opts){
     if (isWindow) {
       worklog.className = 'mars-process-window';
       worklog.innerHTML = `
-        <div class="mars-process-window-header" onclick="this.parentElement.classList.toggle('is-collapsed')">
-          <div class="mars-process-window-title">
+        <button type="button" class="mars-process-window-header" aria-expanded="true" aria-label="${esc(t('activity_mode_short_stream_window'))}" onclick="_toggleActivityWindow(this)">
+          <span class="mars-process-window-title">
             <span class="mars-quiet-status-spinner"></span>
             <span>${esc(t('activity_mode_short_stream_window'))}</span>
-          </div>
-          <div class="mars-process-window-actions">
-            <span class="mars-process-window-btn">⌄</span>
-          </div>
-        </div>
+          </span>
+          <span class="mars-process-window-actions"><span class="mars-process-window-btn">⌄</span></span>
+        </button>
         <div class="mars-process-window-stream live-worklog worklog" data-live-worklog-shell="1">
           <div class="tool-worklog-list"></div>
         </div>
