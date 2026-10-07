@@ -12657,6 +12657,9 @@ def _handle_session_get(handler, parsed) -> bool:
 
 def handle_get(handler, parsed) -> bool:
     """Handle all GET routes. Returns True if handled, False for 404."""
+    from api.native_chat import dispatch as _dispatch_native_chat
+    if _dispatch_native_chat(handler, parsed, "GET"):
+        return True
     proxy_result = _handle_extension_sidecar_proxy(handler, parsed, "GET")
     if proxy_result is not False:
         return proxy_result
@@ -13986,6 +13989,9 @@ def _resolve_new_session_workspace(body, visible_prev_session_id):
 
 def handle_post(handler, parsed) -> bool:
     """Handle all POST routes. Returns True if handled, False for 404."""
+    from api.native_chat import dispatch as _dispatch_native_chat
+    if _dispatch_native_chat(handler, parsed, "POST"):
+        return True
     diag = RequestDiagnostics.maybe_start("POST", parsed.path, logger=logger, print_fn=getattr(handler, '_safe_webui_print', None))
     if parsed.path == "/api/csp-report":
         if diag:
