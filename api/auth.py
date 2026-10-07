@@ -1107,6 +1107,10 @@ def check_auth(handler, parsed) -> bool:
     # Public paths don't require auth
     if (
         parsed.path in PUBLIC_PATHS
+        or (
+            parsed.path.startswith('/api/v1/auth/device-pairings/')
+            and parsed.path.endswith('/exchange')
+        )
         or parsed.path.startswith('/share/')
         or (
             parsed.path.startswith('/api/share/')
@@ -1116,6 +1120,10 @@ def check_auth(handler, parsed) -> bool:
         or parsed.path.startswith('/session/static/')
     ):
         return True
+    if parsed.path.startswith('/api/v1/auth/devices/') and parsed.path.endswith('/revoke'):
+        from api.device_pairings import authenticate_device, extract_bearer
+        credential = extract_bearer(handler.headers.get_all('Authorization', []))
+        return bool(credential and authenticate_device(credential))
     cookie_val = parse_cookie(handler)
     has_session = bool(cookie_val and verify_session(cookie_val))
     if parsed.path == '/api/auth/logout':

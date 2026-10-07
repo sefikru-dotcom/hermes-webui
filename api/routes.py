@@ -5549,7 +5549,11 @@ def _csrf_exempt_path(path: str) -> bool:
         "/api/csp-report",
         "/api/auth/passkey/options",
         "/api/auth/passkey/login",
-    }
+    } or (
+        path.startswith("/api/v1/auth/device-pairings/") and path.endswith("/exchange")
+    ) or (
+        path.startswith("/api/v1/auth/devices/") and path.endswith("/revoke")
+    )
 
 
 _CSRF_FAILURE_ATTR = "_hermes_csrf_failure_reason"
@@ -12814,14 +12818,10 @@ def handle_get(handler, parsed) -> bool:
         from api.device_pairings import pairing_status
         query = parse_qs(parsed.query or "")
         pair_id = str(query.get("pair_id", [""])[0] or "").strip()
-        poll_secret = str(
-            query.get("poll_secret", [""])[0]
-            or handler.headers.get("X-Hermes-Poll-Secret", "")
-            or ""
-        ).strip()
-        if not pair_id or not poll_secret:
-            return bad(handler, "pair_id and poll_secret are required", 400)
-        result = pairing_status(pair_id, poll_secret)
+        # Secrets are deliberately not accepted in URLs or custom headers.
+        if query.get("poll_secret") or handler.headers.get("X-Hermes-Poll-Secret"):
+            return bad(handler, "poll_secret is accepted only by exchange", 400)
+        result = pairing_status(pair_id)
         if result is None:
             return bad(handler, "Pairing not found or invalid secret", 404)
         return j(handler, result, extra_headers={"Cache-Control": "no-store"})
@@ -16624,24 +16624,40 @@ def handle_post(handler, parsed) -> bool:
         from api.auth import get_session_info, is_auth_enabled, parse_cookie, verify_session
         from api.device_pairings import approve_pairing
         cookie = parse_cookie(handler)
-        if is_auth_enabled() and not (cookie and verify_session(cookie)):
+        if not (cookie and verify_session(cookie)):
             return bad(handler, "Authentication required", 401)
-        info = get_session_info(cookie) if cookie else None
-        scope = {"profile": str((info or {}).get("bound_profile") or "default")}
-        result = approve_pairing(body.get("code"), scope=scope)
+        result = approve_pairing(body.get("code"), session_cookie=cookie)
         if result is None:
             return bad(handler, "Invalid or expired pairing code", 404)
         return j(handler, result, extra_headers={"Cache-Control": "no-store"})
 
     if parsed.path in {"/api/auth/device-credentials/revoke", "/api/v1/auth/device-credentials/revoke"}:
-        from api.device_pairings import revoke_device
-        authorization = str(handler.headers.get("Authorization", "") or "")
-        scheme, _, credential = authorization.partition(" ")
-        if scheme.lower() != "bearer" or not credential.strip():
+        from api.device_pairings import extract_bearer, revoke_device
+        credential = extract_bearer(handler.headers.get_all("Authorization", []))
+        if not credential:
             return bad(handler, "Native device credential required", 401)
-        if not revoke_device(credential.strip()):
+        if not revoke_device(credential):
             return bad(handler, "Invalid or expired native device credential", 401)
         return j(handler, {"status": "revoked"}, extra_headers={"Cache-Control": "no-store"})
+
+    if parsed.path.startswith("/api/v1/auth/devices/") and parsed.path.endswith("/revoke"):
+        from api.device_pairings import extract_bearer, revoke_device
+        credential = extract_bearer(handler.headers.get_all("Authorization", []))
+        device_id = parsed.path[len("/api/v1/auth/devices/"):-len("/revoke")].strip("/")
+        if not credential or not device_id or not revoke_device(credential, device_id):
+            return bad(handler, "Invalid or expired native device credential", 401)
+        return j(handler, {"status": "revoked", "device_id": device_id}, extra_headers={"Cache-Control": "no-store"})
+
+    if parsed.path.startswith("/api/v1/auth/device-pairings/") and parsed.path.endswith("/exchange"):
+        from api.device_pairings import exchange_pairing
+        pair_id = parsed.path[len("/api/v1/auth/device-pairings/"):-len("/exchange")].strip("/")
+        poll_secret = str(body.get("poll_secret") or "").strip()
+        if not pair_id or not poll_secret or set(body) != {"poll_secret"}:
+            return bad(handler, "poll_secret is required", 400)
+        result = exchange_pairing(pair_id, poll_secret)
+        if result is None:
+            return bad(handler, "Pairing is invalid, expired, or already exchanged", 409)
+        return j(handler, result, extra_headers={"Cache-Control": "no-store"})
 
     if parsed.path == "/api/auth/login":
         from api.auth import (
