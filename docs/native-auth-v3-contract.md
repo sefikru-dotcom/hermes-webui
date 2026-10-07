@@ -23,9 +23,13 @@ not enabled by this change; legacy browser routes remain cookie/CSRF based.
 6. `POST /api/v1/auth/devices/{device_id}/revoke` requires a valid bearer bound to
    the same device. The legacy revoke aliases are retained for compatibility but
    do not authorize native chat.
-7. Pair approval always requires a verified browser session, including when auth is
-   disabled. This vertical slice grants no privileged native scopes; a native caller
-   cannot submit or choose scope. A future principal/profile binding must be added
-   before any privileged scope is enabled.
+7. Native pairing requires authentication to be enabled. When password, passkey,
+   OIDC, or trusted-header auth is not configured, pairing creation and browser
+   approval fail closed with HTTP `503` and the stable error
+   `native_auth_unavailable`. Existing cookie verification is not removed: approval
+   still requires a verified browser session when auth is enabled. This vertical
+   slice grants no privileged native scopes; a native caller cannot submit or choose
+   scope. A future principal/profile binding must be added before any privileged
+   scope is enabled.
 
 No native chat dispatcher, refresh lifecycle, or deployment is part of this slice.

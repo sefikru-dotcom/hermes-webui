@@ -16618,7 +16618,10 @@ def handle_post(handler, parsed) -> bool:
 
     # ── Auth endpoints (POST) ──
     if parsed.path in {"/api/auth/device-pairings", "/api/v1/auth/device-pairings"}:
+        from api.auth import is_auth_enabled
         from api.device_pairings import create_pairing
+        if not is_auth_enabled():
+            return bad(handler, "native_auth_unavailable", 503)
         try:
             result = create_pairing(rate_key=handler.client_address[0])
         except RuntimeError:
@@ -16628,6 +16631,8 @@ def handle_post(handler, parsed) -> bool:
     if parsed.path in {"/api/auth/device-pairings/approve", "/api/v1/auth/device-pairings/approve"}:
         from api.auth import get_session_info, is_auth_enabled, parse_cookie, verify_session
         from api.device_pairings import approve_pairing
+        if not is_auth_enabled():
+            return bad(handler, "native_auth_unavailable", 503)
         cookie = parse_cookie(handler)
         if not (cookie and verify_session(cookie)):
             return bad(handler, "Authentication required", 401)

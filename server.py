@@ -290,6 +290,22 @@ class QuietHTTPServer(ThreadingHTTPServer):
         super().handle_error(request, client_address)
 
 
+def _configure_tls(httpd, tls_enabled, tls_cert, tls_key):
+    """Configure TLS without ever downgrading a configured listener to HTTP."""
+    if not tls_enabled:
+        return "http"
+    import ssl
+    try:
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+        ctx.load_cert_chain(tls_cert, tls_key)
+        httpd.ssl_context = ctx
+        return "https"
+    except Exception as exc:
+        httpd.server_close()
+        raise RuntimeError(f"TLS setup failed; refusing plaintext fallback: {exc}") from exc
+
+
 class Handler(BaseHTTPRequestHandler):
     # HTTP/1.1 keep-alive stays on, so every response must declare framing.
     protocol_version = "HTTP/1.1"
@@ -672,18 +688,9 @@ def main() -> None:
     httpd = QuietHTTPServer((HOST, PORT), Handler)
 
     from api.config import TLS_ENABLED, TLS_CERT, TLS_KEY
-    scheme = 'https' if TLS_ENABLED else 'http'
+    scheme = _configure_tls(httpd, TLS_ENABLED, TLS_CERT, TLS_KEY)
     if TLS_ENABLED:
-        try:
-            import ssl
-            ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-            ctx.minimum_version = ssl.TLSVersion.TLSv1_2
-            ctx.load_cert_chain(TLS_CERT, TLS_KEY)
-            httpd.ssl_context = ctx
-            print(f'  TLS enabled: cert={TLS_CERT}, key={TLS_KEY}', flush=True)
-        except Exception as e:
-            print(f'[!!] WARNING: TLS setup failed ({e}), falling back to HTTP', flush=True)
-            scheme = 'http'
+        print(f'  TLS enabled: cert={TLS_CERT}, key={TLS_KEY}', flush=True)
 
     print(f'  Hermes Web UI listening on {scheme}://{HOST}:{PORT}', flush=True)
     if HOST in ('127.0.0.1', '::1') or within_container:

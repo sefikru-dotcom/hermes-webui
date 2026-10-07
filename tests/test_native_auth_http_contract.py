@@ -65,3 +65,19 @@ def test_versioned_device_revoke_rejects_wrong_device(monkeypatch):
     h = Handler({"Authorization": "Bearer hdev_invalid"})
     routes.handle_post(h, SimpleNamespace(path="/api/v1/auth/devices/dev_wrong/revoke", query=""))
     assert h.status == 401
+
+
+def test_tls_setup_closes_server_and_fails_closed(monkeypatch):
+    import server
+    class FakeContext:
+        def __init__(self, *_args): pass
+        def load_cert_chain(self, *_args): raise OSError("bad certificate")
+    class FakeSSL:
+        PROTOCOL_TLS_SERVER = object()
+        TLSVersion = SimpleNamespace(TLSv1_2=object())
+        SSLContext = FakeContext
+    monkeypatch.setitem(__import__("sys").modules, "ssl", FakeSSL)
+    h = SimpleNamespace(server_close=lambda: setattr(h, "closed", True))
+    with __import__("pytest").raises(RuntimeError, match="refusing plaintext fallback"):
+        server._configure_tls(h, True, "cert", "key")
+    assert h.closed is True

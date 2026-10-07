@@ -47,6 +47,23 @@ def test_approval_fails_closed_without_authenticated_session():
     assert device_pairings.approve_pairing(pair["code"]) is None
 
 
+def test_http_pairing_create_and_approval_require_enabled_auth(monkeypatch):
+    from api import routes
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(routes, "read_body", lambda _h: {"code": "123456"})
+    monkeypatch.setattr("api.auth.is_auth_enabled", lambda: False)
+    handler = SimpleNamespace(client_address=("127.0.0.1", 1), headers={},
+                              send_response=lambda status: setattr(handler, "status", status),
+                              send_header=lambda *_: None, end_headers=lambda: None,
+                              wfile=__import__("io").BytesIO())
+    routes.handle_post(handler, SimpleNamespace(path="/api/v1/auth/device-pairings", query=""))
+    assert handler.status == 503
+    handler.status = None
+    routes.handle_post(handler, SimpleNamespace(path="/api/v1/auth/device-pairings/approve", query=""))
+    assert handler.status == 503
+
+
 def test_approved_status_is_metadata_only(monkeypatch):
     monkeypatch.setattr(device_pairings.time, "time", lambda: 1000.0)
     pair = _approved_pair({"profile": "default"})
