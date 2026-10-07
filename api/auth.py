@@ -62,6 +62,20 @@ PUBLIC_PATHS = frozenset({
     '/session/manifest.json', '/session/manifest.webmanifest',
 })
 
+# ── Native Bearer fast-path: exact interactive-control routes ───────────────
+# A native client blocked on a tool approval or a clarification prompt must
+# answer it with its device Bearer credential.  These are the exact dispatch
+# paths verified against api/routes.py (GET ``pending`` + POST ``respond``);
+# the SSE ``stream`` and loopback-only ``inject_test`` routes deliberately
+# stay on the browser-cookie path.  Exact matches only — no prefixes, no
+# PUBLIC_PATHS entry (authentication is still required on every route here).
+NATIVE_BEARER_EXACT_PATHS = frozenset({
+    '/api/approval/pending',
+    '/api/approval/respond',
+    '/api/clarify/pending',
+    '/api/clarify/respond',
+})
+
 COOKIE_NAME = 'hermes_session'
 CSRF_HEADER_NAME = 'X-Hermes-CSRF-Token'
 
@@ -1124,11 +1138,18 @@ def check_auth(handler, parsed) -> bool:
         from api.device_pairings import verify_native_credential, extract_bearer
         credential = extract_bearer(handler.headers.get_all('Authorization', []))
         return bool(credential and verify_native_credential(credential))
-    # Native clients authenticate chat requests with a short-lived Bearer
-    # credential instead of a browser session cookie.  If an Authorization
-    # header is present on a chat route, fail closed rather than falling back
-    # to a cookie (prevents an invalid native token from masking auth errors).
-    if parsed.path == '/api/chat' or parsed.path.startswith('/api/chat/'):
+    # Native clients authenticate chat and interactive approval/clarify
+    # requests with a short-lived Bearer credential instead of a browser
+    # session cookie.  If an Authorization header is present on a covered
+    # route, fail closed rather than falling back to a cookie (prevents an
+    # invalid native token from masking auth errors).  Covered paths: the
+    # chat family plus the exact NATIVE_BEARER_EXACT_PATHS routes — never a
+    # broad /api/ prefix.
+    if (
+        parsed.path == '/api/chat'
+        or parsed.path.startswith('/api/chat/')
+        or parsed.path in NATIVE_BEARER_EXACT_PATHS
+    ):
         from api.device_pairings import extract_bearer, verify_native_credential
         authorization = handler.headers.get_all('Authorization', [])
         if authorization:
