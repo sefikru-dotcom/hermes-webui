@@ -11,7 +11,10 @@ def _approved_pair(scope=None):
     return pair
 
 
-def test_pairing_create_status_and_approve():
+def test_pairing_create_status_and_approve(monkeypatch):
+    device_pairings.clear_pairings()
+    now = [1000.0]
+    monkeypatch.setattr(device_pairings.time, "time", lambda: now[0])
     pair = _approved_pair()
     assert len(pair["code"]) == 6 and pair["code"].isdigit()
     assert pair["expires_in"] == 300
@@ -104,4 +107,4 @@ def test_versioned_endpoint_aliases_are_documented_in_route_contract():
     assert "/api/v1/auth/device-pairings" in auth.PUBLIC_PATHS
     assert "/api/v1/auth/device-pairings/status" in auth.PUBLIC_PATHS
     assert "/api/v1/auth/device-credentials/revoke" in auth.PUBLIC_PATHS
-    assert "/api/v1/auth/device-pairings" in routes._csrf_exempt_path.__code__.co_consts
+    assert routes._csrf_exempt_path("/api/v1/auth/device-pairings") is True

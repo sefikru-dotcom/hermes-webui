@@ -11,6 +11,7 @@ import time
 import uuid
 import re
 from pathlib import Path
+from contextlib import contextmanager
 
 from api.config import STATE_DIR
 
@@ -21,6 +22,10 @@ _LOGGER = logging.getLogger(__name__)
 _LOCK = threading.RLock()
 _DB_PATH = STATE_DIR / "native_auth.db"
 _BEARER_RE = re.compile(r"^Bearer ([A-Za-z0-9_-]{20,200})$")
+_RATE_LOCK = threading.Lock()
+_RATE_STATE: dict[tuple[str, str], list[float]] = {}
+PAIRING_CREATE_RATE = (10, 60.0)
+PAIRING_APPROVE_RATE = (20, 60.0)
 
 
 def _digest(value: str) -> str:
@@ -55,6 +60,34 @@ def _connect() -> sqlite3.Connection:
     return conn
 
 
+@contextmanager
+def _connection():
+    """Yield a transaction and always close the SQLite file descriptor."""
+    conn = _connect()
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def _rate_allowed(kind: str, key: str | None, limit: tuple[int, float]) -> bool:
+    if not key:
+        return True
+    now = time.monotonic()
+    with _RATE_LOCK:
+        bucket = [t for t in _RATE_STATE.get((kind, key), []) if now - t < limit[1]]
+        if len(bucket) >= limit[0]:
+            _RATE_STATE[(kind, key)] = bucket
+            return False
+        bucket.append(now)
+        _RATE_STATE[(kind, key)] = bucket
+        return True
+
+
 def _json_load(value: str | None) -> dict:
     import json
     try:
@@ -74,8 +107,10 @@ def _prune(conn: sqlite3.Connection, now: float) -> None:
     conn.execute("DELETE FROM device_credentials WHERE expires_at <= ? OR revoked = 1", (now,))
 
 
-def create_pairing() -> dict:
-    with _LOCK, _connect() as conn:
+def create_pairing(rate_key: str | None = None) -> dict:
+    if not _rate_allowed("create", rate_key, PAIRING_CREATE_RATE):
+        raise RuntimeError("Pairing creation rate limit exceeded")
+    with _LOCK, _connection() as conn:
         now = time.time()
         _prune(conn, now)
         for _ in range(_CODE_RETRY_LIMIT):
@@ -105,14 +140,14 @@ def _pair(conn: sqlite3.Connection, pair_id: str, poll_secret: str):
 
 def pairing_status(pair_id: str, poll_secret: str | None = None) -> dict | None:
     """Return status metadata only; never returns or creates a credential."""
-    with _LOCK, _connect() as conn:
+    with _LOCK, _connection() as conn:
         now = time.time()
         _prune(conn, now)
         row = _pair(conn, pair_id, poll_secret or "")
         if not row:
             return None
         if row["status"] == "pending":
-            return {"pair_id": pair_id, "status": "pending", "expires_in": max(0, int(row["expires_at"] - now))}
+            return {"pair_id": pair_id, "status": "pending", "expires_in": max(0, int(row["expires_at"] - now + 0.999999))}
         return {"pair_id": pair_id, "status": row["status"]}
 
 
@@ -120,7 +155,7 @@ def exchange_pairing(pair_id: str, poll_secret: str | None) -> dict | None:
     """Atomically consume an approved pairing and issue one OAuth-like bearer."""
     if not poll_secret:
         return None
-    with _LOCK, _connect() as conn:
+    with _LOCK, _connection() as conn:
         now = time.time()
         _prune(conn, now)
         conn.commit()
@@ -152,19 +187,19 @@ def exchange_pairing(pair_id: str, poll_secret: str | None) -> dict | None:
             raise
 
 
-def approve_pairing(code: str, session_cookie: str | None = None) -> dict | None:
+def approve_pairing(code: str, session_cookie: str | None = None, rate_key: str | None = None) -> dict | None:
     """Approve only from a caller already authenticated by the HTTP layer."""
     code = str(code or "").strip()
     if len(code) != 6 or not code.isdigit() or not session_cookie:
         return None
-    with _LOCK, _connect() as conn:
+    if not _rate_allowed("approve", rate_key, PAIRING_APPROVE_RATE):
+        return None
+    with _LOCK, _connection() as conn:
         now = time.time()
         _prune(conn, now)
         row = conn.execute("SELECT * FROM device_pairings WHERE code = ?", (code,)).fetchone()
         if not row or row["status"] != "pending":
             return None
-        # This slice deliberately grants no privileged native scope. A future
-        # browser-principal binding must resolve authorization server-side.
         approved_scope = {}
         conn.execute("UPDATE device_pairings SET status='approved', scope_json=? WHERE code=?",
                      (_json_dump(approved_scope), code))
@@ -174,7 +209,7 @@ def approve_pairing(code: str, session_cookie: str | None = None) -> dict | None
 def authenticate_device(credential: str | None) -> dict | None:
     if not credential:
         return None
-    with _LOCK, _connect() as conn:
+    with _LOCK, _connection() as conn:
         now = time.time()
         _prune(conn, now)
         row = conn.execute("SELECT * FROM device_credentials WHERE credential_hash=? AND revoked=0 AND expires_at>?",
@@ -188,7 +223,7 @@ def authenticate_device(credential: str | None) -> dict | None:
 def revoke_device(credential: str | None, device_id: str | None = None) -> bool:
     if not credential:
         return False
-    with _LOCK, _connect() as conn:
+    with _LOCK, _connection() as conn:
         if device_id:
             result = conn.execute("UPDATE device_credentials SET revoked=1 WHERE credential_hash=? AND device_id=? AND revoked=0",
                                   (_digest(str(credential)), device_id))
@@ -202,6 +237,6 @@ def revoke_device(credential: str | None, device_id: str | None = None) -> bool:
 
 
 def clear_pairings() -> None:
-    with _LOCK, _connect() as conn:
+    with _LOCK, _connection() as conn:
         conn.execute("DELETE FROM device_pairings")
         conn.execute("DELETE FROM device_credentials")

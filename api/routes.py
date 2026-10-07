@@ -5545,6 +5545,7 @@ def _csrf_exempt_path(path: str) -> bool:
     return path in {
         "/api/auth/login",
         "/api/auth/device-pairings", "/api/v1/auth/device-pairings",
+        "/api/v1/auth/device-pairings/status",
         "/api/auth/device-credentials/revoke", "/api/v1/auth/device-credentials/revoke",
         "/api/csp-report",
         "/api/auth/passkey/options",
@@ -16618,7 +16619,11 @@ def handle_post(handler, parsed) -> bool:
     # ── Auth endpoints (POST) ──
     if parsed.path in {"/api/auth/device-pairings", "/api/v1/auth/device-pairings"}:
         from api.device_pairings import create_pairing
-        return j(handler, create_pairing(), extra_headers={"Cache-Control": "no-store"})
+        try:
+            result = create_pairing(rate_key=handler.client_address[0])
+        except RuntimeError:
+            return bad(handler, "Pairing creation rate limit exceeded", 429)
+        return j(handler, result, extra_headers={"Cache-Control": "no-store"})
 
     if parsed.path in {"/api/auth/device-pairings/approve", "/api/v1/auth/device-pairings/approve"}:
         from api.auth import get_session_info, is_auth_enabled, parse_cookie, verify_session
@@ -16626,7 +16631,7 @@ def handle_post(handler, parsed) -> bool:
         cookie = parse_cookie(handler)
         if not (cookie and verify_session(cookie)):
             return bad(handler, "Authentication required", 401)
-        result = approve_pairing(body.get("code"), session_cookie=cookie)
+        result = approve_pairing(body.get("code"), session_cookie=cookie, rate_key=handler.client_address[0])
         if result is None:
             return bad(handler, "Invalid or expired pairing code", 404)
         return j(handler, result, extra_headers={"Cache-Control": "no-store"})
