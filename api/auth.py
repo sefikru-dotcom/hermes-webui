@@ -49,8 +49,10 @@ def _resolve_session_ttl() -> int:
 
 # ── Public paths (no auth required) ─────────────────────────────────────────
 PUBLIC_PATHS = frozenset({
-    '/login', '/health', '/favicon.ico', '/sw.js',
+    '/login', '/pair', '/health', '/favicon.ico', '/sw.js',
     '/api/auth/login', '/api/auth/status',
+    '/api/auth/device-pairings', '/api/auth/device-pairings/status',
+    '/api/auth/device-credentials/revoke',
     '/api/auth/oidc/start', '/api/auth/oidc/callback',
     '/api/auth/passkey/options', '/api/auth/passkey/login',
     '/share',

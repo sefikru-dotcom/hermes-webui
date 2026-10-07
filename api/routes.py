@@ -5544,9 +5544,11 @@ def _csrf_exempt_path(path: str) -> bool:
     """Paths that cannot or must not carry a session CSRF token."""
     return path in {
         "/api/auth/login",
+        "/api/auth/device-pairings",
+        "/api/auth/device-credentials/revoke",
+        "/api/csp-report",
         "/api/auth/passkey/options",
         "/api/auth/passkey/login",
-        "/api/csp-report",
     }
 
 
@@ -10801,6 +10803,9 @@ def _resolve_login_locale_key(raw_lang: str | None) -> str:
     """Resolve settings.language to a known _LOGIN_LOCALE key."""
     return resolve_login_locale_key(raw_lang, _LOGIN_LOCALE)
 
+# ── Device pairing page (self-contained, no external deps) ───────────────────
+_PAIR_PAGE_HTML = """<!doctype html><html lang=\"ru\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Подключить устройство — Марс</title><style>*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#141425;color:#eee;font:16px system-ui,sans-serif}.card{width:min(92vw,380px);padding:32px;border:1px solid #343452;border-radius:16px;background:#1e1e35;text-align:center}h1{font-size:22px}p{color:#aaa}input{width:100%;padding:14px;border-radius:10px;border:1px solid #555;background:#111124;color:#fff;font-size:24px;text-align:center;letter-spacing:6px}button{width:100%;margin-top:16px;padding:12px;border:0;border-radius:10px;background:#7cb9ff;color:#10101c;font-weight:700;font-size:16px}.error{color:#ff8c9b;margin-top:12px}</style></head><body><main class=\"card\"><h1>Подключить устройство</h1><p>Введите 6-значный код с экрана телевизора</p><form id=\"f\"><input id=\"code\" inputmode=\"numeric\" maxlength=\"6\" pattern=\"[0-9]{6}\" autocomplete=\"one-time-code\" required><button>Подтвердить</button></form><div id=\"m\" class=\"error\" role=\"status\"></div><script>f.onsubmit=async function(e){e.preventDefault();m.textContent='';try{let r=await fetch('/api/auth/device-pairings/approve',{method:'POST',headers:{'Content-Type':'application/json','X-Hermes-CSRF-Token':'__PAIR_CSRF__'},credentials:'same-origin',body:JSON.stringify({code:code.value})});let d=await r.json();if(!r.ok)throw Error(d.error||'Не удалось подтвердить код');m.className='';m.textContent='Устройство подключено.';f.reset()}catch(x){m.textContent=x.message}}</script></main></body></html>"""
+
 # ── Login page (self-contained, no external deps) ────────────────────────────
 _LOGIN_PAGE_HTML = """<!doctype html>
 <html lang="{{LANG}}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -12709,6 +12714,17 @@ def handle_get(handler, parsed) -> bool:
             },
         )
 
+    if parsed.path == "/pair":
+        pair_csrf = ""
+        try:
+            from api.auth import csrf_token_for_session, is_auth_enabled, parse_cookie, verify_session
+            cookie = parse_cookie(handler)
+            if is_auth_enabled() and cookie and verify_session(cookie):
+                pair_csrf = csrf_token_for_session(cookie) or ""
+        except Exception:
+            pass
+        return t(handler, _PAIR_PAGE_HTML.replace("__PAIR_CSRF__", _html.escape(pair_csrf, quote=True)), content_type="text/html; charset=utf-8")
+
     if parsed.path == "/login":
         _settings = load_settings()
         _bn = _html.escape(_settings.get("bot_name") or "Hermes")
@@ -12793,6 +12809,22 @@ def handle_get(handler, parsed) -> bool:
         handler.send_header("Content-Length", "0")
         handler.end_headers()
         return True
+
+    if parsed.path == "/api/auth/device-pairings/status":
+        from api.device_pairings import pairing_status
+        query = parse_qs(parsed.query or "")
+        pair_id = str(query.get("pair_id", [""])[0] or "").strip()
+        poll_secret = str(
+            query.get("poll_secret", [""])[0]
+            or handler.headers.get("X-Hermes-Poll-Secret", "")
+            or ""
+        ).strip()
+        if not pair_id or not poll_secret:
+            return bad(handler, "pair_id and poll_secret are required", 400)
+        result = pairing_status(pair_id, poll_secret)
+        if result is None:
+            return bad(handler, "Pairing not found or invalid secret", 404)
+        return j(handler, result, extra_headers={"Cache-Control": "no-store"})
 
     if parsed.path == "/api/auth/status":
         from api.auth import (
@@ -16584,6 +16616,33 @@ def handle_post(handler, parsed) -> bool:
         return _handle_session_import_cli(handler, body)
 
     # ── Auth endpoints (POST) ──
+    if parsed.path == "/api/auth/device-pairings":
+        from api.device_pairings import create_pairing
+        return j(handler, create_pairing(), extra_headers={"Cache-Control": "no-store"})
+
+    if parsed.path == "/api/auth/device-pairings/approve":
+        from api.auth import get_session_info, is_auth_enabled, parse_cookie, verify_session
+        from api.device_pairings import approve_pairing
+        cookie = parse_cookie(handler)
+        if is_auth_enabled() and not (cookie and verify_session(cookie)):
+            return bad(handler, "Authentication required", 401)
+        info = get_session_info(cookie) if cookie else None
+        scope = {"profile": str((info or {}).get("bound_profile") or "default")}
+        result = approve_pairing(body.get("code"), scope=scope)
+        if result is None:
+            return bad(handler, "Invalid or expired pairing code", 404)
+        return j(handler, result, extra_headers={"Cache-Control": "no-store"})
+
+    if parsed.path == "/api/auth/device-credentials/revoke":
+        from api.device_pairings import revoke_device
+        authorization = str(handler.headers.get("Authorization", "") or "")
+        scheme, _, credential = authorization.partition(" ")
+        if scheme.lower() != "bearer" or not credential.strip():
+            return bad(handler, "Native device credential required", 401)
+        if not revoke_device(credential.strip()):
+            return bad(handler, "Invalid or expired native device credential", 401)
+        return j(handler, {"status": "revoked"}, extra_headers={"Cache-Control": "no-store"})
+
     if parsed.path == "/api/auth/login":
         from api.auth import (
             verify_password,
