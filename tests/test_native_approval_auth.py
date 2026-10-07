@@ -124,10 +124,12 @@ def test_native_bearer_approval_clarify_auth(monkeypatch):
                 assert status == 400, path
 
             # ── Unrelated-path regression: a valid Bearer does not leak beyond
-            # the exact covered routes.  /api/sessions and /api/settings stay
-            # cookie-auth, and the SSE stream + loopback inject_test routes are
-            # deliberately NOT in NATIVE_BEARER_EXACT_PATHS.
-            for path in ("/api/sessions", "/api/settings",
+            # the covered surface.  /api/settings stays cookie-auth, and the
+            # SSE stream + loopback inject_test routes are deliberately NOT in
+            # NATIVE_BEARER_EXACT_PATHS.  (/api/sessions IS covered — it is a
+            # NATIVE_BEARER_PATH_PREFIXES client route; see
+            # tests/test_native_bearer_api_surface.py.)
+            for path in ("/api/settings",
                          "/api/approval/stream", "/api/clarify/stream"):
                 status, _ = request("GET", path, headers=bearer)
                 assert status == 401, path

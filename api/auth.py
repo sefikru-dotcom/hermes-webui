@@ -76,6 +76,21 @@ NATIVE_BEARER_EXACT_PATHS = frozenset({
     '/api/clarify/respond',
 })
 
+# ── Native Bearer fast-path: client API surface prefixes ──────────────────
+# The native Android client calls these API families with its device Bearer
+# credential: chat send/start/stop, session list/detail/new/rename/delete,
+# the model catalog, uploads and profiles.  Prefixes are deliberately narrow
+# and match the client's InteractiveRequestsRepository contract; settings,
+# auth, admin, share and everything else stay on the browser-cookie path.
+NATIVE_BEARER_PATH_PREFIXES = (
+    '/api/chat',
+    '/api/sessions',
+    '/api/session',
+    '/api/models',
+    '/api/upload',
+    '/api/profiles',
+)
+
 COOKIE_NAME = 'hermes_session'
 CSRF_HEADER_NAME = 'X-Hermes-CSRF-Token'
 
@@ -1138,16 +1153,15 @@ def check_auth(handler, parsed) -> bool:
         from api.device_pairings import verify_native_credential, extract_bearer
         credential = extract_bearer(handler.headers.get_all('Authorization', []))
         return bool(credential and verify_native_credential(credential))
-    # Native clients authenticate chat and interactive approval/clarify
-    # requests with a short-lived Bearer credential instead of a browser
-    # session cookie.  If an Authorization header is present on a covered
-    # route, fail closed rather than falling back to a cookie (prevents an
-    # invalid native token from masking auth errors).  Covered paths: the
-    # chat family plus the exact NATIVE_BEARER_EXACT_PATHS routes — never a
-    # broad /api/ prefix.
+    # Native clients authenticate API requests with a Bearer credential
+    # instead of a browser session cookie.  If an Authorization header is
+    # present on a covered route, fail closed rather than falling back to a
+    # cookie (prevents an invalid native token from masking auth errors).
+    # Covered paths: the NATIVE_BEARER_PATH_PREFIXES client API surface plus
+    # the exact NATIVE_BEARER_EXACT_PATHS routes — never a broad /api/
+    # prefix.
     if (
-        parsed.path == '/api/chat'
-        or parsed.path.startswith('/api/chat/')
+        parsed.path.startswith(NATIVE_BEARER_PATH_PREFIXES)
         or parsed.path in NATIVE_BEARER_EXACT_PATHS
     ):
         from api.device_pairings import extract_bearer, verify_native_credential
