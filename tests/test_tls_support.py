@@ -18,8 +18,6 @@ from contextlib import suppress
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from conftest import requires_fcntl
-
 ROOT = Path(__file__).parent.parent
 
 
@@ -288,37 +286,42 @@ class TestTLSEndToEnd(unittest.TestCase):
         self.assertEqual(data.get("status"), "ok")
         conn.close()
 
-    @requires_fcntl
-    def test_tls_startup_failure_fallback_to_http(self):
-        """Bad cert paths should print a warning and start HTTP anyway."""
-        # Server should be reachable over plain HTTP even though TLS setup failed.
-        self._proc = _start_and_wait(
-            use_ssl=False, cert="/nonexistent/cert.pem", key="/nonexistent/key.pem",
+    def test_tls_startup_failure_exits_without_http_fallback(self):
+        """An invalid TLS certificate must fail closed, never start HTTP."""
+        port = _find_free_port()
+        proc = _start_server(
+            port, cert="/nonexistent/cert.pem", key="/nonexistent/key.pem",
         )
-        # Confirm the TLS warning was printed. Drain ALL currently-available
-        # stdout, not just the first N bytes: startup can emit an unbounded
-        # amount of unrelated preamble first (optional-dep plugin/tool import
-        # warnings when the test venv lacks `requests`/`websockets`, the startup
-        # config banner, the state-dir hint, etc.), which can push the
-        # "TLS setup failed" line well past any fixed-size single read and make
-        # this test flaky depending on how noisy the environment is.
-        os.set_blocking(self._proc.stdout.fileno(), False)
-        output = ""
-        deadline = time.time() + 5
-        while time.time() < deadline:
+        self._proc = proc
+        try:
             try:
-                chunk = self._proc.stdout.read(65536)
-            except BlockingIOError:
-                chunk = None
-            if chunk:
-                output += chunk
-                if "TLS setup failed" in output:
-                    break
-            else:
-                if "TLS setup failed" in output:
-                    break
-                time.sleep(0.05)
-        self.assertIn("TLS setup failed", output)
+                returncode = proc.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                self.fail("server did not exit after invalid TLS configuration")
+            self.assertNotEqual(returncode, 0)
+
+            # The configured listener must not be reachable as plaintext HTTP
+            # after TLS setup fails. Retry briefly to avoid a process-exit/port
+            # teardown race while asserting the socket is not listening.
+            deadline = time.time() + 5
+            last_error = None
+            while time.time() < deadline:
+                conn = http.client.HTTPConnection("127.0.0.1", port, timeout=1)
+                try:
+                    conn.request("GET", "/health")
+                    resp = conn.getresponse()
+                    resp.read()
+                    self.fail(
+                        f"invalid TLS configuration fell back to HTTP (status {resp.status})"
+                    )
+                except (ConnectionRefusedError, ConnectionResetError, OSError) as exc:
+                    last_error = exc
+                    time.sleep(0.05)
+                finally:
+                    conn.close()
+            self.assertIsNotNone(last_error, "port unexpectedly accepted no error")
+        finally:
+            _terminate(proc)
 
 
 if __name__ == "__main__":
