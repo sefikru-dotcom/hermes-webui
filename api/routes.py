@@ -5544,8 +5544,8 @@ def _csrf_exempt_path(path: str) -> bool:
     """Paths that cannot or must not carry a session CSRF token."""
     return path in {
         "/api/auth/login",
-        "/api/auth/device-pairings",
-        "/api/auth/device-credentials/revoke",
+        "/api/auth/device-pairings", "/api/v1/auth/device-pairings",
+        "/api/auth/device-credentials/revoke", "/api/v1/auth/device-credentials/revoke",
         "/api/csp-report",
         "/api/auth/passkey/options",
         "/api/auth/passkey/login",
@@ -12810,7 +12810,7 @@ def handle_get(handler, parsed) -> bool:
         handler.end_headers()
         return True
 
-    if parsed.path == "/api/auth/device-pairings/status":
+    if parsed.path in {"/api/auth/device-pairings/status", "/api/v1/auth/device-pairings/status"}:
         from api.device_pairings import pairing_status
         query = parse_qs(parsed.query or "")
         pair_id = str(query.get("pair_id", [""])[0] or "").strip()
@@ -16616,11 +16616,11 @@ def handle_post(handler, parsed) -> bool:
         return _handle_session_import_cli(handler, body)
 
     # ── Auth endpoints (POST) ──
-    if parsed.path == "/api/auth/device-pairings":
+    if parsed.path in {"/api/auth/device-pairings", "/api/v1/auth/device-pairings"}:
         from api.device_pairings import create_pairing
         return j(handler, create_pairing(), extra_headers={"Cache-Control": "no-store"})
 
-    if parsed.path == "/api/auth/device-pairings/approve":
+    if parsed.path in {"/api/auth/device-pairings/approve", "/api/v1/auth/device-pairings/approve"}:
         from api.auth import get_session_info, is_auth_enabled, parse_cookie, verify_session
         from api.device_pairings import approve_pairing
         cookie = parse_cookie(handler)
@@ -16633,7 +16633,7 @@ def handle_post(handler, parsed) -> bool:
             return bad(handler, "Invalid or expired pairing code", 404)
         return j(handler, result, extra_headers={"Cache-Control": "no-store"})
 
-    if parsed.path == "/api/auth/device-credentials/revoke":
+    if parsed.path in {"/api/auth/device-credentials/revoke", "/api/v1/auth/device-credentials/revoke"}:
         from api.device_pairings import revoke_device
         authorization = str(handler.headers.get("Authorization", "") or "")
         scheme, _, credential = authorization.partition(" ")

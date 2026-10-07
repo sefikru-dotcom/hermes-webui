@@ -1,4 +1,10 @@
-"""Short-lived, server-side native device credentials for pairing."""
+"""Short-lived native pairing credentials.
+
+The legacy ``/api/auth/device-pairings`` routes and their versioned
+``/api/v1/auth/device-pairings`` aliases share this contract.  An approved
+poll returns the bearer token only on its first authenticated poll; subsequent
+polls retain the approved metadata but never return the token.
+"""
 from __future__ import annotations
 
 import hashlib
@@ -53,6 +59,7 @@ def create_pairing() -> dict:
             "status": "pending",
             "scope": None,
             "credential_hash": None,
+            "device_id": None,
         }
         return {
             "pair_id": pair_id,
@@ -64,31 +71,36 @@ def create_pairing() -> dict:
 
 
 def pairing_status(pair_id: str, poll_secret: str | None) -> dict | None:
-    """Authenticate polling with both handles and reveal a credential once."""
+    """Authenticate polling and reveal the native token at most once."""
     with _LOCK:
         _prune()
         pair = _PAIRINGS.get(pair_id)
         if not pair or not poll_secret or not hmac.compare_digest(pair["poll_secret"], poll_secret):
             return None
-        credential = None
+        device_token = None
         if pair["status"] == "approved" and pair["credential_hash"] is None:
-            credential = "hdev_" + secrets.token_urlsafe(32)
-            credential_hash = _digest(credential)
+            device_token = "hdev_" + secrets.token_urlsafe(32)
+            credential_hash = _digest(device_token)
+            pair["device_id"] = "dev_" + uuid.uuid4().hex
             pair["credential_hash"] = credential_hash
-            pair["status"] = "claimed"
             _CREDENTIALS[credential_hash] = {
                 "expires_at": time.time() + DEVICE_CREDENTIAL_TTL_SECONDS,
                 "scope": dict(pair["scope"] or {}),
+                "device_id": pair["device_id"],
                 "revoked": False,
             }
-        return {
+        if pair["status"] == "pending":
+            return {"pair_id": pair_id, "status": "pending", "expires_in": max(0, int(pair["expires_at"] - time.time()))}
+        response = {
             "pair_id": pair_id,
-            "status": pair["status"],
-            "expires_at": pair["expires_at"],
-            "credential": credential,
-            "scope": dict(pair["scope"] or {}) if pair["status"] != "pending" else None,
-            "credential_expires_in": DEVICE_CREDENTIAL_TTL_SECONDS if credential else None,
+            "status": "approved",
+            "device_id": pair["device_id"],
+            "scopes": sorted(pair["scope"] or {}),
+            "expires_in": max(0, int((_CREDENTIALS[pair["credential_hash"]]["expires_at"] - time.time()))),
         }
+        if device_token is not None:
+            response["device_token"] = device_token
+        return response
 
 
 def approve_pairing(code: str, session_cookie: str | None = None, *, scope: dict | None = None) -> dict | None:
@@ -117,7 +129,12 @@ def authenticate_device(credential: str | None) -> dict | None:
         record = _CREDENTIALS.get(_digest(str(credential)))
         if not record or record["revoked"]:
             return None
-        return {"scope": dict(record["scope"]), "expires_at": record["expires_at"]}
+        return {
+            "scope": dict(record["scope"]),
+            "scopes": sorted(record["scope"]),
+            "device_id": record["device_id"],
+            "expires_at": record["expires_at"],
+        }
 
 
 def revoke_device(credential: str | None) -> bool:

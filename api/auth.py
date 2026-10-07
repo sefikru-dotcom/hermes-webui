@@ -53,6 +53,8 @@ PUBLIC_PATHS = frozenset({
     '/api/auth/login', '/api/auth/status',
     '/api/auth/device-pairings', '/api/auth/device-pairings/status',
     '/api/auth/device-credentials/revoke',
+    '/api/v1/auth/device-pairings', '/api/v1/auth/device-pairings/status',
+    '/api/v1/auth/device-credentials/revoke',
     '/api/auth/oidc/start', '/api/auth/oidc/callback',
     '/api/auth/passkey/options', '/api/auth/passkey/login',
     '/share',
