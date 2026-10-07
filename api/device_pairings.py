@@ -206,18 +206,24 @@ def approve_pairing(code: str, session_cookie: str | None = None, rate_key: str 
         return {"pair_id": row["pair_id"], "status": "approved"}
 
 
-def authenticate_device(credential: str | None) -> dict | None:
-    if not credential:
+def verify_native_credential(token: str | None) -> dict | None:
+    """Verify a native Bearer credential against its stored hash."""
+    if not token:
         return None
     with _LOCK, _connection() as conn:
         now = time.time()
         _prune(conn, now)
         row = conn.execute("SELECT * FROM device_credentials WHERE credential_hash=? AND revoked=0 AND expires_at>?",
-                           (_digest(str(credential)), now)).fetchone()
+                           (_digest(str(token)), now)).fetchone()
         if not row:
             return None
         scope = _json_load(row["scope_json"])
         return {"scope": scope, "scopes": sorted(scope), "device_id": row["device_id"], "expires_at": row["expires_at"]}
+
+
+# Backwards-compatible name for existing device revoke/auth callers.
+def authenticate_device(credential: str | None) -> dict | None:
+    return verify_native_credential(credential)
 
 
 def revoke_device(credential: str | None, device_id: str | None = None) -> bool:

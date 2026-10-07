@@ -1121,9 +1121,30 @@ def check_auth(handler, parsed) -> bool:
     ):
         return True
     if parsed.path.startswith('/api/v1/auth/devices/') and parsed.path.endswith('/revoke'):
-        from api.device_pairings import authenticate_device, extract_bearer
+        from api.device_pairings import verify_native_credential, extract_bearer
         credential = extract_bearer(handler.headers.get_all('Authorization', []))
-        return bool(credential and authenticate_device(credential))
+        return bool(credential and verify_native_credential(credential))
+    # Native clients authenticate chat requests with a short-lived Bearer
+    # credential instead of a browser session cookie.  If an Authorization
+    # header is present on a chat route, fail closed rather than falling back
+    # to a cookie (prevents an invalid native token from masking auth errors).
+    if parsed.path == '/api/chat' or parsed.path.startswith('/api/chat/'):
+        from api.device_pairings import extract_bearer, verify_native_credential
+        authorization = handler.headers.get_all('Authorization', [])
+        if authorization:
+            credential = extract_bearer(authorization)
+            native_device = verify_native_credential(credential) if credential else None
+            if native_device:
+                handler._native_auth_device = native_device
+                return True
+            body = b'{"error":"Authentication required"}'
+            handler.send_response(401)
+            handler.send_header('Content-Type', 'application/json')
+            handler.send_header('Content-Length', str(len(body)))
+            handler.end_headers()
+            handler.wfile.write(body)
+            return False
+
     cookie_val = parse_cookie(handler)
     has_session = bool(cookie_val and verify_session(cookie_val))
     if parsed.path == '/api/auth/logout':
