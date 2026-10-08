@@ -67,13 +67,18 @@ PUBLIC_PATHS = frozenset({
 # answer it with its device Bearer credential.  These are the exact dispatch
 # paths verified against api/routes.py (GET ``pending`` + POST ``respond``);
 # the SSE ``stream`` and loopback-only ``inject_test`` routes deliberately
-# stay on the browser-cookie path.  Exact matches only — no prefixes, no
-# PUBLIC_PATHS entry (authentication is still required on every route here).
+# stay on the browser-cookie path.  GET ``/api/workspaces`` is the read-only
+# workspace list the native client UI renders; exact matching keeps its
+# mutating siblings (``/api/workspaces/{add,remove,rename,reorder}``) and
+# ``/api/workspaces/suggest`` on cookie auth.  Exact matches only — no
+# prefixes, no PUBLIC_PATHS entry (authentication is still required on every
+# route here).
 NATIVE_BEARER_EXACT_PATHS = frozenset({
     '/api/approval/pending',
     '/api/approval/respond',
     '/api/clarify/pending',
     '/api/clarify/respond',
+    '/api/workspaces',
 })
 
 # ── Native Bearer fast-path: client API surface prefixes ──────────────────
