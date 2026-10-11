@@ -87,3 +87,7 @@ attachments/
 
 # Вендоренные python-пакеты (Web Push); переустанавливаются uv pip install --target
 vendor/
+
+# APK релизов Mars (Android) — отдаются клиентам через /static/apk/, не в git
+static/apk/
+static/apk-backup-*/
