@@ -126,10 +126,12 @@ def test_inline_html_response_sets_csp_sandbox():
 
 def test_file_raw_inline_responses_use_sandbox_csp():
     """The explicit inline-open contract should sandbox non-download raw files."""
-    content = _get_routes_content()
+    content = open("api/route_files.py", encoding="utf-8").read()
     idx = content.find("def _handle_file_raw")
     assert idx != -1, "_handle_file_raw not found"
-    block = content[idx:idx + 2200]
+    import ast
+    function = next(node for node in ast.parse(content).body if isinstance(node, ast.FunctionDef) and node.name == "_handle_file_raw")
+    block = ast.get_source_segment(content, function)
     assert "sandbox_csp" in block
     assert "inline_preview" in block
     assert "disposition == \"inline\"" in block

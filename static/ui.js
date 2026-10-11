@@ -643,6 +643,19 @@ function _resetMessageRenderWindow(sid){
 }
 function _restoreMessageRenderWindowAfterSettledRender(){
   _messageRenderWindowSize=MESSAGE_RENDER_WINDOW_DEFAULT;
+  // #scroll-settle: settle the reset INSIDE the current post-render pass. Left
+  // alone, the shrunk window materializes on the next scroll-triggered rebuild
+  // — but the done path's programmatic restore keeps the scroll listener's
+  // early return latched for ~150ms, so that rebuild used to land frames AFTER
+  // the scroll snapshot was restored: a late height swap against an already
+  // settled viewport (the visible post-reply jerk). Flush the pending rebuild
+  // now instead — key-gated, rAF-deduped and scroll-compensated, so it is a
+  // no-op when nothing is pending (#6799 idle-loop contract preserved).
+  if(typeof _messageRenderSettlePassActive==='function'&&_messageRenderSettlePassActive()
+    &&typeof _scheduleMessageVirtualizedRender==='function'){
+    _messageVirtualWindowKey='';
+    _scheduleMessageVirtualizedRender();
+  }
 }
 function _cancelMessageVirtualizedRender(){
   if(_messageVirtualScrollRaf){
@@ -6420,6 +6433,69 @@ function _recentMessageScrollIntent(){
 function _recentMessageKeyScrollIntent(){
   return performance.now()-_lastMessageKeyScrollIntentMs<MESSAGE_KEY_SCROLL_INTENT_SUPPRESS_MS;
 }
+// ── Render settle pass: frame-accurate post-render artifact identification ──
+// #scroll-settle. Replaces the 1400ms wall-clock "render artifact window" as
+// the authority for absorbing non-user scroll events after renderMessages().
+// The pass opens at the render stamp and closes on the first animation frame
+// after it. The browser emits reflow/clamp scroll events inside the render's
+// own frame (scroll steps run before rAF callbacks), so "event arrived while
+// the pass is open AND the monotonic _messageScrollInputGeneration has not
+// moved since the stamp AND no gesture intent is on record" is a POSITIVE
+// artifact identification instead of a time-based guess: every real gesture
+// (wheel/touchmove with delta, pane keyboard scroll, scrollbar pointerdown)
+// bumps the generation via _recordNonMessageScrollIntent()/the pane handlers.
+// Once the pass closes, even a bare scroll with no gesture evidence at all
+// (momentum/chained scrolls, assistive tech, middle-click autoscroll, keyboard
+// with focus outside the pane — none of which reach the document capture
+// listeners) counts as reader input and must unpin. The old window swallowed
+// exactly those for 1400ms after EVERY render stamp; during streaming the
+// stamp refreshes per token, so the window never expired and the reader could
+// not scroll up at all until page reload.
+let _messageRenderSettlePending=false;
+let _messageRenderSettleRaf=0;
+let _messageRenderSettleGeneration=0;
+let _messageVirtualProgrammaticSettleDone=false;
+function _beginMessageRenderSettlePass(){
+  if(_messageRenderSettleRaf){ cancelAnimationFrame(_messageRenderSettleRaf); _messageRenderSettleRaf=0; }
+  _messageRenderSettleGeneration=(typeof _messageScrollInputGeneration==='number')?_messageScrollInputGeneration:0;
+  _messageRenderSettlePending=true;
+  _messageVirtualProgrammaticSettleDone=false;
+  _messageRenderSettleRaf=requestAnimationFrame(()=>{
+    _messageRenderSettleRaf=0;
+    _messageRenderSettlePending=false;
+  });
+}
+function _closeMessageRenderSettlePass(){
+  if(_messageRenderSettleRaf){ cancelAnimationFrame(_messageRenderSettleRaf); _messageRenderSettleRaf=0; }
+  _messageRenderSettlePending=false;
+}
+function _messageRenderSettlePassActive(){
+  return _messageRenderSettlePending;
+}
+function _messageRenderArtifactScrollEvent(){
+  if(!_messageRenderSettlePending) return false;
+  // Generation moved since the render stamp => real input, never an artifact.
+  if(typeof _messageScrollInputGeneration==='number'&&_messageScrollInputGeneration!==_messageRenderSettleGeneration) return false;
+  if(typeof _messageTouchScrollActive!=='undefined'&&_messageTouchScrollActive) return false;
+  if(typeof _scrollbarDragActive!=='undefined'&&_scrollbarDragActive) return false;
+  if(_recentMessageTouchScrollIntent()||_recentNonMessageScrollIntent()||_recentMessageWheelIntent()||_recentMessageKeyScrollIntent()) return false;
+  return true;
+}
+function _settleMessageVirtualWindowInProgrammaticPass(){
+  // #6799 contract preserved: while a programmatic scroll is latched the pin
+  // bookkeeping stays skipped and there is still no per-event re-render
+  // scheduling. But the latch early return must not STARVE the virtualization
+  // rebuild: after the settled-render restore writes scrollTop, the pending
+  // window/measurement rebuild used to wait for the first unlatched scroll
+  // event and then swap heights frames after the snapshot restore — the
+  // visible post-reply jerk. Run the same key-gated, rAF-deduped schedule
+  // exactly ONCE per render settle pass; _compensateScrollForMeasurementDelta
+  // absorbs any delta within the frame, so this cannot re-arm the #6799 loop.
+  if(typeof _freshProgrammaticScrollActive!=='function'||!_freshProgrammaticScrollActive()) return;
+  if(_messageVirtualProgrammaticSettleDone) return;
+  _messageVirtualProgrammaticSettleDone=true;
+  if(typeof _scheduleMessageVirtualizedRender==='function') _scheduleMessageVirtualizedRender();
+}
 function _isMessageReaderUnpinned(){
   return !!_messageUserUnpinned;
 }
@@ -6620,6 +6696,9 @@ function _resetScrollDirectionTracker(){
   _lastMessageScrollIntentMs=-Infinity;
   // #4970 review (greptile P1): same hygiene for keyboard scroll intent.
   _lastMessageKeyScrollIntentMs=-Infinity;
+  // #scroll-settle: a session switch must not carry the previous chat's render
+  // settle pass (stale post-render artifact absorption) into the new chat.
+  if(typeof _closeMessageRenderSettlePass==='function') _closeMessageRenderSettlePass();
   clearTimeout(_deferredOlderMessagesTimer);
   _deferredOlderMessagesTimer=0;
 }
@@ -6777,14 +6856,19 @@ if(typeof window!=='undefined'){
     }
   },{capture:true,passive:true});
   let _scrollRaf=0;
+  let _messageScrollArtifactEventPending=false;
   el.addEventListener('scroll',()=>{
     if(_messageJumpScrollOwner){
       _scheduleMessageJumpScrollReconcile(_messageJumpScrollOwner.generation);
       return;
     }
+    if(typeof _settleMessageVirtualWindowInProgrammaticPass==='function') _settleMessageVirtualWindowInProgrammaticPass();
     if(_freshProgrammaticScrollActive()) return;
     _scheduleMessageVirtualizedRender();
     _markMessageVirtualScrollActive();
+    // #scroll-settle: adjudicate artifact-vs-input at EVENT time; the settle
+    // pass closes in a rAF that runs before this listener's bookkeeping rAF.
+    _messageScrollArtifactEventPending=(typeof _messageRenderArtifactScrollEvent==='function')&&_messageRenderArtifactScrollEvent();
     cancelAnimationFrame(_scrollRaf);
     _scrollRaf=requestAnimationFrame(()=>{
       const top=el.scrollTop;
@@ -6802,29 +6886,25 @@ if(typeof window!=='undefined'){
       _lastMessageClientHeight=el.clientHeight;
       const movedUp=!grew&&_lastScrollTop!==null&&top<_lastScrollTop-2;
       const movedDown=_lastScrollTop!==null&&top>_lastScrollTop+2;
-      // Suppress the post-render scroll artifact: right after renderMessages()
-      // rebuilds #msgInner, the browser can emit a non-user upward scroll event.
-      // The typeof guards keep this branch inert in unit harnesses that inject
-      // the listener body without these helpers (and short-circuit before any
-      // call), while production evaluates the real intent/recency helpers.
-      // #4970: also require no recent low-delta message-pane wheel intent, so a
-      // gentle trackpad scroll-up (deltaY>-30) right after a render still unpins
-      // instead of being swallowed for the artifact window.
-      // #4970 review: and never suppress while a scrollbar drag is active — a
-      // manual scrollbar-drag upward scroll inside the window is real intent.
-      // typeof guard keeps the #4295 node harness (no _scrollbarDragActive
-      // injected) inert via short-circuit.
-      // #4970 review (greptile P1): likewise skip suppression when the reader
-      // recently scrolled the pane with the keyboard — a keyboard scroll-up is
-      // real intent that produces a native scroll event with no wheel/touch.
+      // #scroll-settle: absorb the post-render scroll artifact ONLY on positive
+      // identification. renderArtifactEvent was adjudicated at scroll-event time
+      // (_messageRenderArtifactScrollEvent): the event landed inside the render's
+      // own settle frame, the monotonic input generation has not moved since the
+      // render stamp, and no gesture intent is on record. The old 1400ms wall-clock
+      // window also swallowed BARE user scrolls (keyboard with focus outside the
+      // pane, momentum/assistive scrolling — no wheel/touch/key stamp ever reaches
+      // the capture listeners) after EVERY render; during streaming the stamp
+      // refreshes per token, so the reader could not scroll up until page reload.
+      // The typeof fallback keeps body-only extraction harnesses (#4856/#4295) on
+      // the legacy wall-clock semantics.
+      const renderArtifactEvent=(typeof _messageScrollArtifactEventPending!=='undefined')?!!_messageScrollArtifactEventPending:(typeof _recentMessageRenderArtifactWindow==='function'&&_recentMessageRenderArtifactWindow(1400));
       if(movedUp
-        && typeof _recentMessageRenderArtifactWindow==='function'
+        && renderArtifactEvent
         && typeof _recentMessageTouchScrollIntent==='function'
         && typeof _recentNonMessageScrollIntent==='function'
         && typeof _recentMessageWheelIntent==='function'
         && typeof _recentMessageKeyScrollIntent==='function'
         && (typeof _scrollbarDragActive==='undefined' || !_scrollbarDragActive)
-        && _recentMessageRenderArtifactWindow(1400)
         && !_recentMessageTouchScrollIntent()
         && !_recentNonMessageScrollIntent()
         && !_recentMessageWheelIntent()
@@ -17376,6 +17456,7 @@ function _processWakeupCardHtml(info, rawText, extras){
 
 function renderMessages(options){
   _lastMessageRenderAt=performance.now();
+  if(typeof _beginMessageRenderSettlePass==='function') _beginMessageRenderSettlePass();
   const preserveScroll=!!(options&&options.preserveScroll);
   const virtualFallback=!!(options&&options._virtualFallback);
   // Capture the pre-wipe scroll position when preserving OR when the reader has

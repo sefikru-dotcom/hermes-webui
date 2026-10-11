@@ -28,6 +28,7 @@ import urllib.request
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 ROUTES = ROOT / "api" / "routes.py"
+FILES = ROOT / "api" / "route_files.py"
 UI = ROOT / "static" / "ui.js"
 I18N = ROOT / "static" / "i18n.js"
 
@@ -43,18 +44,18 @@ from conftest import TEST_BASE  # noqa: E402
 class TestOpenInVsCodeBackendWiring:
     def test_route_dispatch_entry_present(self):
         """Dispatcher must route /api/file/open-vscode to the handler."""
-        src = ROUTES.read_text(encoding="utf-8")
+        src = FILES.read_text(encoding="utf-8") + chr(10) + ROUTES.read_text(encoding="utf-8")
         assert 'parsed.path == "/api/file/open-vscode"' in src
 
     def test_handler_function_defined(self):
-        src = ROUTES.read_text(encoding="utf-8")
-        assert "def _handle_file_open_vscode(handler, body):" in src
+        src = FILES.read_text(encoding="utf-8") + chr(10) + ROUTES.read_text(encoding="utf-8")
+        assert "def _handle_file_open_vscode(handler, body" in src
 
     def test_handler_uses_safe_resolve(self):
         """Handler must use safe_resolve to prevent path traversal."""
-        src = ROUTES.read_text(encoding="utf-8")
+        src = FILES.read_text(encoding="utf-8") + chr(10) + ROUTES.read_text(encoding="utf-8")
         m = re.search(
-            r"def _handle_file_open_vscode\(handler, body\):.*?(?=\ndef )",
+            r"def _handle_file_open_vscode\(\s*handler,\s*body[^)]*\):.*?(?=\ndef )",
             src,
             re.DOTALL,
         )
@@ -64,9 +65,9 @@ class TestOpenInVsCodeBackendWiring:
 
     def test_handler_checks_existence(self):
         """Handler must require the target to exist (unlike copy-path)."""
-        src = ROUTES.read_text(encoding="utf-8")
+        src = FILES.read_text(encoding="utf-8") + chr(10) + ROUTES.read_text(encoding="utf-8")
         m = re.search(
-            r"def _handle_file_open_vscode\(handler, body\):.*?(?=\ndef )",
+            r"def _handle_file_open_vscode\(\s*handler,\s*body[^)]*\):.*?(?=\ndef )",
             src,
             re.DOTALL,
         )
@@ -76,9 +77,9 @@ class TestOpenInVsCodeBackendWiring:
 
     def test_handler_reads_vscode_config(self):
         """Handler must read the optional ``vscode`` config block."""
-        src = ROUTES.read_text(encoding="utf-8")
+        src = FILES.read_text(encoding="utf-8") + chr(10) + ROUTES.read_text(encoding="utf-8")
         m = re.search(
-            r"def _handle_file_open_vscode\(handler, body\):.*?(?=\ndef )",
+            r"def _handle_file_open_vscode\(\s*handler,\s*body[^)]*\):.*?(?=\ndef )",
             src,
             re.DOTALL,
         )
@@ -88,9 +89,9 @@ class TestOpenInVsCodeBackendWiring:
 
     def test_handler_defaults_to_code_command(self):
         """Default executable must be ``code`` when config is absent."""
-        src = ROUTES.read_text(encoding="utf-8")
+        src = FILES.read_text(encoding="utf-8") + chr(10) + ROUTES.read_text(encoding="utf-8")
         m = re.search(
-            r"def _handle_file_open_vscode\(handler, body\):.*?(?=\ndef )",
+            r"def _handle_file_open_vscode\(\s*handler,\s*body[^)]*\):.*?(?=\ndef )",
             src,
             re.DOTALL,
         )
@@ -101,9 +102,9 @@ class TestOpenInVsCodeBackendWiring:
     def test_handler_supports_path_prefix_mapping(self):
         """Handler must support container_path_prefix / host_path_prefix
         so Docker users can map container paths to host paths."""
-        src = ROUTES.read_text(encoding="utf-8")
+        src = FILES.read_text(encoding="utf-8") + chr(10) + ROUTES.read_text(encoding="utf-8")
         m = re.search(
-            r"def _handle_file_open_vscode\(handler, body\):.*?(?=\ndef )",
+            r"def _handle_file_open_vscode\(\s*handler,\s*body[^)]*\):.*?(?=\ndef )",
             src,
             re.DOTALL,
         )
@@ -115,9 +116,9 @@ class TestOpenInVsCodeBackendWiring:
     def test_handler_uses_subprocess_popen(self):
         """Handler must use subprocess.Popen (async, non-blocking) consistent
         with _handle_file_reveal."""
-        src = ROUTES.read_text(encoding="utf-8")
+        src = FILES.read_text(encoding="utf-8") + chr(10) + ROUTES.read_text(encoding="utf-8")
         m = re.search(
-            r"def _handle_file_open_vscode\(handler, body\):.*?(?=\ndef )",
+            r"def _handle_file_open_vscode\(\s*handler,\s*body[^)]*\):.*?(?=\ndef )",
             src,
             re.DOTALL,
         )
@@ -130,9 +131,9 @@ class TestOpenInVsCodeBackendWiring:
         even when the server's inherited PATH is minimal (e.g. macOS launch
         via start.sh where /usr/local/bin may be absent from the subprocess
         PATH)."""
-        src = ROUTES.read_text(encoding="utf-8")
+        src = FILES.read_text(encoding="utf-8") + chr(10) + ROUTES.read_text(encoding="utf-8")
         m = re.search(
-            r"def _handle_file_open_vscode\(handler, body\):.*?(?=\ndef )",
+            r"def _handle_file_open_vscode\(\s*handler,\s*body[^)]*\):.*?(?=\ndef )",
             src,
             re.DOTALL,
         )
@@ -144,9 +145,9 @@ class TestOpenInVsCodeBackendWiring:
         """Handler must try common VS Code paths when shutil.which fails,
         covering macOS (/usr/local/bin/code), Linux (/snap/bin/code), and
         Windows (%LOCALAPPDATA%\\Programs\\Microsoft VS Code)."""
-        src = ROUTES.read_text(encoding="utf-8")
+        src = FILES.read_text(encoding="utf-8") + chr(10) + ROUTES.read_text(encoding="utf-8")
         m = re.search(
-            r"def _handle_file_open_vscode\(handler, body\):.*?(?=\ndef )",
+            r"def _handle_file_open_vscode\(\s*handler,\s*body[^)]*\):.*?(?=\ndef )",
             src,
             re.DOTALL,
         )
@@ -159,9 +160,9 @@ class TestOpenInVsCodeBackendWiring:
     def test_handler_returns_helpful_error_when_not_found(self):
         """When code command is not found anywhere, handler must return a
         descriptive error instead of a bare OSError message."""
-        src = ROUTES.read_text(encoding="utf-8")
+        src = FILES.read_text(encoding="utf-8") + chr(10) + ROUTES.read_text(encoding="utf-8")
         m = re.search(
-            r"def _handle_file_open_vscode\(handler, body\):.*?(?=\ndef )",
+            r"def _handle_file_open_vscode\(\s*handler,\s*body[^)]*\):.*?(?=\ndef )",
             src,
             re.DOTALL,
         )
