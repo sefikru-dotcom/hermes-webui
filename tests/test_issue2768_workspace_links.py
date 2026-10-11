@@ -95,8 +95,9 @@ def test_workspace_html_iframe_allows_links_to_escape_sandbox():
 
 
 def test_file_raw_inline_html_preview_injects_base_target_blank():
-    raw_handler = ROUTES_PY[ROUTES_PY.index("def _handle_file_raw") :]
+    source = (REPO / "api" / "route_files.py").read_text(encoding="utf-8")
+    raw_handler = source[source.index("def _handle_file_raw") :]
 
-    assert '<base target="_blank">' in ROUTES_PY
+    assert '<base target="_blank">' in (REPO / "api" / "file_response_helpers.py").read_text(encoding="utf-8")
     assert "_serve_inline_html_preview" in raw_handler
     assert "html_inline_ok" in raw_handler

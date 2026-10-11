@@ -5,20 +5,21 @@ elsewhere in the hermes-webui test suite (see tests/test_issue1867_upload_size_p
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-ROUTES_PY = ROOT / "api" / "routes.py"
+ROUTES_PY = ROOT / "api" / "route_files.py"
+DISPATCH_PY = ROOT / "api" / "routes.py"
 UI_JS = ROOT / "static" / "ui.js"
 
 
 def test_folder_download_handler_defined():
     src = ROUTES_PY.read_text(encoding="utf-8")
-    assert "def _handle_folder_download(handler, parsed):" in src
+    assert "def _handle_folder_download(" in src
     assert "/api/folder/download?session_id=" in src  # in handler docstring
     assert 'Content-Type", "application/zip"' in src
     assert "zipfile.ZipFile(handler.wfile" in src
 
 
 def test_folder_download_dispatch_registered():
-    src = ROUTES_PY.read_text(encoding="utf-8")
+    src = DISPATCH_PY.read_text(encoding="utf-8")
     assert 'parsed.path == "/api/folder/download"' in src
     assert "_handle_folder_download(handler, parsed)" in src
 

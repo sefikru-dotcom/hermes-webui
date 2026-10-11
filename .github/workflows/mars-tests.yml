@@ -1,0 +1,27 @@
+name: Mars regression gate
+
+on:
+  push:
+    branches: [mars-custom, 'mars-*']
+  pull_request:
+    branches: [mars-custom, 'mars-*']
+  workflow_dispatch:
+
+jobs:
+  mars:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Run Mars gate
+        env:
+          HERMES_WEBUI_TEST_PYTHON: python
+        run: bash scripts/mars-test.sh

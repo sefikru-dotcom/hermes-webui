@@ -560,6 +560,14 @@ For the deep dive on each of these, see [`docs/docker.md`](docs/docker.md).
 
 ---
 
+## Mars verification scope
+
+`bash scripts/mars-test.sh` is the mandatory regression gate for the current Mars structural slice, anchor persistence/hydration, workspace Git, media and authentication. Its exact file list lives in `scripts/mars-test-files.txt`.
+It prepares the repository Python 3.11–3.13 venv through `scripts/test.sh`, runs syntax/diff/lint checks and executes every test in the manifest without failure exclusions. Use `HERMES_WEBUI_TEST_PYTHON` to select a supported interpreter.
+The `Mars regression gate` workflow exercises Python 3.11, 3.12 and 3.13 on Mars branches.
+
+`bash scripts/test.sh` remains the full diagnostic suite. Tests outside the Mars manifest are **unclassified**, not automatically obsolete or upstream-only. A full-suite failure requires inspection or baseline comparison before exclusion; a green scoped gate is not certification of every Mars feature. Extend the manifest when changing another domain; never remove tests merely to make the gate green. Existing optional-dependency skips must be reported.
+
 ## Running tests
 
 Tests discover the repo and the Hermes agent dynamically -- no hardcoded paths.
