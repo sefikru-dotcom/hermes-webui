@@ -16998,6 +16998,254 @@ _COMPRESSIBLE_MIME = {
 _STATIC_CACHE: dict = {}
 _STATIC_CACHE_LOCK = threading.Lock()
 
+# ── i18n bundle splitting (first-load weight) ──────────────────────────────
+# static/i18n.js carries every locale inline (~1.75 MB raw / ~490 KB gzip).
+# Tests and tools parse the on-disk file directly, so it stays untouched; the
+# split happens at serve time:
+#   * /static/i18n.js        → reduced core: en (t() fallback) and ru (primary
+#                              UI language) stay synchronous; every other
+#                              locale becomes a metadata stub
+#                              { _lang, _label, _speech, __lazy_stub: true }
+#                              so the language picker (panels.js) and
+#                              resolveLocale() keep working pre-chunk.
+#   * /static/locales/<c>.js → generated chunk calling
+#                              __hermesRegisterLocale(<c>, {…}) with the
+#                              verbatim original table. i18n.js's
+#                              ensureLocale() injects it on demand (selected
+#                              locale at boot/switch, or idle prefetch by
+#                              navigator.language).
+# Chunks inherit i18n.js's ?v= fingerprint from the client side, so the
+# versioned-asset rule below gives them immutable caching too. The transform
+# is cached by the source file's (size, mtime_ns) and FAILS OPEN: any parse
+# error serves the original full bundle (its loader section degrades to a
+# no-op when no stubs exist) and 404s chunk requests, so a bad split can
+# never break localization.
+_I18N_LAZY_LOCALES = frozenset({
+    "it", "ja", "es", "de", "zh", "zh-Hant", "pt", "ko",
+    "fr", "cs", "tr", "pl", "vi",
+})
+_I18N_CORE_LOCALES = ("en", "ru")
+_I18N_META_KEYS = ("_lang", "_label", "_speech")
+_I18N_META_VALUE_RE = r"(?:\'(?:\\.|[^\'\\])*\'|\"(?:\\.|[^\\\"])*\")"
+_I18N_SPLIT_LOCK = threading.Lock()
+_I18N_SPLIT_CACHE: dict = {}  # {"sig": (size, mtime_ns), "assets": {rel: bytes}}
+
+
+def _i18n_skip_token(src: str, i: int) -> int:
+    """Advance past one string/template/comment token starting at src[i]."""
+    n = len(src)
+    ch = src[i]
+    if ch == "/" and i + 1 < n and src[i + 1] == "/":
+        nl = src.find("\n", i)
+        # Stop AT the newline (not past it) so callers that key off "\n"
+        # (top-level locale-line detection) still see the line boundary when
+        # a comment line precedes an entry like `  'zh-Hant': {`.
+        return n if nl < 0 else nl
+    if ch == "/" and i + 1 < n and src[i + 1] == "*":
+        end = src.find("*/", i + 2)
+        return n if end < 0 else end + 2
+    # Quoted string or template literal. Flat scan — the same simplification
+    # the repo's own i18n parsing tests use; LOCALES contains no nested
+    # templates or regex literals at token level.
+    quote = ch
+    i += 1
+    while i < n and src[i] != quote:
+        i += 2 if src[i] == "\\" else 1
+    return i + 1
+
+
+def _i18n_skip_object(src: str, i: int) -> int:
+    """Given src[i] == '{', return the index just past its matching '}'."""
+    n = len(src)
+    depth = 0
+    while i < n:
+        ch = src[i]
+        if ch in ("'", '"', "`") or (ch == "/" and i + 1 < n and src[i + 1] in ("/*")):
+            i = _i18n_skip_token(src, i)
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return i + 1
+        i += 1
+    raise ValueError("unbalanced object literal in LOCALES")
+
+
+def _i18n_scan_locale_entries(src: str) -> dict:
+    """Map each top-level LOCALES key to (entry_start, lit_start, lit_end).
+
+    entry_start: offset of the two-space-indented ``key:`` line start.
+    lit_start / lit_end: offset of the object literal's ``{`` and one past
+    its matching ``}``. Mirrors the parsing rules used by
+    tests/test_login_locale_parity.py (line/block comments, quoted strings,
+    template literals), so both parsers agree on this file's structure.
+    """
+    m = re.search(r"const\s+LOCALES\s*=\s*\{", src)
+    if not m:
+        raise ValueError("const LOCALES not found in i18n.js")
+    i = m.end()
+    n = len(src)
+    entries: dict = {}
+    key_re = re.compile(
+        r"  (?:\'(?P<q>[A-Za-z][A-Za-z0-9_-]*)\'|(?P<u>[A-Za-z][A-Za-z0-9_]*))[ \t]*:[ \t]*\{"
+    )
+    while i < n:
+        ch = src[i]
+        if ch in ("'", '"', "`") or (ch == "/" and i + 1 < n and src[i + 1] in ("/*")):
+            i = _i18n_skip_token(src, i)
+            continue
+        if ch == "}":
+            break  # closing brace of LOCALES itself — top level reached end
+        if ch == "\n":
+            km = key_re.match(src, i + 1)
+            if km:
+                code = km.group("q") or km.group("u")
+                lit_start = km.end() - 1
+                lit_end = _i18n_skip_object(src, lit_start)
+                entries[code] = (i + 1, lit_start, lit_end)
+                i = lit_end
+                continue
+        i += 1
+    return entries
+
+
+def _i18n_build_split(raw: bytes) -> dict:
+    """Split on-disk i18n.js bytes into {rel_path: served_bytes}.
+
+    Returns the reduced core under "i18n.js" plus one "locales/<code>.js"
+    chunk per lazy locale. Raises ValueError on any structural surprise —
+    the caller fails open to the untouched full bundle.
+    """
+    src_text = raw.decode("utf-8")
+    entries = _i18n_scan_locale_entries(src_text)
+    missing = sorted(_I18N_LAZY_LOCALES - entries.keys())
+    if missing:
+        raise ValueError(f"lazy locales missing from LOCALES: {missing}")
+    for core_code in _I18N_CORE_LOCALES:
+        if core_code not in entries:
+            raise ValueError(f"core locale {core_code!r} missing from LOCALES")
+
+    assets: dict = {}
+    pieces: list = []
+    last = 0
+    lazy_sorted = sorted(_I18N_LAZY_LOCALES, key=lambda c: entries[c][0])
+    for code in lazy_sorted:
+        entry_start, lit_start, lit_end = entries[code]
+        literal = src_text[lit_start:lit_end]
+        meta_parts = []
+        for mk in _I18N_META_KEYS:
+            mm = re.search(rf"\b{mk}:\s*({_I18N_META_VALUE_RE})", literal)
+            if not mm:
+                raise ValueError(f"locale {code!r}: metadata key {mk} not found")
+            meta_parts.append(f"{mk}: {mm.group(1)}")
+        stub = src_text[entry_start:lit_start] + "{ " + ", ".join(meta_parts) + ", __lazy_stub: true }"
+        pieces.append(src_text[last:entry_start])
+        pieces.append(stub)
+        last = lit_end
+        chunk = (
+            "// Generated at serve time from static/i18n.js by api/routes.py\n"
+            "// (_i18n_build_split). Lazy locale chunk — do not create or edit\n"
+            "// this file by hand; edit static/i18n.js instead.\n"
+            f"__hermesRegisterLocale({json.dumps(code)}, {literal});\n"
+        )
+        assets[f"locales/{code}.js"] = chunk.encode("utf-8")
+    pieces.append(src_text[last:])
+    core_bytes = "".join(pieces).encode("utf-8")
+    assets["i18n.js"] = core_bytes
+
+    # Sanity gates — a failed split must raise so the caller can fail open.
+    core_text = core_bytes.decode("utf-8")
+    for code in lazy_sorted:
+        esc = re.escape(code)
+        pat = rf"(?:^|\n)  (?:\'{esc}\'|{esc})[ \t]*:[ \t]*\{{[^}}\n]*__lazy_stub: true \}}"
+        if not re.search(pat, core_text):
+            raise ValueError(f"stub for locale {code!r} missing from split core")
+    if len(core_bytes) * 10 >= len(raw) * 6:
+        raise ValueError("split core unexpectedly large; refusing to serve it")
+    return assets
+
+
+def _i18n_split_assets(sig: tuple, static_root) -> dict:
+    """Return {rel: bytes} split assets for the given source-file signature.
+
+    Cached per (size, mtime_ns) of static/i18n.js; a redeploy invalidates
+    without a process restart, mirroring _STATIC_CACHE semantics.
+    """
+    with _I18N_SPLIT_LOCK:
+        if _I18N_SPLIT_CACHE.get("sig") == sig and "assets" in _I18N_SPLIT_CACHE:
+            return _I18N_SPLIT_CACHE["assets"]
+    raw = (static_root / "i18n.js").read_bytes()
+    assets = _i18n_build_split(raw)
+    with _I18N_SPLIT_LOCK:
+        _I18N_SPLIT_CACHE["sig"] = sig
+        _I18N_SPLIT_CACHE["assets"] = assets
+    return assets
+
+
+def _install_head_support() -> None:
+    """Give HEAD real semantics without touching server.py.
+
+    http.server answers 501 to any method lacking a do_<METHOD> on the
+    handler class, and server.py's Handler only defines GET/POST/PUT/PATCH/
+    DELETE/OPTIONS — so HEAD /static/... used to fail with "501 Unsupported
+    method". Handler lives in server.py (outside this change's scope), so the
+    missing verb is provided by patching the stdlib base class ONCE, guarded:
+    * only when nothing defines do_HEAD yet — if server.py ever grows its own,
+      the subclass attribute wins in the MRO and this stays inert;
+    * the body is dropped only AFTER the real headers were flushed, so HEAD
+      responses carry byte-identical headers to GET (Content-Type,
+      Content-Length, ETag, Cache-Control, 304 short-circuit) and an empty
+      body, per RFC 9110.
+    """
+    from http.server import BaseHTTPRequestHandler
+
+    if hasattr(BaseHTTPRequestHandler, "do_HEAD"):
+        return
+
+    class _BodyDrop:
+        """Swallow post-header writes; return len() so callers stay consistent."""
+
+        __slots__ = ()
+
+        def write(self, data):
+            return len(data)
+
+        def flush(self):
+            pass
+
+        def drain(self):
+            pass
+
+    def do_HEAD(self):
+        do_GET = getattr(self, "do_GET", None)
+        if do_GET is None:  # not our Handler — keep stdlib behavior
+            self.send_error(501, "Unsupported method (%r)" % self.command)
+            return
+        real_wfile = self.wfile
+        real_flush = self.flush_headers
+        drop = _BodyDrop()
+
+        def flush_headers_then_drop():
+            real_flush()          # real header bytes go out on the real wfile
+            self.wfile = drop     # every later (body) write vanishes
+
+        self.flush_headers = flush_headers_then_drop
+        try:
+            do_GET()
+        finally:
+            self.wfile = real_wfile
+            try:
+                del self.flush_headers  # drop the instance-level override
+            except AttributeError:
+                pass
+
+    BaseHTTPRequestHandler.do_HEAD = do_HEAD
+
+
+_install_head_support()
+
 
 def _serve_static(handler, parsed):
     static_root = api_config.get_static_root().resolve()
@@ -17008,9 +17256,39 @@ def _serve_static(handler, parsed):
         static_file.relative_to(static_root)
     except ValueError:
         return j(handler, {"error": "not found"}, status=404)
-    if not static_file.exists() or not static_file.is_file():
+    # Generated i18n split assets (see _i18n_build_split): the reduced core
+    # replaces the on-disk i18n.js on the wire, and virtual locales/<code>.js
+    # chunks have no on-disk counterpart at all.
+    gen_raw = None
+    gen_sig = None
+    if rel == "i18n.js" or (
+        rel.startswith("locales/")
+        and rel.endswith(".js")
+        and rel[len("locales/"):-len(".js")] in _I18N_LAZY_LOCALES
+    ):
+        try:
+            src_stat = (static_root / "i18n.js").stat()
+            gen_sig = (src_stat.st_size, src_stat.st_mtime_ns)
+            gen_raw = _i18n_split_assets(gen_sig, static_root).get(rel)
+        except Exception:
+            logger.warning(
+                "i18n bundle split failed; falling back to the full bundle",
+                exc_info=True,
+            )
+            gen_raw = None
+            gen_sig = None
+        if gen_raw is None:
+            if rel.startswith("locales/"):
+                # Chunk asked for but the split is broken — the client loader
+                # keeps its English fallbacks (fail-open); nothing to serve.
+                return j(handler, {"error": "not found"}, status=404)
+            # rel == "i18n.js": fall through to the untouched on-disk file —
+            # the full bundle's loader section is a no-op, so behavior equals
+            # the pre-split status quo.
+
+    if gen_raw is None and (not static_file.exists() or not static_file.is_file()):
         return j(handler, {"error": "not found"}, status=404)
-    ext = static_file.suffix.lower()
+    ext = ".js" if gen_raw is not None else static_file.suffix.lower()
     ct = _STATIC_MIME.get(ext.lstrip("."))
     if ct is None:
         guessed_type, content_encoding = mimetypes.guess_type(static_file.name)
@@ -17021,19 +17299,30 @@ def _serve_static(handler, parsed):
     ct_header = f"{ct}; charset=utf-8" if ct in _TEXT_MIME_TYPES else ct
 
     # Look up or populate the per-file cache (raw, optional gzip, ETag).
-    # Keyed by absolute path; invalidated by (size, nanosecond mtime).
-    st = static_file.stat()
-    sig = (st.st_size, st.st_mtime_ns)
-    cache_key = str(static_file)
+    # Keyed by absolute path — or a "gen|" virtual key for split i18n assets;
+    # both invalidate on (size, nanosecond mtime) of the served source file.
+    if gen_raw is not None:
+        sig = gen_sig  # signature of static/i18n.js the split derives from
+        cache_key = f"gen|{rel}"
+    else:
+        st = static_file.stat()
+        sig = (st.st_size, st.st_mtime_ns)
+        cache_key = str(static_file)
     raw = gz = etag = None
     with _STATIC_CACHE_LOCK:
         cached = _STATIC_CACHE.get(cache_key)
         if cached and cached[0] == sig:
             _, raw, gz, etag = cached
     if raw is None:
-        raw = static_file.read_bytes()
-        # Weak ETag: equality semantics, derived from filesystem identity.
-        etag = f'W/"{sig[0]:x}-{sig[1]:x}"'
+        if gen_raw is not None:
+            raw = gen_raw
+            # Weak ETag from the generated content itself: deterministic per
+            # split result, changes whenever the source i18n.js changes.
+            etag = f'W/"gen-{hashlib.sha1(raw).hexdigest()[:16]}"'
+        else:
+            raw = static_file.read_bytes()
+            # Weak ETag: equality semantics, derived from filesystem identity.
+            etag = f'W/"{sig[0]:x}-{sig[1]:x}"'
         gz = (gzip.compress(raw, compresslevel=6)
               if ct in _COMPRESSIBLE_MIME and len(raw) > 1024
               else None)
