@@ -63,6 +63,35 @@ PUBLIC_PATHS = frozenset({
     '/session/manifest.json', '/session/manifest.webmanifest',
 })
 
+# ── Native Bearer fast-path: exact API paths ──────────────────────────────
+# Routes the native Android client answers with its device Bearer credential
+# instead of a browser session cookie.  These are the exact dispatch paths
+# verified against api/routes.py (cron list/run/pause/resume, memory and
+# skills reads, workspace list, reasoning get/set, approval/clarify
+# pending+respond, projects list).  Exact matches only — no prefixes, no
+# PUBLIC_PATHS entry (authentication is still required on every route here),
+# so mutating siblings (/api/crons/{create,update,delete},
+# /api/skills/{save,delete,toggle}, /api/memory/write, /api/projects/*,
+# /api/workspaces/{add,remove,rename,reorder}, /api/workspaces/suggest) and
+# the SSE ``stream`` / loopback-only ``inject_test`` routes stay on the
+# browser-cookie path.
+NATIVE_BEARER_EXACT_PATHS = frozenset({
+    '/api/approval/pending',
+    '/api/approval/respond',
+    '/api/clarify/pending',
+    '/api/clarify/respond',
+    '/api/crons',
+    '/api/crons/pause',
+    '/api/crons/resume',
+    '/api/crons/run',
+    '/api/memory',
+    '/api/projects',
+    '/api/reasoning',
+    '/api/skills',
+    '/api/skills/content',
+    '/api/workspaces',
+})
+
 COOKIE_NAME = 'hermes_session'
 CSRF_HEADER_NAME = 'X-Hermes-CSRF-Token'
 
@@ -1125,11 +1154,19 @@ def check_auth(handler, parsed) -> bool:
         from api.device_pairings import verify_native_credential, extract_bearer
         credential = extract_bearer(handler.headers.get_all('Authorization', []))
         return bool(credential and verify_native_credential(credential))
-    # Native clients authenticate API requests with a Bearer
-    # credential instead of a browser session cookie. If an Authorization
-    # header is present, fail closed rather than falling back
-    # to a cookie (prevents an invalid native token from masking auth errors).
-    if parsed.path.startswith(('/api/chat', '/api/sessions', '/api/session', '/api/models', '/api/upload', '/api/profiles')):
+    # Native clients authenticate API requests with a Bearer credential
+    # instead of a browser session cookie.  Two disjoint sets are covered:
+    #   * the broad Mars client prefixes below, and
+    #   * NATIVE_BEARER_EXACT_PATHS — the exact dispatch routes the native
+    #     Android client answers with its device Bearer (crons, memory,
+    #     skills, workspaces, reasoning, approval, clarify, projects).
+    # On a covered route, fail closed when an Authorization header is
+    # present rather than falling back to a cookie (prevents an invalid
+    # native token from masking auth errors).
+    if (
+        parsed.path.startswith(('/api/chat', '/api/sessions', '/api/session', '/api/models', '/api/upload', '/api/profiles'))
+        or parsed.path in NATIVE_BEARER_EXACT_PATHS
+    ):
         from api.device_pairings import extract_bearer, verify_native_credential
         authorization = handler.headers.get_all('Authorization', [])
         if authorization:
