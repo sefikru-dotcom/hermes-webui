@@ -26167,6 +26167,101 @@ const LOCALES = {
 
 };
 
+// ── Lazy locale chunks (split-bundle support) ─────────────────────────────
+// static/i18n.js ships on disk with every locale inline (tests and tools parse
+// that file directly), but the server can SERVE a reduced "core" bundle:
+// api/routes.py (_i18n_build_split) replaces each non-core locale table with a
+// small metadata stub ({ _lang, _label, _speech, __lazy_stub: true }) and
+// generates the removed tables as /static/locales/<code>.js chunks, which the
+// loader below pulls in on demand (same ?v= fingerprint → immutable caching).
+// Core locales (en — the t() fallback, and ru — the primary UI language) always
+// stay in the synchronous bundle.
+// When this file is loaded in its FULL on-disk form (tests, node, direct file
+// access, or the server's fail-open path), no stubs exist and everything below
+// degrades to a no-op: ensureLocale() resolves immediately because the real
+// table is already in place. Language-picker metadata (_label etc.) is present
+// in both forms, so panels.js keeps listing every language either way.
+const LAZY_LOCALE_CODES = ['it', 'ja', 'es', 'de', 'zh', 'zh-Hant', 'pt', 'ko', 'fr', 'cs', 'tr', 'pl', 'vi'];
+const _localeChunkLoads = Object.create(null);
+
+/** True when LOCALES[code] is a serve-time metadata stub awaiting its chunk. */
+function _localeIsStub(code) {
+  return !!(LOCALES[code] && LOCALES[code].__lazy_stub);
+}
+
+/**
+ * Called by generated locale chunk scripts (static/locales/<code>.js).
+ * Merges the string table into the existing stub IN PLACE, so any live
+ * references (including the active `_locale`) see translations immediately.
+ * @param {string} code - locale key, must be in LAZY_LOCALE_CODES
+ * @param {Object} table - the locale's full string table
+ */
+function __hermesRegisterLocale(code, table) {
+  if (LAZY_LOCALE_CODES.indexOf(code) === -1 || !table) return;
+  const target = LOCALES[code];
+  if (!target) {
+    LOCALES[code] = table;
+  } else {
+    for (const k in table) {
+      if (Object.prototype.hasOwnProperty.call(table, k)) target[k] = table[k];
+    }
+  }
+  delete LOCALES[code].__lazy_stub;
+}
+
+/**
+ * Build the chunk URL from this script's own src so the mount path (e.g.
+ * /session/static/) and the ?v= version fingerprint carry over verbatim —
+ * versioned chunk URLs get immutable caching from the server.
+ * @param {string} code - whitelisted locale code (no user input reaches here)
+ * @returns {string}
+ */
+function _i18nChunkSrc(code) {
+  let base = 'static/';
+  let verQ = '';
+  try {
+    const scripts = document.querySelectorAll('script[src]');
+    for (let i = 0; i < scripts.length; i++) {
+      const abs = scripts[i].src || '';
+      const m = abs.match(/^(.*\/)i18n\.js(\?.*)?$/);
+      if (m) { base = m[1]; verQ = m[2] || ''; break; }
+    }
+  } catch (_) {}
+  return base + 'locales/' + code + '.js' + verQ;
+}
+
+/**
+ * Ensure the string table for `lang` is available. Resolves true when the
+ * locale data is in place (full bundle, already-merged chunk, or sync core
+ * locale), false when the code is unknown or the chunk failed to load — the
+ * UI then keeps its English fallbacks and a later retry is possible.
+ * Concurrent calls for the same code share one in-flight load.
+ * @param {string} lang - any tag resolveLocale() understands
+ * @returns {Promise<boolean>}
+ */
+function ensureLocale(lang) {
+  const code = resolveLocale(lang);
+  if (!code) return Promise.resolve(false);
+  if (!_localeIsStub(code)) return Promise.resolve(true);
+  if (_localeChunkLoads[code]) return _localeChunkLoads[code];
+  _localeChunkLoads[code] = new Promise((resolve) => {
+    let settled = false;
+    const finish = (ok) => { if (!settled) { settled = true; resolve(ok); } };
+    try {
+      const sc = document.createElement('script');
+      sc.src = _i18nChunkSrc(code);
+      sc.async = true;
+      sc.onload = () => finish(!_localeIsStub(code));
+      sc.onerror = () => { delete _localeChunkLoads[code]; finish(false); };
+      (document.head || document.documentElement).appendChild(sc);
+    } catch (_) {
+      delete _localeChunkLoads[code];
+      finish(false);
+    }
+  });
+  return _localeChunkLoads[code];
+}
+
 const _I18N_TOOL_ACTION_TEXT_EN = {
     shell: { running: 'Running', done: 'Ran', fail: 'run', fallback: 'a command' },
     read: { running: 'Reading', done: 'Read', fail: 'read', fallback: 'a file' },
@@ -26557,6 +26652,20 @@ function setLocale(lang) {
   _locale = LOCALES[resolved];
   try { localStorage.setItem('hermes-lang', resolved); } catch (_) {}
   document.documentElement.lang = _locale._speech || resolved;
+  // Split-bundle path: the served core may carry this locale as a metadata
+  // stub only — pull its chunk and re-stamp the UI once the table lands.
+  // Until then t() falls back to English per key. On the full on-disk bundle
+  // this is a no-op (ensureLocale resolves immediately, no network).
+  if (_localeIsStub(resolved)) {
+    const wanted = _locale;
+    ensureLocale(resolved).then((ok) => {
+      // A newer setLocale() may have switched languages mid-flight — bail out
+      // instead of re-stamping the DOM with a locale the user already left.
+      if (!ok || _locale !== wanted) return;
+      document.documentElement.lang = _locale._speech || resolved;
+      if (typeof applyLocaleToDOM === 'function') applyLocaleToDOM();
+    }).catch(() => {});
+  }
 }
 
 /**
@@ -26611,3 +26720,19 @@ function applyLocaleToDOM() {
 
 // Apply saved locale immediately so there's no flash of English on reload.
 loadLocale();
+
+// Split bundle only: idle-prefetch the chunk matching the browser language so a
+// later switch to it is instant. navigator.language resolving to a sync core
+// locale (ru/en) or to nothing costs zero bytes — the common case for Mars's
+// owner (ru-RU) never triggers a fetch. Deduped with setLocale()'s load via
+// _localeChunkLoads. No-op on the full on-disk bundle (no stubs).
+(function _prefetchNavigatorLocaleChunk() {
+  try {
+    if (typeof navigator === 'undefined' || !navigator.language) return;
+    const code = resolveLocale(navigator.language);
+    if (!code || !_localeIsStub(code)) return;
+    const kick = () => { ensureLocale(code); };
+    if (typeof requestIdleCallback === 'function') requestIdleCallback(kick, { timeout: 5000 });
+    else setTimeout(kick, 2000);
+  } catch (_) {}
+})();
