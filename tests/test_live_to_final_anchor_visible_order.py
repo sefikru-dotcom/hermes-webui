@@ -13,6 +13,7 @@ MESSAGES_JS = (ROOT / "static" / "messages.js").read_text(encoding="utf-8")
 UI_JS = (ROOT / "static" / "ui.js").read_text(encoding="utf-8")
 SESSIONS_JS = (ROOT / "static" / "sessions.js").read_text(encoding="utf-8")
 ROUTES_PY = (ROOT / "api" / "routes.py").read_text(encoding="utf-8")
+ANCHOR_SCENE_PY = (ROOT / "api" / "anchor_activity_scene.py").read_text(encoding="utf-8")
 STYLE_CSS = (ROOT / "static" / "style.css").read_text(encoding="utf-8")
 I18N_JS = (ROOT / "static" / "i18n.js").read_text(encoding="utf-8")
 NODE = shutil.which("node")
@@ -776,8 +777,8 @@ def test_settled_scene_keeps_user_visible_lifecycle_and_control_rows():
     node = _function_body(UI_JS, "_anchorSceneNodeForRow")
 
     assert "return 'lifecycle:compression';" in rows
-    assert 'return "lifecycle:compression"' in ROUTES_PY
-    assert 'if key == "lifecycle:compression":' in ROUTES_PY
+    assert 'return "lifecycle:compression"' in ANCHOR_SCENE_PY
+    assert 'if key == "lifecycle:compression":' in ANCHOR_SCENE_PY
     assert "return out.slice().sort" not in rows
     assert "source==='compressing'||source==='compressed'" in rows
     assert "(weight(a)-weight(b))" not in rows

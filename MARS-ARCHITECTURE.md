@@ -128,16 +128,20 @@ time; state-db resolution remains runtime-patchable through api.models. The
 payload contract is unchanged. Focused insights/cache/parameter-validation
 tests passed 28/28.
 
-## Next candidates
+## Refactoring rules and remaining boundaries
 
-1. Extract further narrow helpers from `api/routes.py` (~28.2k lines) one
-   limited diff at a time, without changing endpoints or payloads. Leave HTTP
-   handlers and monkeypatch targets (functions patched as
-   `api.routes.<name>`) in `routes.py`; inject them into extracted builders at
-   call time when needed.
-2. Separate reasoning/anchor-scene rendering from `static/messages.js` only after
-   current mobile and streaming tests are mapped.
-3. Treat profiles and streaming lifecycle as late refactor targets.
+- `api/routes.py` remains the entry dispatcher and compatibility facade. New
+  implementations own one domain, not a copied route namespace.
+- Inject route-owned functions, policy constants, caches, and locks explicitly at
+  call time. Do not synchronize module globals or capture active-profile values at
+  import time. Existing `api.routes.<name>` monkeypatch seams remain supported.
+- Preserve state ownership: moving a function must not duplicate its cache or
+  lock, reset a limiter, or change where the active profile is resolved.
+- Source-location checks must follow the actual implementation or become behavior
+  tests; do not add placeholder source markers to make a check pass.
+- Profiles, streaming lifecycle, session hydration, and anchor-scene reconciliation
+  remain later refactor targets. Do not combine structural extraction with runtime
+  cleanup or upstream merges.
 
 ## Fifth structural slice
 
@@ -196,3 +200,136 @@ shipped Mars UI: Edge is the settings-panel TTS fallback; reasoning labels are
 `Off` and `Dynamic` rather than inherited `None` and `Default`. The reasoning
 label test executes the actual formatter, including aliases, instead of matching
 source strings. No product defaults or labels were changed by this release.
+
+## Wiki discovery and status domain — 2026-10-04
+
+`api/route_wiki_helpers.py` owns Wiki location discovery, environment/config
+precedence, bounded filesystem walks, cached page allowlists, inode-checked status
+files, last-writer detection, and the private-safe status payload. The existing
+`api/route_wiki.py` owns read-only HTTP browse/page dispatch.
+
+`api/routes.py` preserves helper names and passes current policy constants,
+scanner callbacks, and the route-owned allowlist cache/lock on every call. TTL
+changes, active-profile changes, and test substitutions continue to take effect.
+All 16 original helper bodies remain AST-equivalent. Tests now execute the walk
+limit and forbidden-root guards instead of depending on their location in a
+monolithic source file. Four additional compatibility tests cover resolver
+precedence, cache ownership/current scanners, status dependencies, and allowlists.
+
+## Memory and project context domain — 2026-10-04
+
+`api/route_memory.py` owns profile memory read/write and project context discovery,
+frontmatter removal, source priority, shadowed-file metadata, and context limits.
+It does not own profile switching or session lifecycle. Active profile lookup
+remains lazy; request-time configuration snapshots, trusted workspace resolution,
+redaction, and response helpers come through the existing route facades.
+
+All seven original function bodies remain AST-equivalent. Four additional tests
+cover profile changes between calls, changed configuration permissions, trusted
+workspace resolution, and current context scanner/limit callbacks. Existing tests
+retain symlink-write protection, read-only errors, secret redaction, non-git walk
+boundaries, and cross-profile configuration isolation.
+
+## Domain navigation
+
+| Work area | Implementation | Stable entry surface |
+|---|---|---|
+| Wiki location, scans, cache, status | `api/route_wiki_helpers.py` | `api.routes._llm_wiki_*`, `_build_llm_wiki_status` |
+| Wiki browse/page HTTP | `api/route_wiki.py` | `api.routes.handle_get`, `api/route_readonly.py` |
+| Memory read/write and project context | `api/route_memory.py` | `api.routes._handle_memory_*`, `_project_context_*` |
+| Speech synthesis | `api/route_tts.py` | `api.routes._handle_tts` |
+
+## Workspace Git domain — 2026-10-04
+
+`api/route_git.py` owns all 21 workspace Git route helpers and handlers, including
+session/workspace lookup, destructive-action and active-stream guards, Git error
+sanitization, stage/unstage/discard/commit/checkout/remote requests, and LLM commit
+message generation. `api/workspace_git.py` remains the lower-level Git engine.
+HTTP dispatch and route-level monkeypatch names remain in `api/routes.py`.
+The active-stream lookup and Agent runtime check retain their original lazy
+imports. No Git subprocess semantics, permissions, or payloads changed.
+
+All 21 original function bodies are AST-equivalent; 98 original Git and workspace
+panel tests pass, plus four new call-time seam tests. Agent-runtime tests still
+exercise both commit-message routes; inherited English restart-text assertions
+fail against Mars's already shipped Russian diagnostics before and after this
+refactor, and were not weakened.
+
+## Skills domain — 2026-10-04
+
+`api/route_skills.py` owns all 20 helpers for profile-scoped skills discovery,
+category resolution, disabled-state normalization, lookup, views/linked files,
+save/delete/toggle, and names-list normalization. Agent skill-utils imports remain
+lazy. `_skill_path_within` is re-exported with function identity preserved for
+Wiki callers. Config path, loaders, reload callback, config lock and stats cache
+remain current at call time through the route facade.
+
+All 20 original bodies are AST-equivalent. Additional tests cover per-call
+profile config, bounded missing-skill listings, the route-owned lock/cache and
+reload outside the lock, and containment function identity. Agent-dependent tests
+are reported as skipped where the isolated test runner cannot discover the Agent.
+
+## Files and anchored responses — 2026-10-04
+
+`api/route_files.py` owns 27 file/folder/escape-access and workspace registration
+helpers/handlers. It covers directory listing, escape authorization, file reads
+and mutations, office saves, ZIP collection/download, path/reveal/VS Code actions,
+and workspace add/remove/rename/reorder. It does not own session creation,
+profile switching, media-access policy, TTS, or the HTTP method dispatchers.
+
+`api/file_response_helpers.py` owns eight lower-level file response helpers:
+anchored FD opening/closure, immutable ETag snapshots, byte/range responses,
+HTML base-target injection/preview, and bounded anchored reads. Existing caps,
+MIME policy, sanitization, CSRF and anchored filesystem functions come through
+call-time facade dependencies; no duplicate caches/locks or namespace copying.
+
+All 35 original bodies are AST-equivalent. Existing security/source audits now
+inspect the real modules while route-registration checks stay on `api/routes.py`.
+Five new behavior tests cover anchored saves, raw-route resolver/sender seams,
+current ETag cap/digest, workspace storage callbacks, and ZIP limits/symlink escape
+exclusion. The focused files/Git/skills seam gate passes 329 tests.
+
+## Twelfth structural slice — anchor activity scenes
+
+api/anchor_activity_scene.py now owns anchor-activity scene normalization, message/content
+row projection, tool-row matching/merging, live-row settlement, and persisted-scene hydration.
+The HTTP persistence handler, session materialization, profile visibility guard, and message-ref
+facade remain in api/routes.py; the facade injects the route-owned message-ref callback at
+call time. This keeps scene behavior isolated without moving session lifecycle or security policy.
+
+The scene module preserves the existing payload and row contracts. Its policy limits and digest
+implementation are local to the domain; no caches, profile state, or namespace copies are
+created at import time.
+
+The 2026-10-04 combined structural pass moves 99 original functions into six
+cohesive implementation modules. `api/routes.py` shrinks from 28,174 to 26,260
+lines (1,914 fewer; about 6.8%). Compatible wrappers intentionally remain: callers
+and monkeypatch tests do not need to migrate at the same time as implementations.
+The result is navigable domain boundaries, not a performance or memory-use claim.
+
+Additional domain entry points:
+
+| Work area | Implementation | Stable entry surface |
+|---|---|---|
+| Workspace Git | `api/route_git.py` | `api.routes._git_*`, `_handle_git_*` |
+| Skills discovery/views/mutations | `api/route_skills.py` | Existing skill helper/handler names in `api.routes` |
+| File/folder/escape/workspace operations | `api/route_files.py` | Existing file/workspace handler names in `api.routes` |
+| Anchored reads, ETag/ranges, HTML preview | `api/file_response_helpers.py` | Existing file response helper names in `api.routes` |
+
+## Combined verification — 2026-10-04
+
+Detailed scope, cleanup and the exact original failure list:
+`MARS-RESTRUCTURE-20261004.md`.
+
+The large comparison covered 3,248 final tests: 3,116 passed, 74 failed and 58
+skipped. The same 74 node IDs fail on baseline `8fdcebfc` (3,100 passed, 74 failed,
+58 skipped). There are zero new failure node IDs after source-audit adaptation.
+A separate gate deselecting only those 74 confirmed original failures reports
+3,116 passed, 58 skipped, 74 deselected. AST equivalence covers all 99 moved
+functions; legacy facade signatures/exports and zero `static/` changes were also
+verified. All six new modules and five new test modules pass Ruff; the diff-scoped
+gate reports zero new violations.
+
+Changes are committed on `mars-restructure-20261004`; production remains on
+`8fdcebfc` without a restart or deploy. Worker scratch worktrees and session
+artifacts were removed; existing runtime data/backups were not touched.

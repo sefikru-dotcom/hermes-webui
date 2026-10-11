@@ -5,7 +5,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-ROUTES_PY = ROOT / "api" / "routes.py"
+ROUTES_PY = ROOT / "api" / "route_files.py"
 WORKSPACE_PY = ROOT / "api" / "workspace.py"
 UPLOAD_PY = ROOT / "api" / "upload.py"
 

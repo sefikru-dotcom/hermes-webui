@@ -727,77 +727,36 @@ def _guard_request_session_visibility(handler, parsed, body=None, method="GET") 
     return True
 
 
-def _active_skills_dir() -> Path:
-    """Return the skills directory for the request's active Hermes profile.
-
-    WebUI profile switches are cookie/thread-local scoped, so the agent
-    module-level ``tools.skills_tool.SKILLS_DIR`` can still point at the server
-    startup profile. Skills UI endpoints must derive the directory from
-    ``get_active_hermes_home()`` for every request instead of reading that
-    process-global constant.
-    """
-    try:
-        from api.profiles import get_active_hermes_home
-
-        return Path(get_active_hermes_home()) / "skills"
-    except Exception:
-        try:
-            from tools.skills_tool import SKILLS_DIR
-
-            return Path(SKILLS_DIR)
-        except Exception:
-            return Path(os.getenv("HERMES_HOME", str(Path.home() / ".hermes"))).expanduser() / "skills"
-
-
-def _skill_path_within(base_dir: Path, candidate: Path) -> bool:
-    try:
-        candidate.resolve().relative_to(base_dir.resolve())
-        return True
-    except (OSError, ValueError):
-        return False
+from api.route_skills import (
+    _active_skills_dir,
+    _skill_path_within,
+    _skill_category_from_path,
+    _active_skill_search_dirs,
+    _active_profile_config_path as _skills_impl_active_profile_config_path,
+    _get_disabled_skill_names_for_profile as _skills_impl_get_disabled_skill_names_for_profile,
+    _parse_config_string_list,
+    _normalize_disabled_set as _skills_impl_normalize_disabled_set,
+    _skills_list_from_dir as _skills_impl_skills_list_from_dir,
+    _find_skill_in_dirs as _skills_impl_find_skill_in_dirs,
+    _find_skill_in_dir as _skills_impl_find_skill_in_dir,
+    _skill_not_found_payload as _skills_impl_skill_not_found_payload,
+    _linked_files_for_skill,
+    _skill_view_from_file as _skills_impl_skill_view_from_file,
+    _skill_view_from_active_dir as _skills_impl_skill_view_from_active_dir,
+    _handle_skill_save as _skills_impl_handle_skill_save,
+    _handle_skill_delete as _skills_impl_handle_skill_delete,
+    _normalize_names_list as _skills_impl_normalize_names_list,
+    _toggle_name_in_list as _skills_impl_toggle_name_in_list,
+    _handle_skill_toggle as _skills_impl_handle_skill_toggle,
+)
 
 
-def _skill_category_from_path(
-    skill_md: Path,
-    skills_dirs: list[Path],
-    local_skills_dir: Path | None = None,
-) -> str | None:
-    """Return the UI category for a discovered skill path.
-
-    Flat skills directly under the active *local* skills root stay uncategorized,
-    while flat skills under an *external* root use that root's directory name as
-    their category. ``local_skills_dir`` identifies the local root explicitly; if
-    omitted it falls back to ``skills_dirs[0]`` for backward compatibility, but
-    callers should pass it directly because the local root can be filtered out of
-    ``skills_dirs`` (e.g. when it does not exist yet on a host with only external
-    skills configured), which would otherwise misclassify the first external root
-    as local.
-    """
-    if local_skills_dir is None:
-        local_skills_dir = skills_dirs[0] if skills_dirs else None
-    for skills_dir in skills_dirs:
-        try:
-            rel_path = skill_md.relative_to(skills_dir)
-        except ValueError:
-            continue
-        parts = rel_path.parts
-        if len(parts) >= 3:
-            return parts[0]
-        if len(parts) >= 2 and local_skills_dir is not None and skills_dir != local_skills_dir:
-            return skills_dir.name
-        return None
-    return None
 
 
-def _active_skill_search_dirs(skills_dir: Path) -> list[Path]:
-    dirs = [skills_dir]
-    try:
-        from agent.skill_utils import get_external_skills_dirs
 
-        dirs.extend(Path(p) for p in get_external_skills_dirs())
-    except Exception:
-        pass
-    return [p for p in dirs if p.exists()]
+
+
+
 
 
 def _worktree_retained_payload(session) -> dict:
@@ -836,15 +795,9 @@ def _active_profile_config_path() -> Path:
     Hermes home, not process-global HERMES_HOME or HERMES_CONFIG_PATH values
     captured at server startup.
     """
-    test_override_module = getattr(_get_config_path, "__module__", "")
-    if test_override_module != "api.config":
-        return _get_config_path()
-    try:
-        from api.profiles import get_active_hermes_home
-
-        return Path(get_active_hermes_home()) / "config.yaml"
-    except Exception:
-        return _get_config_path()
+    return _skills_impl_active_profile_config_path(
+        _get_config_path=_get_config_path,
+    )
 
 
 def _get_disabled_skill_names_for_profile() -> set:
@@ -856,72 +809,21 @@ def _get_disabled_skill_names_for_profile() -> set:
     ``skills.platform_disabled.webui`` first, falling back to
     ``skills.disabled``.
     """
-    config_path = _active_profile_config_path()
-    if not config_path.exists():
-        return set()
-    try:
-        cfg = _load_yaml_config_file(config_path)
-    except Exception:
-        return set()
-    if not isinstance(cfg, dict):
-        return set()
-    skills_cfg = cfg.get("skills")
-    if not isinstance(skills_cfg, dict):
-        return set()
-    # Check platform_disabled.webui first (mirrors agent platform resolution)
-    platform_disabled = skills_cfg.get("platform_disabled")
-    if isinstance(platform_disabled, dict) and "webui" in platform_disabled:
-        return _normalize_disabled_set(platform_disabled["webui"])
-    return _normalize_disabled_set(skills_cfg.get("disabled"))
+    return _skills_impl_get_disabled_skill_names_for_profile(
+        _active_profile_config_path=_active_profile_config_path,
+        _load_yaml_config_file=_load_yaml_config_file,
+        _normalize_disabled_set=_normalize_disabled_set,
+    )
 
 
-def _parse_config_string_list(value) -> list:
-    """Decode a config value that may hold a JSON-array string into a list.
-
-    ``hermes config set`` (and JSON-mode editor saves) store lists as quoted
-    JSON strings (``'[\"a\",\"b\"]'`` or the Python-literal ``\"['a']\"``), so a
-    disabled list read from ``config.yaml`` can arrive as a single string
-    instead of a YAML list. Treating it as one literal name makes the Skills
-    panel show every skill as enabled and makes the toggle write a destructive
-    single-entry list (hermes-webui#7120).
-
-    Reuses ``agent.skill_utils.parse_config_string_list`` (hermes-agent #86661
-    fix) when the bundled agent source is importable, and mirrors its logic
-    otherwise so the two surfaces cannot drift. A scalar string still means one
-    name.
-    """
-    try:
-        from agent.skill_utils import parse_config_string_list
-
-        return parse_config_string_list(value)
-    except ImportError:
-        pass
-    import ast
-
-    if value is None:
-        return []
-    if isinstance(value, str):
-        stripped = value.strip()
-        if stripped.startswith("["):
-            try:
-                parsed = ast.literal_eval(stripped)
-            except (ValueError, SyntaxError):
-                parsed = None
-            if isinstance(parsed, list):
-                return [str(item) for item in parsed]
-        return [value]
-    if isinstance(value, (list, tuple, set, frozenset)):
-        return [str(item) for item in value]
-    return []
 
 
 def _normalize_disabled_set(values) -> set:
     """Normalize a YAML disabled list into a set of stripped strings."""
-    if values is None:
-        return set()
-    if isinstance(values, str):
-        values = _parse_config_string_list(values)
-    return {str(v).strip() for v in values if str(v).strip()}
+    return _skills_impl_normalize_disabled_set(
+        values,
+        _parse_config_string_list=_parse_config_string_list,
+    )
 
 
 def _skills_list_from_dir(skills_dir: Path, category: str | None = None) -> dict:
@@ -931,138 +833,32 @@ def _skills_list_from_dir(skills_dir: Path, category: str | None = None) -> dict
     scan root explicit so per-client WebUI profile switches do not race on or
     leak through the skills tool's module-global ``SKILLS_DIR``.
     """
-    from agent.skill_utils import iter_skill_index_files
-    from tools.skills_tool import (
-        MAX_DESCRIPTION_LENGTH,
-        _EXCLUDED_SKILL_DIRS,
-        _parse_frontmatter,
-        _sort_skills,
-        skill_matches_platform,
+    return _skills_impl_skills_list_from_dir(
+        skills_dir,
+        category,
+        _active_skill_search_dirs=_active_skill_search_dirs,
+        _get_disabled_skill_names_for_profile=_get_disabled_skill_names_for_profile,
+        _skill_category_from_path=_skill_category_from_path,
+        logger=logger,
     )
-
-    if not skills_dir.exists():
-        skills_dir.mkdir(parents=True, exist_ok=True)
-        return {
-            "success": True,
-            "skills": [],
-            "categories": [],
-            "message": f"No skills found. Skills directory created at {skills_dir}/",
-        }
-
-    all_skills = []
-    seen_names: set[str] = set()
-    disabled = _get_disabled_skill_names_for_profile()
-    search_dirs = _active_skill_search_dirs(skills_dir)
-
-    for scan_dir in search_dirs:
-        for skill_md in iter_skill_index_files(scan_dir, "SKILL.md"):
-            if any(part in _EXCLUDED_SKILL_DIRS for part in skill_md.parts):
-                continue
-            skill_dir = skill_md.parent
-            try:
-                content = skill_md.read_text(encoding="utf-8")[:4000]
-                frontmatter, body = _parse_frontmatter(content)
-                if not skill_matches_platform(frontmatter):
-                    continue
-                name = frontmatter.get("name", skill_dir.name)[:64]
-                if name in seen_names:
-                    continue
-                description = frontmatter.get("description", "")
-                if not description:
-                    for line in body.strip().split("\n"):
-                        line = line.strip()
-                        if line and not line.startswith("#"):
-                            description = line
-                            break
-                if len(description) > MAX_DESCRIPTION_LENGTH:
-                    description = description[: MAX_DESCRIPTION_LENGTH - 3] + "..."
-                seen_names.add(name)
-                all_skills.append(
-                    {
-                        "name": name,
-                        "description": description,
-                        "category": _skill_category_from_path(
-                            skill_md, search_dirs, local_skills_dir=skills_dir
-                        ),
-                        "disabled": name in disabled,
-                    }
-                )
-            except (UnicodeDecodeError, PermissionError) as e:
-                logger.debug("Failed to read skill file %s: %s", skill_md, e)
-            except Exception as e:
-                logger.debug(
-                    "Skipping skill at %s: failed to parse: %s", skill_md, e, exc_info=True
-                )
-
-    if category:
-        all_skills = [s for s in all_skills if s.get("category") == category]
-    all_skills = _sort_skills(all_skills)
-    categories = sorted(set(s.get("category") for s in all_skills if s.get("category")))
-    result = {
-        "success": True,
-        "skills": all_skills,
-        "categories": categories,
-        "count": len(all_skills),
-    }
-    if all_skills:
-        result["hint"] = "Use skill_view(name) to see full content, tags, and linked files"
-    else:
-        result["message"] = "No skills found in skills/ directory."
-    return result
 
 
 def _find_skill_in_dirs(name: str, skills_dirs: list[Path]) -> tuple[Path | None, Path | None]:
     """Resolve a WebUI skill name inside explicit skills directories."""
-    from agent.skill_utils import iter_skill_index_files
-    from tools.skills_tool import _EXCLUDED_SKILL_DIRS, _parse_frontmatter
-
-    raw_name = str(name or "").strip().strip("/")
-    if not raw_name:
-        return None, None
-
-    candidate_names = [raw_name]
-    if ":" in raw_name:
-        namespace, bare = raw_name.split(":", 1)
-        if namespace and bare:
-            candidate_names.append(f"{namespace}/{bare}")
-
-    for skills_dir in skills_dirs:
-        if not skills_dir.exists():
-            continue
-        for candidate_name in candidate_names:
-            direct_path = skills_dir / candidate_name
-            if not _skill_path_within(skills_dir, direct_path):
-                continue
-            if direct_path.is_dir() and (direct_path / "SKILL.md").exists():
-                return direct_path, direct_path / "SKILL.md"
-            legacy_md = direct_path.with_suffix(".md")
-            if legacy_md.exists() and _skill_path_within(skills_dir, legacy_md):
-                return legacy_md.parent, legacy_md
-
-        for skill_md in iter_skill_index_files(skills_dir, "SKILL.md"):
-            if any(part in _EXCLUDED_SKILL_DIRS for part in skill_md.parts):
-                continue
-            skill_dir = skill_md.parent
-            if skill_dir.name == raw_name:
-                return skill_dir, skill_md
-            try:
-                frontmatter, _ = _parse_frontmatter(skill_md.read_text(encoding="utf-8")[:4000])
-                if frontmatter.get("name") == raw_name:
-                    return skill_dir, skill_md
-            except Exception:
-                continue
-
-        for legacy_md in skills_dir.rglob("*.md"):
-            if legacy_md.name == "SKILL.md":
-                continue
-            if legacy_md.stem == raw_name and _skill_path_within(skills_dir, legacy_md):
-                return legacy_md.parent, legacy_md
-    return None, None
+    return _skills_impl_find_skill_in_dirs(
+        name,
+        skills_dirs,
+        _skill_path_within=_skill_path_within,
+    )
 
 
 def _find_skill_in_dir(name: str, skills_dir: Path) -> tuple[Path | None, Path | None]:
     """Resolve a WebUI skill name inside an explicit skills directory."""
-    return _find_skill_in_dirs(name, [skills_dir])
+    return _skills_impl_find_skill_in_dir(
+        name,
+        skills_dir,
+        _find_skill_in_dirs=_find_skill_in_dirs,
+    )
 
 
 # Cap on the courtesy list of names carried by a skill-not-found reply. The
@@ -1073,116 +869,33 @@ _SKILL_NOT_FOUND_LIST_LIMIT = 20
 
 
 def _skill_not_found_payload(name: str, skills_dir: Path) -> dict:
-    all_names = [s["name"] for s in _skills_list_from_dir(skills_dir).get("skills", [])]
-    total = len(all_names)
-    available = all_names[:_SKILL_NOT_FOUND_LIST_LIMIT]
-    truncated = total > len(available)
-    hint = "Use skills_list to see all available skills"
-    if truncated:
-        hint = f"Showing {len(available)} of {total} skills. {hint}"
-    return {
-        "success": False,
-        "error": f"Skill '{name}' not found.",
-        "available_skills": available,
-        "available_skills_truncated": truncated,
-        "total_skills": total,
-        "hint": hint,
-    }
+    return _skills_impl_skill_not_found_payload(
+        name,
+        skills_dir,
+        _SKILL_NOT_FOUND_LIST_LIMIT=_SKILL_NOT_FOUND_LIST_LIMIT,
+        _skills_list_from_dir=_skills_list_from_dir,
+    )
 
 
-def _linked_files_for_skill(skill_dir: Path | None) -> dict:
-    if not skill_dir or not (skill_dir / "SKILL.md").exists():
-        return {}
-    linked_files: dict[str, list[str]] = {}
-
-    references_dir = skill_dir / "references"
-    if references_dir.exists():
-        refs = [str(f.relative_to(skill_dir)) for f in references_dir.glob("*.md")]
-        if refs:
-            linked_files["references"] = sorted(refs)
-
-    templates_dir = skill_dir / "templates"
-    if templates_dir.exists():
-        templates = []
-        for ext in ["*.md", "*.py", "*.yaml", "*.yml", "*.json", "*.tex", "*.sh"]:
-            templates.extend(str(f.relative_to(skill_dir)) for f in templates_dir.rglob(ext))
-        if templates:
-            linked_files["templates"] = sorted(set(templates))
-
-    assets_dir = skill_dir / "assets"
-    if assets_dir.exists():
-        assets = [str(f.relative_to(skill_dir)) for f in assets_dir.rglob("*") if f.is_file()]
-        if assets:
-            linked_files["assets"] = sorted(assets)
-
-    scripts_dir = skill_dir / "scripts"
-    if scripts_dir.exists():
-        scripts = []
-        for ext in ["*.py", "*.sh", "*.bash", "*.js", "*.ts", "*.rb"]:
-            scripts.extend(str(f.relative_to(skill_dir)) for f in scripts_dir.glob(ext))
-        if scripts:
-            linked_files["scripts"] = sorted(set(scripts))
-
-    return linked_files
 
 
 def _skill_view_from_file(skill_dir: Path | None, skill_md: Path) -> dict:
-    from tools.skills_tool import _parse_frontmatter, _parse_tags, skill_matches_platform
-
-    content = skill_md.read_text(encoding="utf-8")
-    frontmatter, _body = _parse_frontmatter(content)
-    if not skill_matches_platform(frontmatter):
-        return {"success": False, "error": "Skill is not available on this platform."}
-
-    metadata = frontmatter.get("metadata")
-    hermes_meta = metadata.get("hermes", {}) if isinstance(metadata, dict) else {}
-    tags = _parse_tags(hermes_meta.get("tags") or frontmatter.get("tags", ""))
-    related_skills = _parse_tags(
-        hermes_meta.get("related_skills") or frontmatter.get("related_skills", "")
+    return _skills_impl_skill_view_from_file(
+        skill_dir,
+        skill_md,
+        _linked_files_for_skill=_linked_files_for_skill,
     )
-    try:
-        path = str(skill_md.relative_to((skill_dir or skill_md.parent).parent))
-    except ValueError:
-        path = str(skill_md)
-
-    return {
-        "success": True,
-        "name": frontmatter.get("name", skill_md.stem if not skill_dir else skill_dir.name),
-        "description": frontmatter.get("description", ""),
-        "tags": tags,
-        "related_skills": related_skills,
-        "content": content,
-        "path": path,
-        "skill_dir": str(skill_dir) if skill_dir else None,
-        "linked_files": _linked_files_for_skill(skill_dir),
-    }
 
 
 def _skill_view_from_active_dir(name: str) -> dict:
-    from tools.skills_tool import skill_view as _skill_view
-
-    skills_dir = _active_skills_dir()
-    search_dirs = _active_skill_search_dirs(skills_dir)
-    skill_dir, skill_md = _find_skill_in_dirs(name, search_dirs)
-    if not skill_md:
-        # Preserve plugin-qualified skill viewing without falling back to the
-        # startup/root profile's local skills tree for ordinary missing skills.
-        if ":" in str(name or ""):
-            try:
-                from agent.skill_utils import is_valid_namespace, parse_qualified_name
-                from hermes_cli.plugins import discover_plugins, get_plugin_manager
-
-                namespace, _bare = parse_qualified_name(name)
-                if is_valid_namespace(namespace):
-                    discover_plugins()
-                    pm = get_plugin_manager()
-                    if pm.find_plugin_skill(name) is not None or pm.list_plugin_skills(namespace):
-                        raw = _skill_view(name)
-                        return json.loads(raw) if isinstance(raw, str) else raw
-            except Exception:
-                pass
-        return _skill_not_found_payload(name, skills_dir)
-    return _skill_view_from_file(skill_dir, skill_md)
+    return _skills_impl_skill_view_from_active_dir(
+        name,
+        _active_skill_search_dirs=_active_skill_search_dirs,
+        _active_skills_dir=_active_skills_dir,
+        _find_skill_in_dirs=_find_skill_in_dirs,
+        _skill_not_found_payload=_skill_not_found_payload,
+        _skill_view_from_file=_skill_view_from_file,
+    )
 
 # ── SSE app-level heartbeat (#1623) ────────────────────────────────────────
 #
@@ -3928,62 +3641,12 @@ def _anchor_scene_message_ref_digest(payload: dict) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
-def _sanitize_anchor_activity_scene(scene):
-    if not isinstance(scene, dict):
-        raise ValueError("scene must be an object")
-    if str(scene.get("version") or "") != "activity_scene_v1":
-        raise ValueError("scene.version must be activity_scene_v1")
-    rows = scene.get("activity_rows")
-    if not isinstance(rows, list):
-        raise ValueError("scene.activity_rows must be a list")
-    if len(rows) > _ANCHOR_ACTIVITY_SCENE_MAX_ROWS:
-        raise ValueError("scene.activity_rows is too large")
-    scene_copy = copy.deepcopy(scene)
-    encoded = json.dumps(scene_copy, ensure_ascii=False, separators=(",", ":"), default=str).encode("utf-8")
-    if len(encoded) > _ANCHOR_ACTIVITY_SCENE_MAX_BYTES:
-        raise ValueError("scene payload is too large")
-    return json.loads(encoded.decode("utf-8"))
 
 
-def _anchor_scene_int_or_none(value):
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
 
 
-def _anchor_scene_message_index_from_request(body):
-    if not isinstance(body, dict):
-        return None
-    message_index = _anchor_scene_int_or_none(body.get("message_index"))
-    message_offset = _anchor_scene_int_or_none(body.get("message_offset"))
-    message_window_index = _anchor_scene_int_or_none(body.get("message_window_index"))
-    if (
-        message_window_index is not None
-        and message_offset is not None
-        and message_offset > 0
-        and (message_index is None or message_index == message_window_index)
-    ):
-        return message_window_index + message_offset
-    return message_index
 
 
-def _anchor_scene_candidate_matches_scene(candidate, scene) -> bool:
-    if not isinstance(scene, dict):
-        return True
-    final_key = _anchor_scene_text_key(scene.get("final_answer") or "")
-    if not final_key:
-        return True
-    candidate_key = _anchor_scene_text_key(_anchor_scene_message_text(candidate))
-    if not candidate_key:
-        return False
-    if candidate_key == final_key:
-        return True
-    if len(final_key) >= 16 and final_key in candidate_key:
-        return True
-    if len(candidate_key) >= 16 and candidate_key in final_key:
-        return True
-    return _anchor_scene_text_has_long_overlap(candidate_key, final_key)
 
 
 def _find_anchor_scene_message(messages, *, message_index=None, message_ref="", scene=None):
@@ -4023,1063 +3686,200 @@ def _find_anchor_scene_message(messages, *, message_index=None, message_ref="", 
     return None, None
 
 
-def _normalize_anchor_scene_message_ref(message_ref) -> str:
-    ref = str(message_ref or "").strip()
-    if not ref:
-        return ""
-    if re.fullmatch(r"[0-9a-fA-F]{64}", ref):
-        return ref.lower()
-    try:
-        payload = json.loads(ref)
-    except (TypeError, ValueError):
-        return ref
-    if not isinstance(payload, dict):
-        return ref
-    canonical = {
-        "role": str(payload.get("role") or ""),
-        "content": " ".join(str(payload.get("content") or "").split()),
-        "timestamp": payload.get("timestamp") or "",
-    }
-    return _anchor_scene_message_ref_digest(canonical)
 
 
-def _anchor_scene_records(session) -> dict:
-    records = getattr(session, "anchor_activity_scenes", None)
-    return records if isinstance(records, dict) else {}
 
 
-def _anchor_scene_message_text(message) -> str:
-    if not isinstance(message, dict):
-        return ""
-    content = message.get("content", "")
-    if isinstance(content, list):
-        parts = []
-        for part in content:
-            if isinstance(part, dict):
-                parts.append(str(part.get("text") or part.get("content") or part.get("input_text") or ""))
-            else:
-                parts.append(str(part or ""))
-        return "\n".join(parts)
-    return str(content or "")
 
 
-def _anchor_scene_content_text(part) -> str:
-    if part is None:
-        return ""
-    if isinstance(part, str):
-        return part
-    if not isinstance(part, dict):
-        return str(part or "")
-    return str(
-        part.get("text")
-        or part.get("content")
-        or part.get("input_text")
-        or part.get("output_text")
-        or part.get("thinking")
-        or part.get("reasoning")
-        or part.get("summary")
-        or ""
-    )
 
 
-def _anchor_scene_content_visible_text(part) -> str:
-    if part is None:
-        return ""
-    if isinstance(part, str):
-        return part
-    if not isinstance(part, dict):
-        return str(part or "")
-    part_type = str(part.get("type") or "")
-    if part_type in ("thinking", "reasoning"):
-        return ""
-    content_text = part.get("content") if part_type in ("text", "input_text", "output_text") else ""
-    return str(part.get("text") or part.get("input_text") or part.get("output_text") or content_text or "")
 
 
-def _anchor_scene_message_has_content_tool_use(message) -> bool:
-    content = message.get("content") if isinstance(message, dict) else None
-    return isinstance(content, list) and any(
-        isinstance(part, dict) and part.get("type") == "tool_use" for part in content
-    )
 
 
-def _anchor_scene_final_answer_text(message) -> str:
-    if not _anchor_scene_message_has_content_tool_use(message):
-        return _anchor_scene_message_text(message)
-    content = message.get("content") if isinstance(message, dict) else []
-    last_tool_index = -1
-    for idx, part in enumerate(content):
-        if isinstance(part, dict) and part.get("type") == "tool_use":
-            last_tool_index = idx
-    tail_text = "\n".join(
-        text
-        for text in (_anchor_scene_content_visible_text(part) for part in content[last_tool_index + 1 :])
-        if _anchor_scene_clean_text(text)
-    )
-    return tail_text if _anchor_scene_clean_text(tail_text) else ""
 
 
-def _anchor_scene_message_reasoning_text(message) -> str:
-    if not isinstance(message, dict):
-        return ""
-    for key in ("reasoning", "_reasoning", "reasoning_content", "thinking"):
-        value = message.get(key)
-        if not value:
-            continue
-        if isinstance(value, list):
-            parts = []
-            for part in value:
-                if isinstance(part, dict):
-                    parts.append(
-                        str(
-                            part.get("text")
-                            or part.get("content")
-                            or part.get("reasoning")
-                            or part.get("summary")
-                            or ""
-                        )
-                    )
-                else:
-                    parts.append(str(part or ""))
-            return "\n".join(parts)
-        if isinstance(value, dict):
-            return str(
-                value.get("text")
-                or value.get("content")
-                or value.get("reasoning")
-                or value.get("summary")
-                or ""
-            )
-        return str(value or "")
-    return ""
 
 
-def _anchor_scene_clean_text(value) -> str:
-    return " ".join(str(value or "").split()).strip()
 
 
-def _anchor_scene_text_key(value) -> str:
-    return _anchor_scene_clean_text(value).lower()
 
 
 _ANCHOR_SCENE_SETTLED_SNIPPET_CAP = 4000
 
 
-def _anchor_scene_string_payload(value) -> str:
-    if value is None:
-        return ""
-    if isinstance(value, str):
-        return value
-    try:
-        return json.dumps(value)
-    except Exception:
-        return str(value)
 
 
-def _anchor_scene_is_bounded_tool_body_preview(settled, full) -> bool:
-    settled_text = _anchor_scene_string_payload(settled)
-    full_text = _anchor_scene_string_payload(full)
-    return bool(
-        settled_text
-        and full_text
-        and len(full_text) > len(settled_text)
-        and len(settled_text) >= _ANCHOR_SCENE_SETTLED_SNIPPET_CAP
-        and full_text.startswith(settled_text)
-    )
 
 
-def _anchor_scene_row_looks_like_final_answer(row_text_key: str, final_key: str) -> bool:
-    if not row_text_key or not final_key:
-        return False
-    if row_text_key == final_key:
-        return True
-    # #4587: align with the renderer's _anchorSceneProseMatchesFinalAnswer — a
-    # prefix-like overlap only counts as "the final answer" when it's a
-    # NEAR-complete match (ratio >= 0.9). A shorter intermediate-prose row that
-    # is merely a prefix of the final answer is legitimate progress narration and
-    # must be preserved in the persisted scene, not filtered out.
-    if not (final_key.startswith(row_text_key) or row_text_key.startswith(final_key)):
-        return False
-    shorter = min(len(row_text_key), len(final_key))
-    longer = max(len(row_text_key), len(final_key))
-    return shorter >= 80 and longer > 0 and (shorter / longer) >= 0.9
 
 
-def _anchor_scene_text_has_long_overlap(text_key: str, final_key: str) -> bool:
-    if len(text_key) < 80 or len(final_key) < 80:
-        return False
-    shorter, longer = (text_key, final_key) if len(text_key) <= len(final_key) else (final_key, text_key)
-    window = 64
-    scan_limit = min(len(shorter), 1400)
-    if scan_limit < window:
-        return False
-    for start in range(0, scan_limit - window + 1, 24):
-        chunk = shorter[start : start + window].strip()
-        if len(chunk) >= 48 and chunk in longer:
-            return True
-    text_tokens = set(re.findall(r"[a-z0-9_./:-]{3,}", text_key))
-    final_tokens = set(re.findall(r"[a-z0-9_./:-]{3,}", final_key))
-    if text_tokens and final_tokens:
-        common = text_tokens & final_tokens
-        shorter_count = min(len(text_tokens), len(final_tokens))
-        if shorter_count >= 3 and len(common) >= min(5, shorter_count) and (len(common) / shorter_count) >= 0.5:
-            return True
-    text_compact = re.sub(r"[\s`*_#|\[\](){}<>.,;:!?，。；：！？、/\\-]+", "", text_key)
-    final_compact = re.sub(r"[\s`*_#|\[\](){}<>.,;:!?，。；：！？、/\\-]+", "", final_key)
-    if len(text_compact) >= 40 and len(final_compact) >= 40:
-        text_grams = {text_compact[idx : idx + 4] for idx in range(0, len(text_compact) - 3)}
-        final_grams = {final_compact[idx : idx + 4] for idx in range(0, len(final_compact) - 3)}
-        common_grams = text_grams & final_grams
-        shorter_grams = min(len(text_grams), len(final_grams))
-        if shorter_grams and len(common_grams) >= 12 and (len(common_grams) / shorter_grams) >= 0.35:
-            return True
-    return False
 
 
-def _anchor_scene_row_is_stale_token_answer(row, row_text_key: str, final_key: str) -> bool:
-    if not isinstance(row, dict) or row.get("role") not in ("prose", "thinking"):
-        return False
-    source_type = str(row.get("source_event_type") or row.get("source") or "")
-    if source_type != "token":
-        return False
-    return _anchor_scene_text_has_long_overlap(row_text_key, final_key)
 
 
-def _anchor_scene_message_turn_duration(message):
-    if not isinstance(message, dict):
-        return None
-    for key in ("_turnDuration", "_turn_duration", "turn_duration"):
-        value = message.get(key)
-        if isinstance(value, (int, float)) and value >= 0:
-            return value
-    return None
 
 
-def _anchor_scene_tool_id(tool) -> str:
-    if not isinstance(tool, dict):
-        return ""
-    return str(
-        tool.get("tid")
-        or tool.get("id")
-        or tool.get("tool_call_id")
-        or tool.get("tool_use_id")
-        or tool.get("call_id")
-        or ""
-    ).strip()
 
 
-def _anchor_scene_tool_name(tool) -> str:
-    if not isinstance(tool, dict):
-        return "tool"
-    fn = tool.get("function") if isinstance(tool.get("function"), dict) else {}
-    return str(tool.get("name") or tool.get("tool_name") or fn.get("name") or "tool").strip() or "tool"
 
 
-def _anchor_scene_tool_args(tool):
-    if not isinstance(tool, dict):
-        return {}
-    for key in ("args", "input"):
-        value = tool.get(key)
-        if isinstance(value, dict):
-            return copy.deepcopy(value)
-    fn = tool.get("function") if isinstance(tool.get("function"), dict) else {}
-    raw = fn.get("arguments")
-    if isinstance(raw, str) and raw.strip():
-        try:
-            parsed = json.loads(raw)
-            return parsed if isinstance(parsed, dict) else {}
-        except Exception:
-            return {}
-    return {}
 
 
-def _anchor_scene_content_tool(part):
-    if not isinstance(part, dict):
-        return {}
-    fn = part.get("function") if isinstance(part.get("function"), dict) else {}
-    tool_id = (
-        part.get("id")
-        or part.get("tid")
-        or part.get("tool_call_id")
-        or part.get("tool_use_id")
-        or part.get("call_id")
-    )
-    return {
-        "id": tool_id,
-        "tid": part.get("tid") or tool_id,
-        "tool_call_id": part.get("tool_call_id"),
-        "tool_use_id": part.get("tool_use_id"),
-        "call_id": part.get("call_id"),
-        "name": part.get("name") or part.get("tool_name") or fn.get("name") or "tool",
-        "tool_name": part.get("tool_name"),
-        "args": part.get("args"),
-        "input": part.get("input"),
-        "function": copy.deepcopy(part.get("function")) if isinstance(part.get("function"), dict) else None,
-        "command": part.get("command") or part.get("raw_command") or part.get("original_command") or part.get("display_command"),
-        "preview": part.get("preview") or part.get("summary"),
-        "snippet": part.get("snippet") or part.get("result") or part.get("output"),
-        "result": copy.deepcopy(part.get("result")),
-        "output": copy.deepcopy(part.get("output")),
-        "is_error": part.get("is_error"),
-        "error": part.get("error"),
-        "duration": part.get("duration"),
-        "started_at": part.get("started_at"),
-    }
 
 
-def _anchor_scene_row_base(role, kind, source_event_type, order_index, message_index, stream_id=""):
-    return {
-        "row_id": f"hydrated:{stream_id or 'stream'}:{role}:{message_index}:{order_index}",
-        "order_index": order_index,
-        "kind": kind,
-        "role": role,
-        "display_hint": {
-            "prose": "main_prose",
-            "thinking": "collapsed_thinking",
-            "tool": "tool_row",
-            "terminal": "terminal_status_row",
-        }.get(role, "activity_row"),
-        "display_hints": {
-            "compact_worklog": {
-                "prose": "main_prose",
-                "thinking": "collapsed_thinking",
-                "tool": "tool_row",
-                "terminal": "terminal_status_row",
-            }.get(role, "activity_row"),
-            "transparent_stream": "chronological_activity",
-        },
-        "source_event_type": source_event_type,
-        "event_id": None,
-        "local_id": None,
-        "run_id": None,
-        "stream_id": stream_id or None,
-        "seq": order_index,
-        "status": "completed",
-        "created_at": None,
-        "identity": {"event_id": None, "local_id": None, "run_id": None, "stream_id": stream_id or None, "seq": order_index},
-        "group": {
-            "group_key": f"assistant:{message_index}" if isinstance(message_index, int) else f"activity:{order_index}",
-            "activity_burst_id": None,
-            "activity_segment_seq": None,
-            "assistant_msg_idx": message_index if isinstance(message_index, int) else None,
-        },
-        "text": "",
-        "thinking": None,
-        "tool_call_id": None,
-        "tool": None,
-        "payload": {"assistant_msg_idx": message_index if isinstance(message_index, int) else None},
-    }
 
 
-def _anchor_scene_prose_row(text, order_index, message_index, stream_id=""):
-    row = _anchor_scene_row_base("prose", "process_prose", "settled_message", order_index, message_index, stream_id)
-    row["text"] = str(text or "")
-    row["payload"]["text"] = row["text"]
-    return row
 
 
-def _anchor_scene_thinking_row(text, order_index, message_index, stream_id=""):
-    row = _anchor_scene_row_base("thinking", "reasoning", "reasoning", order_index, message_index, stream_id)
-    row["text"] = str(text or "")
-    preview = _anchor_scene_clean_text(text)
-    row["thinking"] = {
-        "text": row["text"],
-        "preview": (preview[:177] + "...") if len(preview) > 180 else preview,
-        "dedupe_key": f"thinking:{preview.lower()}" if preview else "",
-    }
-    row["payload"]["text"] = row["text"]
-    return row
 
 
-def _anchor_scene_tool_row(tool, order_index, message_index, stream_id=""):
-    row = _anchor_scene_row_base("tool", "tool_completed", "tool_complete", order_index, message_index, stream_id)
-    tid = _anchor_scene_tool_id(tool)
-    name = _anchor_scene_tool_name(tool)
-    args = _anchor_scene_tool_args(tool)
-    preview = str((tool or {}).get("preview") or (tool or {}).get("summary") or "")
-    snippet = str((tool or {}).get("snippet") or (tool or {}).get("result") or (tool or {}).get("output") or "")
-    row["row_id"] = f"hydrated:{stream_id or 'stream'}:tool:{tid}" if tid else row["row_id"]
-    row["tool_call_id"] = tid or None
-    row["tool"] = {
-        "id": tid or None,
-        "name": name,
-        "args": args,
-        "preview": preview,
-        "snippet": snippet,
-        "result": copy.deepcopy((tool or {}).get("result")) if isinstance(tool, dict) else None,
-        "output": copy.deepcopy((tool or {}).get("output")) if isinstance(tool, dict) else None,
-        "done": True,
-        "is_error": bool((tool or {}).get("is_error") or (tool or {}).get("error")),
-        "duration": (tool or {}).get("duration") if isinstance(tool, dict) else None,
-        "started_at": (tool or {}).get("started_at") if isinstance(tool, dict) else None,
-        "signature": f"{name}|{tid}|{json.dumps(args, sort_keys=True, default=str)}",
-    }
-    row["payload"].update({"tid": tid, "id": tid, "name": name, "args": args, "preview": preview, "snippet": snippet})
-    return row
 
 
-def _anchor_scene_tool_row_id(row) -> str:
-    if not isinstance(row, dict):
-        return ""
-    tool = row.get("tool") if isinstance(row.get("tool"), dict) else {}
-    payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
-    return str(
-        row.get("tool_call_id")
-        or tool.get("id")
-        or tool.get("tid")
-        or tool.get("tool_call_id")
-        or tool.get("tool_use_id")
-        or tool.get("call_id")
-        or payload.get("tid")
-        or payload.get("id")
-        or ""
-    ).strip()
 
 
-def _anchor_scene_tool_row_name(row) -> str:
-    if not isinstance(row, dict):
-        return ""
-    tool = row.get("tool") if isinstance(row.get("tool"), dict) else {}
-    payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
-    return str(tool.get("name") or payload.get("name") or "tool").strip().lower()
 
 
-def _anchor_scene_tool_rows_have_compatible_names(existing, incoming) -> bool:
-    existing_name = _anchor_scene_tool_row_name(existing)
-    incoming_name = _anchor_scene_tool_row_name(incoming)
-    return (
-        not existing_name
-        or not incoming_name
-        or existing_name == "tool"
-        or incoming_name == "tool"
-        or existing_name == incoming_name
-    )
 
 
-def _anchor_scene_tool_row_args(row):
-    if not isinstance(row, dict):
-        return None
-    tool = row.get("tool") if isinstance(row.get("tool"), dict) else {}
-    payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
-    args = tool.get("args") if isinstance(tool.get("args"), dict) else payload.get("args")
-    return args if isinstance(args, dict) and args else None
 
 
-def _anchor_scene_object_contains_subset(base, subset) -> bool:
-    if not isinstance(base, dict) or not isinstance(subset, dict):
-        return False
-    for key, value in subset.items():
-        if key not in base:
-            return False
-        if json.dumps(base[key], sort_keys=True, separators=(",", ":")) != json.dumps(
-            value,
-            sort_keys=True,
-            separators=(",", ":"),
-        ):
-            return False
-    return True
 
 
-def _anchor_scene_tool_rows_have_compatible_invocation(existing, incoming) -> bool:
-    if not isinstance(existing, dict) or not isinstance(incoming, dict):
-        return False
-    existing_tool = existing.get("tool") if isinstance(existing.get("tool"), dict) else {}
-    incoming_tool = incoming.get("tool") if isinstance(incoming.get("tool"), dict) else {}
-    existing_payload = existing.get("payload") if isinstance(existing.get("payload"), dict) else {}
-    incoming_payload = incoming.get("payload") if isinstance(incoming.get("payload"), dict) else {}
-    existing_command = str(existing_tool.get("command") or existing_payload.get("command") or "").strip()
-    incoming_command = str(incoming_tool.get("command") or incoming_payload.get("command") or "").strip()
-    if existing_command and incoming_command:
-        return existing_command == incoming_command
-    existing_args = _anchor_scene_tool_row_args(existing)
-    incoming_args = _anchor_scene_tool_row_args(incoming)
-    if not existing_args or not incoming_args:
-        return False
-    return _anchor_scene_object_contains_subset(
-        existing_args,
-        incoming_args,
-    ) or _anchor_scene_object_contains_subset(incoming_args, existing_args)
 
 
-def _anchor_scene_tool_row_has_invocation_evidence(row) -> bool:
-    if not isinstance(row, dict):
-        return False
-    tool = row.get("tool") if isinstance(row.get("tool"), dict) else {}
-    payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
-    command = str(tool.get("command") or payload.get("command") or "").strip()
-    args = _anchor_scene_tool_row_args(row)
-    return bool(command or args)
 
 
-def _anchor_scene_tool_rows_can_name_match(existing, incoming) -> bool:
-    if not _anchor_scene_tool_rows_have_compatible_names(existing, incoming):
-        return False
-    if _anchor_scene_tool_row_has_invocation_evidence(existing) and _anchor_scene_tool_row_has_invocation_evidence(incoming):
-        return _anchor_scene_tool_rows_have_compatible_invocation(existing, incoming)
-    return True
 
 
-def _anchor_scene_tool_rows_have_different_explicit_ids(existing, incoming) -> bool:
-    existing_id = _anchor_scene_tool_row_id(existing)
-    incoming_id = _anchor_scene_tool_row_id(incoming)
-    return bool(existing_id and incoming_id and existing_id != incoming_id)
 
 
-def _anchor_scene_tool_row_started_at(row) -> str:
-    if not isinstance(row, dict):
-        return ""
-    tool = row.get("tool") if isinstance(row.get("tool"), dict) else {}
-    payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
-    value = tool.get("started_at")
-    if value is None or value == "":
-        value = payload.get("started_at")
-    return str(value) if value is not None and value != "" else ""
 
 
-def _anchor_scene_tool_rows_have_same_started_at(existing, incoming) -> bool:
-    existing_started_at = _anchor_scene_tool_row_started_at(existing)
-    incoming_started_at = _anchor_scene_tool_row_started_at(incoming)
-    return bool(existing_started_at and incoming_started_at and existing_started_at == incoming_started_at)
 
 
-def _anchor_scene_tool_row_body_text(row) -> str:
-    if not isinstance(row, dict):
-        return ""
-    tool = row.get("tool") if isinstance(row.get("tool"), dict) else {}
-    payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
-    for value in (
-        tool.get("snippet"),
-        payload.get("snippet"),
-        tool.get("output"),
-        payload.get("output"),
-        tool.get("result"),
-        payload.get("result"),
-        tool.get("preview"),
-        payload.get("preview"),
-    ):
-        text = str(value or "").strip()
-        if text:
-            return text
-    return ""
 
 
-def _anchor_scene_tool_rows_have_compatible_body(existing, incoming) -> bool:
-    existing_body = _anchor_scene_tool_row_body_text(existing)
-    incoming_body = _anchor_scene_tool_row_body_text(incoming)
-    return bool(
-        existing_body
-        and incoming_body
-        and (
-            existing_body == incoming_body
-            or existing_body.startswith(incoming_body)
-            or incoming_body.startswith(existing_body)
-        )
-    )
 
 
-def _anchor_scene_matching_content_tool_row_index(
-    rows,
-    content_tool_indexes,
-    incoming_row,
-    ordinal,
-    used_indexes,
-    incoming_total=0,
-    id_flexible_indexes=None,
-):
-    if not isinstance(rows, list) or not isinstance(content_tool_indexes, list) or not isinstance(incoming_row, dict):
-        return None
-    incoming_id = _anchor_scene_tool_row_id(incoming_row)
-    for index in content_tool_indexes:
-        if index in used_indexes or index < 0 or index >= len(rows):
-            continue
-        existing_id = _anchor_scene_tool_row_id(rows[index])
-        if existing_id and incoming_id and existing_id == incoming_id:
-            return index
-    if len(content_tool_indexes) == 1 and incoming_total == 1:
-        index = content_tool_indexes[0]
-        if (
-            index not in used_indexes
-            and 0 <= index < len(rows)
-            and _anchor_scene_tool_rows_can_name_match(rows[index], incoming_row)
-        ):
-            return index
-    available_indexes = [
-        index for index in content_tool_indexes if index not in used_indexes and 0 <= index < len(rows)
-    ]
-    if len(available_indexes) == 1:
-        index = available_indexes[0]
-        if incoming_total == 1 and _anchor_scene_tool_rows_can_name_match(rows[index], incoming_row):
-            return index
-        if _anchor_scene_tool_rows_have_compatible_names(
-            rows[index],
-            incoming_row,
-        ) and _anchor_scene_tool_rows_have_compatible_invocation(rows[index], incoming_row):
-            return index
-    reusable_indexes = [
-        index for index in content_tool_indexes if index in used_indexes and 0 <= index < len(rows)
-    ]
-    if len(reusable_indexes) == 1 and incoming_total == 1:
-        index = reusable_indexes[0]
-        existing_id = _anchor_scene_tool_row_id(rows[index])
-        id_flexible = isinstance(id_flexible_indexes, set) and index in id_flexible_indexes
-        if _anchor_scene_tool_rows_have_compatible_names(
-            rows[index],
-            incoming_row,
-        ) and (
-            (existing_id and incoming_id and existing_id == incoming_id)
-            or (
-                id_flexible
-                and _anchor_scene_tool_rows_have_same_started_at(rows[index], incoming_row)
-                and _anchor_scene_tool_rows_have_compatible_body(rows[index], incoming_row)
-            )
-        ) and _anchor_scene_tool_rows_have_compatible_invocation(rows[index], incoming_row):
-            return index
-    for index in content_tool_indexes:
-        if index in used_indexes or index < 0 or index >= len(rows):
-            continue
-        existing_id = _anchor_scene_tool_row_id(rows[index])
-        if not existing_id and not incoming_id and _anchor_scene_tool_rows_can_name_match(rows[index], incoming_row):
-            return index
-    return None
 
 
-def _anchor_scene_content_rows(message, order_index, message_index, stream_id="", *, is_final_message=False):
-    if not _anchor_scene_message_has_content_tool_use(message):
-        return None
-    rows = []
-    content = message.get("content") if isinstance(message, dict) else []
-    last_tool_index = -1
-    for idx, part in enumerate(content):
-        if isinstance(part, dict) and part.get("type") == "tool_use":
-            last_tool_index = idx
-    for idx, part in enumerate(content):
-        if not isinstance(part, dict):
-            if is_final_message and idx > last_tool_index:
-                continue
-            text = _anchor_scene_content_text(part)
-            if _anchor_scene_clean_text(text):
-                rows.append(_anchor_scene_prose_row(text, order_index + len(rows), message_index, stream_id))
-            continue
-        part_type = part.get("type")
-        if part_type in ("text", "input_text", "output_text"):
-            if is_final_message and idx > last_tool_index and _anchor_scene_content_visible_text(part):
-                continue
-            text = _anchor_scene_content_text(part)
-            if _anchor_scene_clean_text(text):
-                rows.append(_anchor_scene_prose_row(text, order_index + len(rows), message_index, stream_id))
-            continue
-        if part_type in ("thinking", "reasoning"):
-            text = _anchor_scene_content_text(part)
-            if _anchor_scene_clean_text(text):
-                rows.append(_anchor_scene_thinking_row(text, order_index + len(rows), message_index, stream_id))
-            continue
-        if part_type == "tool_use":
-            rows.append(
-                _anchor_scene_tool_row(
-                    _anchor_scene_content_tool(part),
-                    order_index + len(rows),
-                    message_index,
-                    stream_id,
-                )
-            )
-    return rows
 
 
-def _anchor_scene_row_key(row) -> str:
-    if not isinstance(row, dict):
-        return ""
-    if row.get("role") == "tool":
-        tool = row.get("tool") if isinstance(row.get("tool"), dict) else {}
-        return "tool:" + str(
-            row.get("tool_call_id")
-            or tool.get("id")
-            or tool.get("tid")
-            or tool.get("tool_call_id")
-            or tool.get("tool_use_id")
-            or tool.get("call_id")
-            or row.get("row_id")
-            or ""
-        )
-    if row.get("role") in ("prose", "thinking"):
-        return f"{row.get('role')}:{_anchor_scene_text_key(row.get('text'))}"
-    if row.get("role") == "lifecycle":
-        source_type = str(row.get("source_event_type") or row.get("source") or "")
-        if source_type in ("compressing", "compressed"):
-            return "lifecycle:compression"
-    return f"{row.get('role') or row.get('kind')}:{row.get('source_event_type') or ''}:{row.get('status') or ''}:{row.get('row_id') or ''}"
 
 
-def _anchor_scene_row_has_live_identity(row) -> bool:
-    if not isinstance(row, dict):
-        return False
-    values = [row.get("row_id"), row.get("local_id"), row.get("event_id")]
-    identity = row.get("identity") if isinstance(row.get("identity"), dict) else {}
-    values.extend([identity.get("local_id"), identity.get("event_id")])
-    if any(str(value or "").startswith("live-") for value in values):
-        return True
-    group = row.get("group") if isinstance(row.get("group"), dict) else {}
-    has_stream_owner = bool(
-        row.get("stream_id")
-        or row.get("run_id")
-        or identity.get("stream_id")
-        or identity.get("run_id")
-    )
-    has_assistant_message_index = group.get("assistant_msg_idx") is not None
-    return has_stream_owner and not has_assistant_message_index
 
 
-def _anchor_scene_settle_live_running_row(row, *, has_settled_thinking: bool):
-    if not isinstance(row, dict):
-        return row
-    role = row.get("role")
-    if role not in ("thinking", "prose", "tool"):
-        return row
-    if str(row.get("status") or "").lower() != "running":
-        return row
-    if not _anchor_scene_row_has_live_identity(row):
-        return row
-    if role == "thinking" and has_settled_thinking:
-        return None
-    next_row = copy.deepcopy(row)
-    next_row["status"] = "completed"
-    payload = next_row.get("payload")
-    if isinstance(payload, dict):
-        payload["status"] = "completed"
-        if role == "tool":
-            payload["done"] = True
-    tool = next_row.get("tool")
-    if role == "tool" and isinstance(tool, dict):
-        tool["done"] = True
-    return next_row
 
+
+
+
+
+
+from api import anchor_activity_scene as _anchor_scene_module
+
+_sanitize_anchor_activity_scene = _anchor_scene_module._sanitize_anchor_activity_scene
+
+_anchor_scene_int_or_none = _anchor_scene_module._anchor_scene_int_or_none
+
+_anchor_scene_message_index_from_request = _anchor_scene_module._anchor_scene_message_index_from_request
+
+def _anchor_scene_candidate_matches_scene(message, scene):
+    return _anchor_scene_module._anchor_scene_candidate_matches_scene(message, scene)
+
+
+_normalize_anchor_scene_message_ref = _anchor_scene_module._normalize_anchor_scene_message_ref
+
+_anchor_scene_records = _anchor_scene_module._anchor_scene_records
+
+_anchor_scene_message_text = _anchor_scene_module._anchor_scene_message_text
+
+_anchor_scene_content_text = _anchor_scene_module._anchor_scene_content_text
+
+_anchor_scene_content_visible_text = _anchor_scene_module._anchor_scene_content_visible_text
+
+_anchor_scene_message_has_content_tool_use = _anchor_scene_module._anchor_scene_message_has_content_tool_use
+
+_anchor_scene_final_answer_text = _anchor_scene_module._anchor_scene_final_answer_text
+
+_anchor_scene_message_reasoning_text = _anchor_scene_module._anchor_scene_message_reasoning_text
+
+_anchor_scene_clean_text = _anchor_scene_module._anchor_scene_clean_text
+
+_anchor_scene_text_key = _anchor_scene_module._anchor_scene_text_key
+
+_anchor_scene_string_payload = _anchor_scene_module._anchor_scene_string_payload
+
+_anchor_scene_is_bounded_tool_body_preview = _anchor_scene_module._anchor_scene_is_bounded_tool_body_preview
+
+_anchor_scene_row_looks_like_final_answer = _anchor_scene_module._anchor_scene_row_looks_like_final_answer
+
+_anchor_scene_text_has_long_overlap = _anchor_scene_module._anchor_scene_text_has_long_overlap
+
+_anchor_scene_row_is_stale_token_answer = _anchor_scene_module._anchor_scene_row_is_stale_token_answer
+
+_anchor_scene_message_turn_duration = _anchor_scene_module._anchor_scene_message_turn_duration
+
+_anchor_scene_tool_id = _anchor_scene_module._anchor_scene_tool_id
+
+_anchor_scene_tool_name = _anchor_scene_module._anchor_scene_tool_name
+
+_anchor_scene_tool_args = _anchor_scene_module._anchor_scene_tool_args
+
+_anchor_scene_content_tool = _anchor_scene_module._anchor_scene_content_tool
+
+_anchor_scene_row_base = _anchor_scene_module._anchor_scene_row_base
+
+_anchor_scene_prose_row = _anchor_scene_module._anchor_scene_prose_row
+
+_anchor_scene_thinking_row = _anchor_scene_module._anchor_scene_thinking_row
+
+_anchor_scene_tool_row = _anchor_scene_module._anchor_scene_tool_row
+
+_anchor_scene_tool_row_id = _anchor_scene_module._anchor_scene_tool_row_id
+
+_anchor_scene_tool_row_name = _anchor_scene_module._anchor_scene_tool_row_name
+
+_anchor_scene_tool_rows_have_compatible_names = _anchor_scene_module._anchor_scene_tool_rows_have_compatible_names
+
+_anchor_scene_tool_row_args = _anchor_scene_module._anchor_scene_tool_row_args
+
+_anchor_scene_object_contains_subset = _anchor_scene_module._anchor_scene_object_contains_subset
+
+_anchor_scene_tool_rows_have_compatible_invocation = _anchor_scene_module._anchor_scene_tool_rows_have_compatible_invocation
+
+_anchor_scene_tool_row_has_invocation_evidence = _anchor_scene_module._anchor_scene_tool_row_has_invocation_evidence
+
+_anchor_scene_tool_rows_can_name_match = _anchor_scene_module._anchor_scene_tool_rows_can_name_match
+
+_anchor_scene_tool_rows_have_different_explicit_ids = _anchor_scene_module._anchor_scene_tool_rows_have_different_explicit_ids
+
+_anchor_scene_tool_row_started_at = _anchor_scene_module._anchor_scene_tool_row_started_at
+
+_anchor_scene_tool_rows_have_same_started_at = _anchor_scene_module._anchor_scene_tool_rows_have_same_started_at
+
+_anchor_scene_tool_row_body_text = _anchor_scene_module._anchor_scene_tool_row_body_text
+
+_anchor_scene_tool_rows_have_compatible_body = _anchor_scene_module._anchor_scene_tool_rows_have_compatible_body
+
+_anchor_scene_matching_content_tool_row_index = _anchor_scene_module._anchor_scene_matching_content_tool_row_index
+
+_anchor_scene_content_rows = _anchor_scene_module._anchor_scene_content_rows
+
+_anchor_scene_row_key = _anchor_scene_module._anchor_scene_row_key
+
+_anchor_scene_row_has_live_identity = _anchor_scene_module._anchor_scene_row_has_live_identity
+
+_anchor_scene_settle_live_running_row = _anchor_scene_module._anchor_scene_settle_live_running_row
 
 def _complete_hydrated_anchor_scene(messages, scene, message_index, *, message_offset=0, tool_calls=None, stream_id=""):
-    if not isinstance(messages, list) or not isinstance(scene, dict) or not isinstance(message_index, int):
-        return scene
-    local_final_idx = message_index - int(message_offset or 0)
-    if local_final_idx < 0 or local_final_idx >= len(messages):
-        return scene
-    final_message = messages[local_final_idx]
-    if not isinstance(final_message, dict) or final_message.get("role") != "assistant":
-        return scene
-    turn_start = -1
-    for idx in range(local_final_idx - 1, -1, -1):
-        message = messages[idx]
-        if isinstance(message, dict) and message.get("role") == "user":
-            turn_start = idx
-            break
-    message_final_answer = _anchor_scene_final_answer_text(final_message)
-    scene_final_answer = scene.get("final_answer") if isinstance(scene.get("final_answer"), str) else ""
-    final_answer = message_final_answer if _anchor_scene_clean_text(message_final_answer) else scene_final_answer
-    final_key = _anchor_scene_text_key(final_answer)
-    rows = []
-    seen = {}
-
-    def merge_duplicate_tool_row(existing, incoming, *, prefer_incoming_body=False):
-        if not isinstance(existing, dict) or not isinstance(incoming, dict):
-            return existing
-        merged = copy.deepcopy(existing)
-        merged_tool = merged.get("tool") if isinstance(merged.get("tool"), dict) else {}
-        incoming_tool = incoming.get("tool") if isinstance(incoming.get("tool"), dict) else {}
-        merged_payload = merged.get("payload") if isinstance(merged.get("payload"), dict) else {}
-        incoming_payload = incoming.get("payload") if isinstance(incoming.get("payload"), dict) else {}
-
-        def empty(value):
-            return value is None or value == "" or value == {}
-
-        def merge_missing_args(existing_args, incoming_args):
-            if not isinstance(incoming_args, dict) or not incoming_args:
-                return existing_args, False
-            base = copy.deepcopy(existing_args) if isinstance(existing_args, dict) else {}
-            changed = not isinstance(existing_args, dict)
-            for key, value in incoming_args.items():
-                if key not in base:
-                    base[key] = copy.deepcopy(value)
-                    changed = True
-            return base, changed
-
-        for key in ("snippet", "result", "output"):
-            incoming_value = incoming_tool.get(key)
-            if not empty(incoming_value) and (
-                empty(merged_tool.get(key))
-                or (
-                    prefer_incoming_body
-                    and _anchor_scene_is_bounded_tool_body_preview(merged_tool.get(key), incoming_value)
-                )
-            ):
-                merged_tool[key] = copy.deepcopy(incoming_value)
-            incoming_value = incoming_payload.get(key)
-            if not empty(incoming_value) and (
-                empty(merged_payload.get(key))
-                or (
-                    prefer_incoming_body
-                    and _anchor_scene_is_bounded_tool_body_preview(merged_payload.get(key), incoming_value)
-                )
-            ):
-                merged_payload[key] = copy.deepcopy(incoming_value)
-        for key in ("preview", "command", "duration", "started_at"):
-            incoming_value = incoming_tool.get(key)
-            if not empty(incoming_value) and empty(merged_tool.get(key)):
-                merged_tool[key] = copy.deepcopy(incoming_value)
-            incoming_value = incoming_payload.get(key)
-            if not empty(incoming_value) and empty(merged_payload.get(key)):
-                merged_payload[key] = copy.deepcopy(incoming_value)
-        merged_args, args_changed = merge_missing_args(merged_tool.get("args"), incoming_tool.get("args"))
-        if args_changed:
-            merged_tool["args"] = merged_args
-        merged_payload_args, payload_args_changed = merge_missing_args(
-            merged_payload.get("args"),
-            incoming_payload.get("args"),
-        )
-        if payload_args_changed:
-            merged_payload["args"] = merged_payload_args
-        merged["tool"] = merged_tool
-        merged["payload"] = merged_payload
-        return merged
-
-    def push(row, *, prefer_incoming_tool_body=False):
-        if not isinstance(row, dict):
-            return
-        row = _anchor_scene_settle_live_running_row(
-            row,
-            has_settled_thinking=any(existing.get("role") == "thinking" for existing in rows),
-        )
-        if row is None or not isinstance(row, dict):
-            return
-        text_key = _anchor_scene_text_key(row.get("text"))
-        if row.get("role") in ("prose", "thinking") and _anchor_scene_row_looks_like_final_answer(text_key, final_key):
-            return
-        if _anchor_scene_row_is_stale_token_answer(row, text_key, final_key):
-            return
-        key = _anchor_scene_row_key(row)
-        if key and key in seen:
-            if key.startswith("tool:"):
-                index = seen[key]
-                rows[index] = merge_duplicate_tool_row(
-                    rows[index],
-                    row,
-                    prefer_incoming_body=prefer_incoming_tool_body,
-                )
-                return
-            if key == "lifecycle:compression":
-                index = seen[key]
-                next_row = copy.deepcopy(row)
-                next_row["order_index"] = index
-                next_row["seq"] = index
-                rows[index] = next_row
-            return
-        if key:
-            seen[key] = len(rows)
-        next_row = copy.deepcopy(row)
-        next_row["order_index"] = len(rows)
-        next_row["seq"] = len(rows)
-        rows.append(next_row)
-
-    order = 0
-    content_tool_indexes_by_idx = {}
-    used_content_tool_indexes_by_idx = {}
-    id_flexible_content_tool_indexes_by_idx = {}
-    for local_idx in range(turn_start + 1, local_final_idx + 1):
-        message = messages[local_idx]
-        if not isinstance(message, dict) or message.get("role") != "assistant":
-            continue
-        absolute_idx = int(message_offset or 0) + local_idx
-        text = _anchor_scene_message_text(message)
-        content_rows = _anchor_scene_content_rows(
-            message,
-            order,
-            absolute_idx,
-            stream_id,
-            is_final_message=local_idx == local_final_idx,
-        )
-        content_tool_indexes = []
-        used_content_tool_indexes = set()
-        id_flexible_content_tool_indexes = set()
-        if content_rows:
-            for row in content_rows:
-                previous_len = len(rows)
-                push(row)
-                if row.get("role") == "tool" and len(rows) > previous_len:
-                    content_tool_indexes.append(len(rows) - 1)
-                order += 1
-            if content_tool_indexes:
-                content_tool_indexes_by_idx[absolute_idx] = content_tool_indexes
-                used_content_tool_indexes_by_idx[absolute_idx] = used_content_tool_indexes
-                id_flexible_content_tool_indexes_by_idx[absolute_idx] = id_flexible_content_tool_indexes
-        elif _anchor_scene_clean_text(text):
-            push(_anchor_scene_prose_row(text, order, absolute_idx, stream_id))
-            order += 1
-        reasoning = _anchor_scene_message_reasoning_text(message)
-        if _anchor_scene_clean_text(reasoning) and _anchor_scene_text_key(reasoning) != _anchor_scene_text_key(text):
-            push(_anchor_scene_thinking_row(reasoning, order, absolute_idx, stream_id))
-            order += 1
-        for key in ("tool_calls", "_partial_tool_calls"):
-            calls = message.get(key)
-            if isinstance(calls, list):
-                for tool_ordinal, call in enumerate(calls):
-                    row = _anchor_scene_tool_row(call, order, absolute_idx, stream_id)
-                    content_match_index = _anchor_scene_matching_content_tool_row_index(
-                        rows,
-                        content_tool_indexes,
-                        row,
-                        tool_ordinal,
-                        used_content_tool_indexes,
-                        len(calls),
-                        id_flexible_content_tool_indexes,
-                    )
-                    if content_match_index is not None:
-                        if _anchor_scene_tool_rows_have_different_explicit_ids(
-                            rows[content_match_index],
-                            row,
-                        ):
-                            id_flexible_content_tool_indexes.add(content_match_index)
-                        rows[content_match_index] = merge_duplicate_tool_row(rows[content_match_index], row)
-                        incoming_key = _anchor_scene_row_key(row)
-                        if incoming_key:
-                            seen[incoming_key] = content_match_index
-                        used_content_tool_indexes.add(content_match_index)
-                        order += 1
-                        continue
-                    push(row)
-                    order += 1
-    external_tool_counts = {}
-    for call in tool_calls or []:
-        if not isinstance(call, dict):
-            continue
-        try:
-            absolute_idx = int(call.get("assistant_msg_idx"))
-        except (TypeError, ValueError):
-            continue
-        external_tool_counts[absolute_idx] = external_tool_counts.get(absolute_idx, 0) + 1
-    external_tool_ordinals = {}
-    for call in tool_calls or []:
-        if not isinstance(call, dict):
-            continue
-        try:
-            absolute_idx = int(call.get("assistant_msg_idx"))
-        except (TypeError, ValueError):
-            continue
-        local_idx = absolute_idx - int(message_offset or 0)
-        if not (turn_start < local_idx <= local_final_idx):
-            continue
-        row = _anchor_scene_tool_row(call, order, absolute_idx, stream_id)
-        tool_ordinal = external_tool_ordinals.get(absolute_idx, 0)
-        external_tool_ordinals[absolute_idx] = tool_ordinal + 1
-        content_match_index = _anchor_scene_matching_content_tool_row_index(
-            rows,
-            content_tool_indexes_by_idx.get(absolute_idx, []),
-            row,
-            tool_ordinal,
-            used_content_tool_indexes_by_idx.setdefault(absolute_idx, set()),
-            external_tool_counts.get(absolute_idx, 0),
-            id_flexible_content_tool_indexes_by_idx.setdefault(absolute_idx, set()),
-        )
-        if content_match_index is not None:
-            if _anchor_scene_tool_rows_have_different_explicit_ids(rows[content_match_index], row):
-                id_flexible_content_tool_indexes_by_idx.setdefault(absolute_idx, set()).add(content_match_index)
-            rows[content_match_index] = merge_duplicate_tool_row(
-                rows[content_match_index],
-                row,
-                prefer_incoming_body=True,
-            )
-            incoming_key = _anchor_scene_row_key(row)
-            if incoming_key:
-                seen[incoming_key] = content_match_index
-            used_content_tool_indexes_by_idx[absolute_idx].add(content_match_index)
-            order += 1
-            continue
-        push(row, prefer_incoming_tool_body=True)
-        order += 1
-    for row in scene.get("activity_rows") or []:
-        if isinstance(row, dict) and row.get("role") != "terminal":
-            push(row)
-    for row in scene.get("activity_rows") or []:
-        if isinstance(row, dict) and row.get("role") == "terminal":
-            push(row)
-    repaired = copy.deepcopy(scene)
-    repaired["version"] = "activity_scene_v1"
-    repaired["mode"] = repaired.get("mode") or "compact_worklog"
-    repaired["final_answer"] = final_answer if _anchor_scene_clean_text(final_answer) else repaired.get("final_answer", "")
-    repaired["final_message_ref"] = _assistant_anchor_scene_message_ref(final_message)
-    if repaired.get("turn_duration") is None:
-        duration = _anchor_scene_message_turn_duration(final_message)
-        if duration is not None:
-            repaired["turn_duration"] = duration
-    repaired["activity_rows"] = rows
-    identity = repaired.get("identity") if isinstance(repaired.get("identity"), dict) else {}
-    identity = dict(identity)
-    identity["source_message_refs"] = [
-        _assistant_anchor_scene_message_ref(message)
-        for message in messages[turn_start + 1 : local_final_idx + 1]
-        if isinstance(message, dict) and message.get("role") == "assistant"
-    ]
-    repaired["identity"] = identity
-    return repaired
+    return _anchor_scene_module._complete_hydrated_anchor_scene(messages, scene, message_index, message_offset=message_offset, tool_calls=tool_calls, stream_id=stream_id, _assistant_anchor_scene_message_ref=_assistant_anchor_scene_message_ref)
 
 
 def _hydrate_anchor_activity_scenes(messages, records, *, message_offset=0, tool_calls=None):
-    if not isinstance(messages, list) or not isinstance(records, dict) or not records:
-        return messages
-    by_ref = {}
-    by_index = {}
-    for key, record in records.items():
-        if not isinstance(record, dict):
-            continue
-        scene = record.get("scene")
-        if not isinstance(scene, dict):
-            continue
-        ref = str(record.get("message_ref") or key or "")
-        if ref:
-            by_ref[ref] = record
-        try:
-            idx = int(record.get("message_index"))
-        except (TypeError, ValueError):
-            idx = None
-        if idx is not None:
-            by_index[idx] = record
-    out = list(messages)
-    # Read-side ref-ambiguity guard (parity with the write-side
-    # _find_anchor_scene_message, which returns None when a ref matches >1
-    # message). If two assistant messages ever share a ref (byte-identical
-    # whitespace-normalized content + identical _ts), attaching the same scene
-    # to both would render duplicate worklog groups. Count ref occurrences and
-    # fall through to the index-based match (which is positional, unambiguous)
-    # for any ref that resolves to more than one assistant message.
-    _ref_counts: dict[str, int] = {}
-    for _m in messages:
-        if isinstance(_m, dict) and _m.get("role") == "assistant":
-            _r = _assistant_anchor_scene_message_ref(_m)
-            if _r:
-                _ref_counts[_r] = _ref_counts.get(_r, 0) + 1
-    for local_idx, message in enumerate(messages):
-        if not isinstance(message, dict) or message.get("role") != "assistant":
-            continue
-        absolute_idx = int(message_offset or 0) + local_idx
-        _msg_ref = _assistant_anchor_scene_message_ref(message)
-        record = by_ref.get(_msg_ref) if _ref_counts.get(_msg_ref, 0) <= 1 else None
-        if not record:
-            candidate = by_index.get(absolute_idx)
-            if candidate and _anchor_scene_candidate_matches_scene(message, candidate.get("scene") or {}):
-                record = candidate
-        if not record:
-            continue
-        scene = record.get("scene")
-        if not isinstance(scene, dict):
-            continue
-        next_message = dict(message)
-        stream_id = record.get("stream_id")
-        next_message["_anchor_activity_scene"] = _complete_hydrated_anchor_scene(
-            messages,
-            scene,
-            absolute_idx,
-            message_offset=message_offset,
-            tool_calls=tool_calls,
-            stream_id=str(stream_id or ""),
-        )
-        if stream_id:
-            next_message["_anchor_stream_id"] = str(stream_id)
-        out[local_idx] = next_message
-    return out
+    return _anchor_scene_module._hydrate_anchor_activity_scenes(messages, records, message_offset=message_offset, tool_calls=tool_calls, _assistant_anchor_scene_message_ref=_assistant_anchor_scene_message_ref)
+
 
 
 def _handle_session_anchor_scene(handler, body):
@@ -10932,125 +9732,54 @@ def _oidc_login_html(parsed) -> str:
 
 # ── Insights endpoint ──────────────────────────────────────────────────────────
 
-_LLM_WIKI_DOCS_URL = "https://hermes-agent.nousresearch.com/docs/user-guide/skills/bundled/research/research-llm-wiki"
-_LLM_WIKI_PAGE_DIRS = ("entities", "concepts", "comparisons", "queries")
-
-
-def _llm_wiki_active_hermes_home() -> Path:
-    try:
-        from api.profiles import get_active_hermes_home
-        return Path(get_active_hermes_home()).expanduser()
-    except Exception:
-        return Path(os.getenv("HERMES_HOME", str(Path.home() / ".hermes"))).expanduser()
-
-
-def _llm_wiki_env_file_path(hermes_home: Path) -> str | None:
-    env_path = hermes_home / ".env"
-    if not env_path.exists() or not env_path.is_file():
-        return None
-    try:
-        for line in env_path.read_text(encoding="utf-8", errors="replace").splitlines():
-            stripped = line.strip()
-            if not stripped or stripped.startswith("#") or "=" not in stripped:
-                continue
-            key, value = stripped.split("=", 1)
-            if key.strip() != "WIKI_PATH":
-                continue
-            value = value.strip().strip('"').strip("'")
-            return value or None
-    except Exception:
-        return None
-    return None
-
-
-def _llm_wiki_get_config_path_value(config: dict, dotted_key: str) -> str | None:
-    if not isinstance(config, dict):
-        return None
-    if dotted_key in config and config.get(dotted_key):
-        return str(config.get(dotted_key))
-    cur = config
-    for part in dotted_key.split("."):
-        if not isinstance(cur, dict) or part not in cur:
-            return None
-        cur = cur[part]
-    return str(cur) if cur else None
+from api.route_wiki_helpers import (
+    _LLM_WIKI_DOCS_URL,
+    _LLM_WIKI_FORBIDDEN_ROOTS,
+    _LLM_WIKI_MAX_FILES,
+    _LLM_WIKI_MAX_PAGE_BYTES,
+    _LLM_WIKI_PAGE_DIRS,
+    _WIKI_ALLOWLIST_TTL,
+    _wiki_allowlist_cache,
+    _wiki_allowlist_cache_lock,
+    _llm_wiki_active_hermes_home,
+    _llm_wiki_env_file_path,
+    _llm_wiki_get_config_path_value,
+    _llm_wiki_config_path as _wiki_impl_llm_wiki_config_path,
+    _llm_wiki_resolve_path as _wiki_impl_llm_wiki_resolve_path,
+    _llm_wiki_safe_iso,
+    _llm_wiki_count_files as _wiki_impl_llm_wiki_count_files,
+    _llm_wiki_page_files_cache_signature as _wiki_impl_llm_wiki_page_files_cache_signature,
+    _llm_wiki_page_files_uncached as _wiki_impl_llm_wiki_page_files_uncached,
+    _llm_wiki_page_files as _wiki_impl_llm_wiki_page_files,
+    _llm_wiki_clear_page_files_cache as _wiki_impl_llm_wiki_clear_page_files_cache,
+    _llm_wiki_allowlisted_entries as _wiki_impl_llm_wiki_allowlisted_entries,
+    _llm_wiki_status_file_entry_stat,
+    _llm_wiki_verified_status_file_stat as _wiki_impl_llm_wiki_verified_status_file_stat,
+    _llm_wiki_last_writer as _wiki_impl_llm_wiki_last_writer,
+    _build_llm_wiki_status as _wiki_impl_build_llm_wiki_status,
+)
 
 
 def _llm_wiki_config_path() -> str | None:
-    try:
-        from api.config import get_config as _get_cfg
-        cfg = _get_cfg()
-    except Exception:
-        return None
-    return (
-        _llm_wiki_get_config_path_value(cfg, "skills.config.wiki.path")
-        or _llm_wiki_get_config_path_value(cfg, "wiki.path")
+    return _wiki_impl_llm_wiki_config_path(
+        _llm_wiki_get_config_path_value=_llm_wiki_get_config_path_value,
     )
 
 
-# Cap WIKI walks to prevent self-DoS if WIKI_PATH points at /, /etc, /home, etc.
-# Real LLM wikis have under a few thousand files; 10k is generous and catches misconfig.
-_LLM_WIKI_MAX_FILES = 10000
-# Cap a single served wiki page at 2 MiB so a huge/binary file can't be slurped
-# wholesale into memory + a JSON response (DoS / memory-blowup guard).
-_LLM_WIKI_MAX_PAGE_BYTES = 2 * 1024 * 1024
-# Refuse to walk these system roots even if explicitly configured.
-_LLM_WIKI_FORBIDDEN_ROOTS = frozenset(
-    str(Path(p).expanduser().resolve()) for p in ("/", "/etc", "/usr", "/var", "/opt", "/sys", "/proc")
-)
-_WIKI_ALLOWLIST_TTL = 5.0  # seconds
-_wiki_allowlist_cache: dict[str, dict[str, object]] = {}
-_wiki_allowlist_cache_lock = threading.Lock()
-
-
 def _llm_wiki_resolve_path() -> tuple[Path, str, bool]:
-    hermes_home = _llm_wiki_active_hermes_home()
-    raw = os.getenv("WIKI_PATH") or _llm_wiki_env_file_path(hermes_home)
-    source = "WIKI_PATH" if raw else "default"
-    configured = bool(raw)
-    if not raw:
-        raw = _llm_wiki_config_path()
-        if raw:
-            source = "skills.config.wiki.path"
-            configured = True
-    if not raw:
-        raw = "~/wiki"
-    return Path(os.path.expandvars(raw)).expanduser(), source, configured
-
-
-def _llm_wiki_safe_iso(ts: float | None) -> str | None:
-    if not ts:
-        return None
-    try:
-        from datetime import datetime, timezone
-        return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat().replace("+00:00", "Z")
-    except Exception:
-        return None
+    return _wiki_impl_llm_wiki_resolve_path(
+        _llm_wiki_active_hermes_home=_llm_wiki_active_hermes_home,
+        _llm_wiki_config_path=_llm_wiki_config_path,
+        _llm_wiki_env_file_path=_llm_wiki_env_file_path,
+    )
 
 
 def _llm_wiki_count_files(root: Path) -> int:
-    if not root.exists() or not root.is_dir():
-        return 0
-    # Defense in depth: refuse to walk forbidden system roots even if WIKI_PATH
-    # was set to one. The endpoint is auth-gated but a misconfigured server
-    # shouldn't self-DoS by rglob'ing all of /etc on every Insights load.
-    try:
-        if str(root.resolve()) in _LLM_WIKI_FORBIDDEN_ROOTS:
-            return 0
-    except Exception:
-        return 0
-    count = 0
-    iterated = 0
-    for item in root.rglob("*"):
-        iterated += 1
-        if iterated > _LLM_WIKI_MAX_FILES:
-            break  # bounded — prevents hangs on symlink loops or huge trees
-        try:
-            if item.is_file() and not any(part.startswith(".") for part in item.relative_to(root).parts):
-                count += 1
-        except Exception:
-            continue
-    return count
+    return _wiki_impl_llm_wiki_count_files(
+        root,
+        _LLM_WIKI_FORBIDDEN_ROOTS=_LLM_WIKI_FORBIDDEN_ROOTS,
+        _LLM_WIKI_MAX_FILES=_LLM_WIKI_MAX_FILES,
+    )
 
 
 def _llm_wiki_page_files_cache_signature(wiki_path: Path) -> tuple:
@@ -11062,79 +9791,19 @@ def _llm_wiki_page_files_cache_signature(wiki_path: Path) -> tuple:
     section dirs are represented as ``(section, None)`` so their appearance
     or disappearance also invalidates the cache.
     """
-    sig = []
-    for section in _LLM_WIKI_PAGE_DIRS:
-        section_dir = wiki_path / section
-        try:
-            st = section_dir.lstat()
-        except OSError:
-            sig.append((section, None))
-            continue
-        sig.append((section, st.st_dev, st.st_ino, st.st_mtime_ns))
-    return tuple(sig)
+    return _wiki_impl_llm_wiki_page_files_cache_signature(
+        wiki_path,
+        _LLM_WIKI_PAGE_DIRS=_LLM_WIKI_PAGE_DIRS,
+    )
 
 
 def _llm_wiki_page_files_uncached(wiki_path: Path) -> list[Path]:
-    pages: list[Path] = []
-    # Defense in depth: refuse forbidden system roots, and resolve the wiki root
-    # ONCE as the single trust base for all containment checks below.
-    try:
-        wiki_real = wiki_path.resolve()
-        if str(wiki_real) in _LLM_WIKI_FORBIDDEN_ROOTS:
-            return pages
-    except Exception:
-        return pages
-
-    def _is_clean_relpath(rel: Path) -> bool:
-        # No dot-prefixed segment (dotfile/dotdir) anywhere in the path.
-        return not any(part.startswith(".") for part in rel.parts)
-
-    iterated = 0
-    for dirname in _LLM_WIKI_PAGE_DIRS:
-        section = wiki_path / dirname
-        if not section.exists() or not section.is_dir():
-            continue
-        # The section itself must resolve UNDER the real wiki root — guards a
-        # symlinked section (e.g. concepts -> /tmp/outside) from exposing files
-        # outside the wiki tree entirely.
-        try:
-            section_real = section.resolve()
-            section_real.relative_to(wiki_real)
-        except (OSError, ValueError):
-            continue
-        for item in section.rglob("*.md"):
-            iterated += 1
-            if iterated > _LLM_WIKI_MAX_FILES:
-                return pages  # bounded
-            try:
-                rel = item.relative_to(section)
-                if not item.is_file() or not _is_clean_relpath(rel):
-                    continue
-                # Reject multi-link (hardlinked) page files. A hardlink at a
-                # clean *.md name can point at an arbitrary inode (incl. one
-                # outside the wiki); O_NOFOLLOW + inode-identity at read time
-                # cannot tell such a hardlink apart from the real page, so
-                # exclude any file with st_nlink > 1 from the allowlist. (#4375)
-                try:
-                    if item.lstat().st_nlink > 1:
-                        continue
-                except OSError:
-                    continue
-                # Resolve the real target and require it to live under BOTH the
-                # real wiki root and the real section, with no dot-prefixed
-                # segment on the resolved-relative path. This closes symlink
-                # escapes whose link name looks like a clean *.md page but whose
-                # target is an arbitrary / hidden / out-of-tree file (the read
-                # endpoint would otherwise serve it).
-                item_real = item.resolve()
-                item_real.relative_to(section_real)
-                rel_real = item_real.relative_to(wiki_real)
-                if not _is_clean_relpath(rel_real):
-                    continue
-                pages.append(item)
-            except (OSError, ValueError):
-                continue
-    return pages
+    return _wiki_impl_llm_wiki_page_files_uncached(
+        wiki_path,
+        _LLM_WIKI_FORBIDDEN_ROOTS=_LLM_WIKI_FORBIDDEN_ROOTS,
+        _LLM_WIKI_MAX_FILES=_LLM_WIKI_MAX_FILES,
+        _LLM_WIKI_PAGE_DIRS=_LLM_WIKI_PAGE_DIRS,
+    )
 
 
 def _llm_wiki_page_files(wiki_path: Path) -> list[Path]:
@@ -11149,118 +9818,39 @@ def _llm_wiki_page_files(wiki_path: Path) -> list[Path]:
     no-follow directory fds would close the gap but is deferred — the inode
     match already defeats path-swap and symlink races at open time.
     """
-    try:
-        wiki_root = wiki_path.resolve()
-    except OSError:
-        wiki_root = wiki_path
-
-    key = str(wiki_root)
-    sig = _llm_wiki_page_files_cache_signature(wiki_root)
-    now = time.monotonic()
-
-    with _wiki_allowlist_cache_lock:
-        cached = _wiki_allowlist_cache.get(key)
-        if (
-            cached is not None
-            and cached.get("signature") == sig
-            and now < cached.get("expires_at", 0)
-        ):
-            return list(cached["files"])
-
-    pages = _llm_wiki_page_files_uncached(wiki_root)
-
-    with _wiki_allowlist_cache_lock:
-        _wiki_allowlist_cache[key] = {
-            "signature": sig,
-            "expires_at": now + _WIKI_ALLOWLIST_TTL,
-            "files": tuple(pages),
-        }
-    return list(pages)
+    return _wiki_impl_llm_wiki_page_files(
+        wiki_path,
+        _WIKI_ALLOWLIST_TTL=_WIKI_ALLOWLIST_TTL,
+        _llm_wiki_page_files_cache_signature=_llm_wiki_page_files_cache_signature,
+        _llm_wiki_page_files_uncached=_llm_wiki_page_files_uncached,
+        _wiki_allowlist_cache=_wiki_allowlist_cache,
+        _wiki_allowlist_cache_lock=_wiki_allowlist_cache_lock,
+    )
 
 
 def _llm_wiki_clear_page_files_cache() -> None:
     """Clear the allowlist cache; intended for tests only."""
-    with _wiki_allowlist_cache_lock:
-        _wiki_allowlist_cache.clear()
+    return _wiki_impl_llm_wiki_clear_page_files_cache(
+        _wiki_allowlist_cache=_wiki_allowlist_cache,
+        _wiki_allowlist_cache_lock=_wiki_allowlist_cache_lock,
+    )
 
 
 def _llm_wiki_allowlisted_entries(wiki_path: Path) -> dict[str, tuple[Path, tuple[int, int]]]:
     """Return listed relpaths mapped to resolved targets plus stable identity."""
-    try:
-        wiki_real = wiki_path.resolve()
-    except OSError:
-        return {}
-
-    def _wiki_read_relpath_is_clean(rel: Path) -> bool:
-        rel_text = rel.as_posix()
-        return bool(rel.parts) and "\\" not in rel_text and not any(part.startswith(".") for part in rel.parts)
-
-    entries: dict[str, tuple[Path, tuple[int, int]]] = {}
-    try:
-        for listed_path in _llm_wiki_page_files(wiki_real):
-            try:
-                rel_listed = listed_path.relative_to(wiki_real)
-                if not _wiki_read_relpath_is_clean(rel_listed):
-                    continue
-                section_real = (wiki_real / rel_listed.parts[0]).resolve()
-                section_real.relative_to(wiki_real)
-                resolved_target = listed_path.resolve()
-                resolved_target.relative_to(section_real)
-                if not resolved_target.is_file():
-                    continue
-                # Reject hardlinked targets (st_nlink > 1): a multi-link file at
-                # a clean page name can carry an arbitrary inode through the
-                # O_NOFOLLOW + identity read check. Defense in depth alongside
-                # the same rejection in the allowlist walk. (#4375)
-                if resolved_target.stat().st_nlink > 1:
-                    continue
-                rel_resolved = resolved_target.relative_to(wiki_real)
-                if not _wiki_read_relpath_is_clean(rel_resolved):
-                    continue
-                st0 = resolved_target.stat()
-                if listed_path.resolve() != resolved_target:
-                    continue
-                entries[rel_listed.as_posix()] = (resolved_target, (st0.st_dev, st0.st_ino))
-            except (OSError, ValueError):
-                continue
-    except Exception:
-        return {}
-    return entries
-
-
-def _llm_wiki_status_file_entry_stat(wiki_path: Path, path: Path) -> os.stat_result | None:
-    """Return the current top-level status-file entry metadata when it is safe to trust."""
-    try:
-        wiki_root = wiki_path.resolve()
-    except OSError:
-        wiki_root = wiki_path
-    try:
-        path.resolve().relative_to(wiki_root)
-        st_entry = path.lstat()
-    except (OSError, ValueError):
-        return None
-    if not _stat.S_ISREG(st_entry.st_mode):
-        return None
-    return st_entry
+    return _wiki_impl_llm_wiki_allowlisted_entries(
+        wiki_path,
+        _llm_wiki_page_files=_llm_wiki_page_files,
+    )
 
 
 def _llm_wiki_verified_status_file_stat(wiki_path: Path, path: Path) -> os.stat_result | None:
     """Return identity-checked metadata for a top-level wiki status file."""
-    st_entry = _llm_wiki_status_file_entry_stat(wiki_path, path)
-    if st_entry is None:
-        return None
-    fd = None
-    try:
-        fd = os.open(str(path), os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
-        st_open = os.fstat(fd)
-        if (st_open.st_dev, st_open.st_ino) != (st_entry.st_dev, st_entry.st_ino):
-            return None
-        return st_open
-    except OSError:
-        return None
-    finally:
-        if fd is not None:
-            os.close(fd)
+    return _wiki_impl_llm_wiki_verified_status_file_stat(
+        wiki_path,
+        path,
+        _llm_wiki_status_file_entry_stat=_llm_wiki_status_file_entry_stat,
+    )
 
 
 def _llm_wiki_last_writer(
@@ -11284,178 +9874,24 @@ def _llm_wiki_last_writer(
       3. Static fallback ``"ai-agent"`` so the UI never shows "Not available"
          for a configured wiki.
     """
-    # #3455 review (Codex): resolve the wiki root once and require every file we
-    # read to stay under it, so a symlinked .md page can't leak frontmatter from
-    # outside the wiki. Also read bounded line-by-line (frontmatter only / log
-    # headings only), never full page bodies, per the private-safe status contract.
-    try:
-        wiki_root = wiki_path.resolve()
-    except Exception:
-        wiki_root = wiki_path
-
-    def _within_wiki(p: Path) -> bool:
-        try:
-            return p.resolve().is_relative_to(wiki_root)
-        except Exception:
-            return False
-
-    # Priority 1: most recent page frontmatter (resolved-path must stay in-wiki)
-    latest_page: Path | None = None
-    latest_identity: tuple[int, int] | None = None
-    latest_mtime = -1.0
-    for item in page_files:
-        candidate, identity = item if isinstance(item, tuple) else (item, None)
-        if not _within_wiki(candidate):
-            continue  # skip symlinks resolving outside the wiki
-        try:
-            st_candidate = candidate.stat()
-        except Exception:
-            continue
-        if identity is not None and (st_candidate.st_dev, st_candidate.st_ino) != identity:
-            continue
-        mtime = st_candidate.st_mtime
-        if mtime > latest_mtime:
-            latest_mtime = mtime
-            latest_page = candidate
-            latest_identity = identity
-    if latest_page is not None:
-        try:
-            fd = os.open(str(latest_page), os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
-            try:
-                if latest_identity is not None:
-                    st_open = os.fstat(fd)
-                    if (st_open.st_dev, st_open.st_ino) != latest_identity:
-                        raise FileNotFoundError("wiki page changed after allowlist snapshot")
-                with os.fdopen(fd, encoding="utf-8", errors="replace") as fh:
-                    fd = None
-                    first = fh.readline()
-                    if first.strip() == "---":
-                        # Read only the frontmatter block, bounded to a small line cap.
-                        for _ in range(200):
-                            line = fh.readline()
-                            if line == "" or line.strip() == "---":
-                                break  # EOF or end of frontmatter — never touch the body
-                            stripped = line.strip()
-                            lower = stripped.lower()
-                            for key in ("updated_by", "writer", "author"):
-                                if lower.startswith(f"{key}:"):
-                                    value = stripped.split(":", 1)[1].strip()
-                                    if value:
-                                        return value
-            finally:
-                if fd is not None:
-                    os.close(fd)
-        except Exception:
-            pass
-
-    # Priority 2: log.md last entry action verb (heading lines only, bounded)
-    log_path = wiki_path / "log.md"
-    log_entry = _llm_wiki_status_file_entry_stat(wiki_path, log_path)
-    if log_entry is not None:
-        try:
-            fd = os.open(str(log_path), os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
-            try:
-                st_open = os.fstat(fd)
-                if (st_open.st_dev, st_open.st_ino) != (log_entry.st_dev, log_entry.st_ino):
-                    raise FileNotFoundError("wiki log changed before open")
-                with os.fdopen(fd, encoding="utf-8", errors="replace") as fh:
-                    fd = None
-                    for _ in range(5000):  # cap the heading scan
-                        line = fh.readline()
-                        if line == "":
-                            break
-                        stripped = line.strip()
-                        if not stripped.startswith("## [") or "|" not in stripped:
-                            continue
-                        tail = stripped.split("]", 1)[1].strip() if "]" in stripped else ""
-                        action = tail.split()[0] if tail else "update"
-                        return f"ai-agent ({action})"
-            finally:
-                if fd is not None:
-                    os.close(fd)
-        except Exception:
-            pass
-
-    # Priority 3: never return None / "Not available" for a configured wiki
-    return "ai-agent"
+    return _wiki_impl_llm_wiki_last_writer(
+        wiki_path,
+        page_files,
+        _llm_wiki_status_file_entry_stat=_llm_wiki_status_file_entry_stat,
+    )
 
 
 def _build_llm_wiki_status() -> dict:
     """Return private-safe LLM Wiki status metadata without reading page bodies."""
-    try:
-        wiki_path, path_source, path_configured = _llm_wiki_resolve_path()
-        base = {
-            "available": False,
-            "enabled": False,
-            "status": "missing",
-            "entry_count": 0,
-            "page_count": 0,
-            "raw_source_count": 0,
-            "last_updated": None,
-            "last_writer": "ai-agent",
-            "path_configured": path_configured,
-            "path_source": path_source,
-            "toggle_available": False,
-            "toggle_reason": "Hermes Agent exposes WIKI_PATH/wiki.path for location, but no stable on/off config flag is currently available.",
-            "docs_url": _LLM_WIKI_DOCS_URL,
-        }
-        if not wiki_path.exists():
-            return base
-        if not wiki_path.is_dir():
-            base["status"] = "not_directory"
-            return base
-
-        allowlisted_entries = _llm_wiki_allowlisted_entries(wiki_path)
-        verified_page_entries: list[tuple[Path, tuple[int, int], os.stat_result]] = []
-        for target, identity in allowlisted_entries.values():
-            try:
-                st = target.stat()
-            except Exception:
-                continue
-            if (st.st_dev, st.st_ino) != identity:
-                continue
-            verified_page_entries.append((target, identity, st))
-        page_entries = [(target, identity) for target, identity, _ in verified_page_entries]
-        page_files = [target for target, _, _ in verified_page_entries]
-        status_files: list[tuple[Path, float]] = []
-        for path in (wiki_path / "SCHEMA.md", wiki_path / "index.md", wiki_path / "log.md"):
-            st_status = _llm_wiki_verified_status_file_stat(wiki_path, path)
-            if st_status is None:
-                continue
-            status_files.append((path, st_status.st_mtime))
-        status_files.extend((target, st.st_mtime) for target, _, st in verified_page_entries)
-        latest = None
-        for _, mtime in status_files:
-            latest = mtime if latest is None else max(latest, mtime)
-
-        base.update({
-            "available": True,
-            "enabled": True,
-            "status": "ready" if page_files else "empty",
-            "entry_count": len(page_files),
-            "page_count": len(page_entries),
-            "raw_source_count": _llm_wiki_count_files(wiki_path / "raw"),
-            "last_updated": _llm_wiki_safe_iso(latest),
-            "last_writer": _llm_wiki_last_writer(wiki_path, page_entries),
-        })
-        return base
-    except Exception as exc:
-        return {
-            "available": False,
-            "enabled": False,
-            "status": "error",
-            "entry_count": 0,
-            "page_count": 0,
-            "raw_source_count": 0,
-            "last_updated": None,
-            "last_writer": "ai-agent",
-            "path_configured": False,
-            "path_source": "unknown",
-            "toggle_available": False,
-            "toggle_reason": "Unable to inspect LLM Wiki status safely.",
-            "docs_url": _LLM_WIKI_DOCS_URL,
-            "error": type(exc).__name__,
-        }
+    return _wiki_impl_build_llm_wiki_status(
+        _LLM_WIKI_DOCS_URL=_LLM_WIKI_DOCS_URL,
+        _llm_wiki_allowlisted_entries=_llm_wiki_allowlisted_entries,
+        _llm_wiki_count_files=_llm_wiki_count_files,
+        _llm_wiki_last_writer=_llm_wiki_last_writer,
+        _llm_wiki_resolve_path=_llm_wiki_resolve_path,
+        _llm_wiki_safe_iso=_llm_wiki_safe_iso,
+        _llm_wiki_verified_status_file_stat=_llm_wiki_verified_status_file_stat,
+    )
 
 
 def _handle_llm_wiki_status(handler, parsed) -> bool:
@@ -17550,198 +15986,134 @@ def _handle_sessions_search(handler, parsed):
     })
 
 
+from api.route_files import (
+    _handle_list_dir as _files_impl_handle_list_dir,
+    _read_json_request_body as _files_impl_read_json_request_body,
+    _handle_escape_authorize as _files_impl_handle_escape_authorize,
+    _handle_escape_list_dir as _files_impl_handle_escape_list_dir,
+    _handle_escape_file_read as _files_impl_handle_escape_file_read,
+    _handle_escape_file_raw as _files_impl_handle_escape_file_raw,
+    _file_raw_target as _files_impl_file_raw_target,
+    _folder_zip_max_bytes,
+    _folder_zip_max_files,
+    _folder_download_collect,
+    _handle_folder_download as _files_impl_handle_folder_download,
+    _handle_file_raw as _files_impl_handle_file_raw,
+    _handle_file_read as _files_impl_handle_file_read,
+    _handle_file_delete as _files_impl_handle_file_delete,
+    _handle_file_save as _files_impl_handle_file_save,
+    _handle_office_file_save as _files_impl_handle_office_file_save,
+    _handle_file_create as _files_impl_handle_file_create,
+    _handle_file_rename as _files_impl_handle_file_rename,
+    _handle_file_move as _files_impl_handle_file_move,
+    _handle_create_dir as _files_impl_handle_create_dir,
+    _handle_file_reveal as _files_impl_handle_file_reveal,
+    _handle_file_path as _files_impl_handle_file_path,
+    _handle_file_open_vscode as _files_impl_handle_file_open_vscode,
+    _handle_workspace_add as _files_impl_handle_workspace_add,
+    _handle_workspace_remove as _files_impl_handle_workspace_remove,
+    _handle_workspace_rename as _files_impl_handle_workspace_rename,
+    _handle_workspace_reorder as _files_impl_handle_workspace_reorder,
+)
+
+from api.file_response_helpers import (
+    _open_file_read_fd as _files_impl_open_file_read_fd,
+    _close_fd_quietly,
+    _bytes_etag,
+    _etag_and_snapshot as _files_impl_etag_and_snapshot,
+    _serve_file_bytes as _files_impl_serve_file_bytes,
+    _html_preview_with_blank_base,
+    _serve_inline_html_preview as _files_impl_serve_inline_html_preview,
+    _read_anchored_file_bytes as _files_impl_read_anchored_file_bytes,
+)
+
+
 def _handle_list_dir(handler, parsed):
-    qs = parse_qs(parsed.query)
-    sid = qs.get("session_id", [""])[0]
-    if not sid:
-        return bad(handler, "session_id is required")
-    webui_session = None
-    try:
-        s = get_session(sid)
-        webui_session = s
-        workspace = s.workspace
-    except KeyError:
-        # Fallback for CLI sessions not loaded in WebUI memory
-        try:
-            cli_meta = None
-            for cs in get_cli_sessions():
-                if cs["session_id"] == sid:
-                    cli_meta = cs
-                    break
-            if not cli_meta:
-                return bad(handler, "Session not found", 404)
-            workspace = cli_meta.get("workspace", "")
-        except Exception:
-            return bad(handler, "Session not found", 404)
-    try:
-        if webui_session is None:
-            workspace = resolve_trusted_workspace(workspace)
-            recovered = False
-        else:
-            stored_workspace = workspace
-            workspace, recovered = resolve_implicit_workspace_with_recovery(
-                stored_workspace,
-                get_last_workspace,
-            )
-            if recovered:
-                persisted = persist_recovered_workspace_binding(
-                    webui_session,
-                    workspace,
-                    expected_workspace=stored_workspace,
-                )
-                workspace = Path(persisted.workspace)
-        rel_path = qs.get("path", ["."])[0]
-        entries = list_dir(Path(workspace), rel_path)
-        return j(
-            handler,
-            {
-                "entries": serialize_workspace_entries_for_browser(entries),
-                "signature": dir_signature(Path(workspace), rel_path, entries),
-                "path": rel_path,
-                "workspace": str(workspace),
-                "workspace_recovered": recovered,
-            },
-        )
-    except WorkspaceBindingPersistenceError as e:
-        return bad(handler, _sanitize_error(e), 500)
-    except (FileNotFoundError, ValueError) as e:
-        return bad(handler, _sanitize_error(e), 404)
+    return _files_impl_handle_list_dir(
+        handler,
+        parsed,
+        WorkspaceBindingPersistenceError=WorkspaceBindingPersistenceError,
+        _sanitize_error=_sanitize_error,
+        bad=bad,
+        dir_signature=dir_signature,
+        get_cli_sessions=get_cli_sessions,
+        get_last_workspace=get_last_workspace,
+        get_session=get_session,
+        j=j,
+        list_dir=list_dir,
+        persist_recovered_workspace_binding=persist_recovered_workspace_binding,
+        resolve_implicit_workspace_with_recovery=resolve_implicit_workspace_with_recovery,
+        resolve_trusted_workspace=resolve_trusted_workspace,
+        serialize_workspace_entries_for_browser=serialize_workspace_entries_for_browser,
+    )
 
 
 def _read_json_request_body(handler, *, max_bytes: int = 4096) -> dict:
-    try:
-        length = _safe_content_length(handler, max_bytes)
-    except (ValueError, OverflowError) as exc:
-        raise ValueError(_sanitize_error(exc)) from exc
-    raw = handler.rfile.read(length) if length else b"{}"
-    try:
-        payload = json.loads(raw.decode("utf-8"))
-    except Exception as exc:
-        raise ValueError("invalid JSON body") from exc
-    return payload if isinstance(payload, dict) else {}
+    return _files_impl_read_json_request_body(
+        handler,
+        max_bytes=max_bytes,
+        _safe_content_length=_safe_content_length,
+        _sanitize_error=_sanitize_error,
+    )
 
 
 def _handle_escape_authorize(handler, parsed, body: dict | None = None):
-    if handler.command != "POST":
-        return bad(handler, "method not allowed", 405)
-    if not handler.headers.get("Origin"):
-        return bad(handler, "browser origin required", 403)
-    if not _check_csrf(handler):
-        return bad(handler, _csrf_rejection_error(handler), 403)
-    if body is None:
-        try:
-            body = _read_json_request_body(handler)
-        except ValueError as exc:
-            return bad(handler, _sanitize_error(exc), 400)
-    qs = parse_qs(parsed.query)
-    sid = str(body.get("session_id") or qs.get("session_id", [""])[0] or "").strip()
-    rel = str(body.get("path") or qs.get("path", [""])[0] or "").strip()
-    token = str(body.get("token") or qs.get("token", [""])[0] or "").strip()
-    if token:
-        return bad(handler, "token must not be provided", 400)
-    if not sid:
-        return bad(handler, "session_id is required")
-    if not rel:
-        return bad(handler, "path is required")
-    try:
-        s = get_session_for_file_ops(sid)
-    except KeyError:
-        return bad(handler, "Session not found", 404)
-    try:
-        payload = authorize_escape_target(Path(s.workspace), sid, rel)
-    except ValueError as exc:
-        return bad(handler, _sanitize_error(exc), 404)
-    return j(handler, payload)
+    return _files_impl_handle_escape_authorize(
+        handler,
+        parsed,
+        body,
+        _check_csrf=_check_csrf,
+        _csrf_rejection_error=_csrf_rejection_error,
+        _read_json_request_body=_read_json_request_body,
+        _sanitize_error=_sanitize_error,
+        authorize_escape_target=authorize_escape_target,
+        bad=bad,
+        get_session_for_file_ops=get_session_for_file_ops,
+        j=j,
+    )
 
 
 def _handle_escape_list_dir(handler, parsed):
-    qs = parse_qs(parsed.query)
-    sid = qs.get("session_id", [""])[0]
-    token = qs.get("token", [""])[0]
-    if not sid:
-        return bad(handler, "session_id is required")
-    if not token:
-        return bad(handler, "token is required")
-    try:
-        s = get_session_for_file_ops(sid)
-    except KeyError:
-        return bad(handler, "Session not found", 404)
-    rel_path = qs.get("path", ["."])[0]
-    try:
-        payload = list_authorized_escape_dir(Path(s.workspace), sid, token, rel_path)
-        payload["entries"] = serialize_workspace_entries_for_browser(payload.get("entries"))
-        return j(handler, payload)
-    except FileNotFoundError as exc:
-        return bad(handler, _sanitize_error(exc), 404)
-    except EscapeAuthorizationExpiredError as exc:
-        return bad(handler, _sanitize_error(exc), 403)
-    except ValueError as exc:
-        return bad(handler, _sanitize_error(exc), 404)
+    return _files_impl_handle_escape_list_dir(
+        handler,
+        parsed,
+        EscapeAuthorizationExpiredError=EscapeAuthorizationExpiredError,
+        _sanitize_error=_sanitize_error,
+        bad=bad,
+        get_session_for_file_ops=get_session_for_file_ops,
+        j=j,
+        list_authorized_escape_dir=list_authorized_escape_dir,
+        serialize_workspace_entries_for_browser=serialize_workspace_entries_for_browser,
+    )
 
 
 def _handle_escape_file_read(handler, parsed):
-    qs = parse_qs(parsed.query)
-    sid = qs.get("session_id", [""])[0]
-    token = qs.get("token", [""])[0]
-    if not sid:
-        return bad(handler, "session_id is required")
-    if not token:
-        return bad(handler, "token is required")
-    try:
-        s = get_session_for_file_ops(sid)
-    except KeyError:
-        return bad(handler, "Session not found", 404)
-    rel = qs.get("path", [""])[0]
-    try:
-        return j(handler, read_authorized_escape_file_content(Path(s.workspace), sid, token, rel))
-    except FileNotFoundError as exc:
-        return bad(handler, _sanitize_error(exc), 404)
-    except EscapeAuthorizationExpiredError as exc:
-        return bad(handler, _sanitize_error(exc), 403)
-    except ImportError as exc:
-        # Optional Office parsers absent on a lean install — mirror
-        # _handle_file_read: a 503 with the install hint, not a 500 traceback.
-        return bad(handler, _sanitize_error(exc), 503)
-    except ValueError as exc:
-        return bad(handler, _sanitize_error(exc), 404)
+    return _files_impl_handle_escape_file_read(
+        handler,
+        parsed,
+        EscapeAuthorizationExpiredError=EscapeAuthorizationExpiredError,
+        _sanitize_error=_sanitize_error,
+        bad=bad,
+        get_session_for_file_ops=get_session_for_file_ops,
+        j=j,
+        read_authorized_escape_file_content=read_authorized_escape_file_content,
+    )
 
 
 def _handle_escape_file_raw(handler, parsed):
-    qs = parse_qs(parsed.query)
-    sid = qs.get("session_id", [""])[0]
-    token = qs.get("token", [""])[0]
-    if not sid:
-        return bad(handler, "session_id is required")
-    if not token:
-        return bad(handler, "token is required")
-    try:
-        s = get_session_for_file_ops(sid)
-    except KeyError:
-        return bad(handler, "Session not found", 404)
-    rel = qs.get("path", [""])[0]
-    force_download = qs.get("download", [""])[0] == "1"
-    try:
-        anchor_root, target = raw_authorized_escape_target(Path(s.workspace), sid, token, rel)
-    except FileNotFoundError:
-        return j(handler, {"error": "not found"}, status=404)
-    except EscapeAuthorizationExpiredError as exc:
-        return bad(handler, _sanitize_error(exc), 403)
-    except ValueError as exc:
-        return bad(handler, _sanitize_error(exc), 404)
-    if not target.exists() or not target.is_file():
-        return j(handler, {"error": "not found"}, status=404)
-    ext = target.suffix.lower()
-    mime = MIME_MAP.get(ext, "application/octet-stream")
-    inline_preview = qs.get("inline", [""])[0] == "1"
-    dangerous_types = {"text/html", "application/xhtml+xml", "image/svg+xml"}
-    html_inline_ok = inline_preview and mime == "text/html"
-    disposition = "attachment" if force_download or (mime in dangerous_types and not html_inline_ok) else "inline"
-    sandbox_csp = "sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox"
-    # Content-Security-Policy sandboxing is carried through the csp=sandbox_csp handoff below.
-    csp = sandbox_csp if (inline_preview and not force_download and disposition == "inline") else None
-    if html_inline_ok:
-        return _serve_inline_html_preview(handler, target, "no-store", csp=sandbox_csp, anchor_root=anchor_root)
-    return _serve_file_bytes(handler, target, mime, disposition, "no-store", csp=csp, anchor_root=anchor_root)
+    return _files_impl_handle_escape_file_raw(
+        handler,
+        parsed,
+        EscapeAuthorizationExpiredError=EscapeAuthorizationExpiredError,
+        MIME_MAP=MIME_MAP,
+        _sanitize_error=_sanitize_error,
+        _serve_file_bytes=_serve_file_bytes,
+        _serve_inline_html_preview=_serve_inline_html_preview,
+        bad=bad,
+        get_session_for_file_ops=get_session_for_file_ops,
+        j=j,
+        raw_authorized_escape_target=raw_authorized_escape_target,
+    )
 
 
 def _sse_with_id(handler, event, data, event_id=None):
@@ -18890,23 +17262,13 @@ def _handle_session_events_stream(handler):
     )
 
 def _open_file_read_fd(target: Path, anchor_root: Path | None = None) -> int:
-    if anchor_root is None:
-        flags = os.O_RDONLY
-        # On Windows, files are opened in text mode by default; O_BINARY
-        # prevents CRLF translation that would corrupt binary media files.
-        if hasattr(os, "O_BINARY"):
-            flags |= os.O_BINARY
-        return os.open(str(target), flags)
-    return open_anchored_fd(anchor_root, target.resolve(), want_dir=False)
+    return _files_impl_open_file_read_fd(
+        target,
+        anchor_root,
+        open_anchored_fd=open_anchored_fd,
+    )
 
 
-def _close_fd_quietly(fd: int | None) -> None:
-    if fd is None:
-        return
-    try:
-        os.close(fd)
-    except OSError:
-        pass
 
 
 # Maximum size for which a content-derived ETag is computed.  Files above
@@ -18915,13 +17277,6 @@ def _close_fd_quietly(fd: int | None) -> None:
 _ETAG_SIZE_CAP = 10 * 1024 * 1024  # 10 MB
 
 
-def _bytes_etag(data: bytes) -> str:
-    """Weak ETag from a content digest of the bytes that will be served.
-
-    The bytes must be an immutable snapshot (e.g. pread or an in-memory copy)
-    so the validator cannot diverge from the body under TOCTOU.
-    """
-    return 'W/"%s"' % hashlib.sha256(data).hexdigest()
 
 
 def _etag_and_snapshot(fd, *, file_size: int) -> tuple[str | None, bytes | None, int]:
@@ -18936,34 +17291,12 @@ def _etag_and_snapshot(fd, *, file_size: int) -> tuple[str | None, bytes | None,
     The caller must use actual_size (not the original file_size) for Content-Length/Range
     calculations to avoid header/body mismatch.
     """
-    if file_size > _ETAG_SIZE_CAP:
-        return None, None, file_size
-
-    # Cross-platform: os.lseek + looped os.read instead of POSIX-only os.pread
-    # Short reads are possible (interrupted, EOF from truncation), so we loop.
-    os.lseek(fd, 0, os.SEEK_SET)
-    data = b""
-    remaining = file_size
-    while remaining > 0:
-        chunk = os.read(fd, min(1024 * 1024, remaining))
-        if not chunk:  # EOF reached (file was truncated)
-            break
-        data += chunk
-        remaining -= len(chunk)
-
-    actual_size = len(data)
-    if actual_size == 0:
-        return None, None, 0
-
-    # If the file was truncated after fstat (short snapshot), return the actual
-    # size but no ETag — caller will fall back to streaming without ETag.
-    # Round-6 fix: keep the captured `data` so the body path serves the immutable
-    # snapshot instead of re-reading the fd after headers are committed.
-    # Content-Length derives from actual_size == len(data), so header/body match.
-    if actual_size != file_size:
-        return None, data, actual_size
-
-    return _bytes_etag(data), data, actual_size
+    return _files_impl_etag_and_snapshot(
+        fd,
+        file_size=file_size,
+        _ETAG_SIZE_CAP=_ETAG_SIZE_CAP,
+        _bytes_etag=_bytes_etag,
+    )
 
 
 def _serve_file_bytes(handler, target: Path, mime: str, disposition: str, cache_control: str, *, csp: str | None = None, anchor_root: Path | None = None, download_name: str | None = None):
@@ -18976,148 +17309,28 @@ def _serve_file_bytes(handler, target: Path, mime: str, disposition: str, cache_
     ``download_name`` overrides the Content-Disposition filename (used when
     serving an immutable media snapshot whose on-disk name is a content digest).
     """
-    fd = None
-    try:
-        fd = _open_file_read_fd(target, anchor_root)
-        st = os.fstat(fd)
-        file_size = st.st_size
-    except PermissionError:
-        _close_fd_quietly(fd)
-        return bad(handler, "Permission denied", 403)
-    except FileNotFoundError:
-        _close_fd_quietly(fd)
-        return j(handler, {"error": "not found"}, status=404)
-    except ValueError as e:
-        _close_fd_quietly(fd)
-        return bad(handler, _sanitize_error(e), 403)
-    except Exception:
-        _close_fd_quietly(fd)
-        return bad(handler, "Could not stat file", 500)
-
-    try:
-        # Pre-commit phase: ETag/snapshot computation and response selection.
-        # OSError here is still convertible into a clean 500 because no
-        # status line has been written yet. After end_headers() the response
-        # is committed, so body-transmission errors must never call bad()
-        # again (that would attempt a second send_response on a stream the
-        # client may have already closed — see the body phase below).
-        try:
-            no_store = "no-store" in cache_control
-            if no_store or file_size > _ETAG_SIZE_CAP:
-                etag = None
-                snapshot = None
-                # actual_size stays as file_size for over-cap/no-store cases
-            else:
-                etag, snapshot, actual_size = _etag_and_snapshot(fd, file_size=file_size)
-                # If the file was truncated mid-read (short snapshot), use the
-                # actual read size for all subsequent calculations so
-                # Content-Length/Range match the body we can actually send.
-                # Round-6 fix: the captured bytes are kept, so the body path
-                # serves the immutable snapshot instead of re-reading the fd.
-                if actual_size != file_size:
-                    file_size = actual_size  # reconcile to avoid header/body mismatch
-        except OSError:
-            return bad(handler, "Could not serve file", 500)
-
-        # RFC 7232 §3.2: If-None-Match uses weak comparison (W/ prefixes ignored)
-        # and "*" matches any existing resource. On match, GET/HEAD is
-        # short-circuited with 304 — processed before Range since a matched
-        # conditional request skips the entity entirely.
-        if_none_match = handler.headers.get("If-None-Match", "")
-        if if_none_match and etag is not None:
-            current = etag[2:] if etag.startswith("W/") else etag
-            matched = if_none_match.strip() == "*" or any(
-                (c.strip()[2:] if c.strip().startswith("W/") else c.strip()) == current
-                for c in if_none_match.split(",")
-                if c.strip()
-            )
-            if matched:
-                handler.send_response(304)
-                handler.send_header("ETag", etag)
-                handler.send_header("Cache-Control", cache_control)
-                _security_headers(handler)
-                handler.end_headers()
-                return True
-
-        byte_range = _parse_range_header(handler.headers.get("Range", ""), file_size)
-        if handler.headers.get("Range") and byte_range is None:
-            handler.send_response(416)
-            handler.send_header("Content-Range", f"bytes */{file_size}")
-            handler.send_header("Accept-Ranges", "bytes")
-            handler.send_header("Content-Length", "0")
-            _security_headers(handler)
-            handler.end_headers()
-            return True
-
-        start, end = byte_range if byte_range else (0, max(0, file_size - 1))
-        content_length = end - start + 1 if file_size else 0
-        handler.send_response(206 if byte_range else 200)
-        handler.send_header("Content-Type", mime)
-        handler.send_header("Content-Length", str(content_length))
-        handler.send_header("Accept-Ranges", "bytes")
-        if etag is not None:
-            handler.send_header("ETag", etag)
-        if byte_range:
-            handler.send_header("Content-Range", f"bytes {start}-{end}/{file_size}")
-        handler.send_header("Cache-Control", cache_control)
-        handler.send_header("Content-Disposition", _content_disposition_value(disposition, download_name or target.name))
-        if csp:
-            # Sandboxed inline HTML must remain frameable for workspace previews;
-            # X-Frame-Options: DENY would block the iframe before CSP sandbox applies.
-            handler.send_header("Content-Security-Policy", csp)
-            handler.send_header("X-Content-Type-Options", "nosniff")
-            handler.send_header("Referrer-Policy", "same-origin")
-            handler.send_header(
-                "Permissions-Policy",
-                "camera=(), microphone=(self), geolocation=(), clipboard-write=(self)",
-            )
-        else:
-            _security_headers(handler)
-        handler.end_headers()
-
-        # Body transmission: the response is committed once end_headers()
-        # returns, so attempting bad()/send_response again here would corrupt
-        # the stream with a second status line. Client disconnects are normal
-        # (tab close, network switch) — log at debug and stop, same contract
-        # as _safe_write(). Never emit a 500 after headers are out.
-        if content_length:
-            try:
-                if snapshot is not None:
-                    handler.wfile.write(snapshot[start:start + content_length])
-                else:
-                    with os.fdopen(fd, "rb", closefd=True) as f:
-                        fd = None
-                        f.seek(start)
-                        remaining = content_length
-                        while remaining:
-                            chunk = f.read(min(1024 * 1024, remaining))
-                            if not chunk:
-                                break
-                            handler.wfile.write(chunk)
-                            remaining -= len(chunk)
-            except _CLIENT_DISCONNECT_ERRORS as exc:
-                logging.getLogger("hermes.webui").debug(
-                    "Client disconnected mid-response (%s): %s",
-                    type(exc).__name__,
-                    getattr(handler, "path", "?"),
-                )
-            except Exception as exc:
-                # Post-commit fail-closed: the status line is already on the
-                # wire, so ANY body-transmission error that is not a client
-                # disconnect (EIO from a truncated read, a generic OSError,
-                # PermissionError, ...) must still be contained here. Letting
-                # it escape would reach Handler.do_GET's 500 path and emit a
-                # SECOND status line after the committed 200/206, corrupting
-                # the HTTP stream. Log at debug and stop — the client already
-                # received its headers (and possibly a partial body).
-                logging.getLogger("hermes.webui").debug(
-                    "Body transmission error after commit (%s): %s",
-                    type(exc).__name__,
-                    getattr(handler, "path", "?"),
-                )
-        return True
-    finally:
-        _close_fd_quietly(fd)
+    return _files_impl_serve_file_bytes(
+        handler,
+        target,
+        mime,
+        disposition,
+        cache_control,
+        csp=csp,
+        anchor_root=anchor_root,
+        download_name=download_name,
+        _CLIENT_DISCONNECT_ERRORS=_CLIENT_DISCONNECT_ERRORS,
+        _ETAG_SIZE_CAP=_ETAG_SIZE_CAP,
+        _close_fd_quietly=_close_fd_quietly,
+        _content_disposition_value=_content_disposition_value,
+        _etag_and_snapshot=_etag_and_snapshot,
+        _open_file_read_fd=_open_file_read_fd,
+        _parse_range_header=_parse_range_header,
+        _sanitize_error=_sanitize_error,
+        _security_headers=_security_headers,
+        bad=bad,
+        j=j,
+        logging=logging,
+    )
 
 
 
@@ -19376,63 +17589,23 @@ def _handle_tts(handler, parsed):
     )
 
 
-def _html_preview_with_blank_base(raw: bytes) -> bytes:
-    base = '<base target="_blank">'
-    text = raw.decode("utf-8", errors="replace")
-    if re.search(r"<head(?:\s[^>]*)?>", text, flags=re.IGNORECASE):
-        text = re.sub(r"(<head\b[^>]*>)", r"\1" + base, text, count=1, flags=re.IGNORECASE)
-    elif re.search(r"<!doctype[^>]*>", text, flags=re.IGNORECASE):
-        text = re.sub(
-            r"(<!doctype[^>]*>)",
-            r"\1<head>" + base + "</head>",
-            text,
-            count=1,
-            flags=re.IGNORECASE,
-        )
-    else:
-        text = "<head>" + base + "</head>" + text
-    return text.encode("utf-8")
 
 
 def _serve_inline_html_preview(handler, target: Path, cache_control: str, *, csp: str, anchor_root: Path | None = None):
     """Serve sandboxed workspace HTML preview with links targeting a new tab."""
-    fd = None
-    try:
-        fd = _open_file_read_fd(target, anchor_root)
-        with os.fdopen(fd, "rb", closefd=True) as f:
-            fd = None
-            body = _html_preview_with_blank_base(f.read())
-    except PermissionError:
-        return bad(handler, "Permission denied", 403)
-    except FileNotFoundError:
-        return j(handler, {"error": "not found"}, status=404)
-    except ValueError as e:
-        return bad(handler, _sanitize_error(e), 403)
-    except Exception:
-        return bad(handler, "Could not read file", 500)
-    finally:
-        if fd is not None:
-            try:
-                os.close(fd)
-            except OSError:
-                pass
-
-    handler.send_response(200)
-    handler.send_header("Content-Type", "text/html; charset=utf-8")
-    handler.send_header("Content-Length", str(len(body)))
-    handler.send_header("Accept-Ranges", "none")
-    handler.send_header("Cache-Control", cache_control)
-    handler.send_header("Content-Disposition", _content_disposition_value("inline", target.name))
-    handler.send_header("Content-Security-Policy", csp)
-    handler.send_header("X-Content-Type-Options", "nosniff")
-    handler.send_header("Referrer-Policy", "same-origin")
-    handler.send_header(
-        "Permissions-Policy",
-        "camera=(), microphone=(self), geolocation=(), clipboard-write=(self)",
+    return _files_impl_serve_inline_html_preview(
+        handler,
+        target,
+        cache_control,
+        csp=csp,
+        anchor_root=anchor_root,
+        _content_disposition_value=_content_disposition_value,
+        _html_preview_with_blank_base=_html_preview_with_blank_base,
+        _open_file_read_fd=_open_file_read_fd,
+        _sanitize_error=_sanitize_error,
+        bad=bad,
+        j=j,
     )
-    handler.end_headers()
-    handler.wfile.write(body)
-    return True
 
 
 _MEDIA_TOKEN_RE = re.compile(r"MEDIA:([^\s\)\]]+)")
@@ -19903,27 +18076,12 @@ def _handle_media(handler, parsed):
 
 def _file_raw_target(session, sid: str, rel: str) -> tuple[Path, Path] | None:
     """Resolve /api/file/raw paths from the workspace or this session's uploads."""
-    workspace_root = Path(session.workspace)
-    try:
-        target = safe_resolve(workspace_root, rel)
-    except ValueError:
-        target = None
-    if target and target.exists() and target.is_file():
-        return workspace_root, target
-
-    # Chat uploads now live in a per-session attachment inbox outside the
-    # workspace. Keep the public URL stable while scoping fallback lookup to
-    # the requesting session's own attachment directory.
-    try:
-        from api.upload import _session_attachment_dir
-
-        attachment_root = _session_attachment_dir(sid)
-        attachment_target = safe_resolve(attachment_root, rel)
-    except Exception:
-        return None
-    if attachment_target.exists() and attachment_target.is_file():
-        return attachment_root, attachment_target
-    return None
+    return _files_impl_file_raw_target(
+        session,
+        sid,
+        rel,
+        safe_resolve=safe_resolve,
+    )
 
 
 # ─── /api/folder/download ───────────────────────────────────────────────────
@@ -19932,64 +18090,10 @@ def _file_raw_target(session, sid: str, rel: str) -> tuple[Path, Path] | None:
 # Bound on per-request wall-clock and bandwidth, not RSS. The zip streams
 # straight into handler.wfile, so peak memory is the per-file read buffer
 # inside zipfile, not the cap value.
-def _folder_zip_max_bytes() -> int:
-    try:
-        mb = int(os.getenv("HERMES_WEBUI_FOLDER_ZIP_MAX_MB", "1024"))
-    except ValueError:
-        mb = 1024
-    return max(1, mb) * 1024 * 1024
 
 
-def _folder_zip_max_files() -> int:
-    try:
-        return max(1, int(os.getenv("HERMES_WEBUI_FOLDER_ZIP_MAX_FILES", "50000")))
-    except ValueError:
-        return 50000
 
 
-def _folder_download_collect(target: Path, workspace_root: Path,
-                              max_bytes: int, max_files: int):
-    """Walk target dir; return (files, total_bytes, hit_limit_reason_or_None).
-
-    files is a list of (filesystem_path, archive_name) tuples. Each filesystem
-    path is reopened through the workspace anchor when streamed into the ZIP.
-    Symlinks escaping the workspace are skipped.
-    """
-    import os as _os
-    files = []
-    total_bytes = 0
-    for root, dirs, names in _os.walk(target, followlinks=False):
-        root_path = Path(root)
-        try:
-            if not root_path.resolve().is_relative_to(workspace_root):
-                dirs[:] = []
-                continue
-        except (ValueError, OSError):
-            dirs[:] = []
-            continue
-        for name in names:
-            fp = root_path / name
-            if fp.is_symlink():
-                try:
-                    if not fp.resolve().is_relative_to(workspace_root):
-                        continue
-                except (ValueError, OSError):
-                    continue
-            try:
-                size = fp.stat().st_size
-            except OSError:
-                continue
-            if len(files) >= max_files:
-                return files, total_bytes, "max_files"
-            if total_bytes + size > max_bytes:
-                return files, total_bytes, "max_bytes"
-            try:
-                arcname = fp.relative_to(target)
-            except ValueError:
-                continue
-            files.append((fp, str(arcname)))
-            total_bytes += size
-    return files, total_bytes, None
 
 
 def _handle_folder_download(handler, parsed):
@@ -20001,163 +18105,55 @@ def _handle_folder_download(handler, parsed):
     Pre-flights the walk so size/count failures return a clean 413 with JSON
     body BEFORE any zip bytes are sent.
     """
-    import zipfile
-    from urllib.parse import parse_qs
-
-    qs = parse_qs(parsed.query)
-    sid = qs.get("session_id", [""])[0]
-    if not sid:
-        return bad(handler, "session_id is required")
-    try:
-        s = get_session_for_file_ops(sid)
-    except KeyError:
-        return bad(handler, "Session not found", 404)
-
-    rel = qs.get("path", [""])[0]
-    try:
-        target = safe_resolve(Path(s.workspace), rel)
-    except ValueError:
-        return bad(handler, "invalid path", 400)
-    if not target.exists():
-        return j(handler, {"error": "not found"}, status=404)
-    if not target.is_dir():
-        return bad(handler, "path must be a directory; use /api/file/raw for single files", 400)
-
-    workspace_root = Path(s.workspace).resolve()
-    max_bytes = _folder_zip_max_bytes()
-    max_files = _folder_zip_max_files()
-
-    files, total_bytes, limit_hit = _folder_download_collect(
-        target, workspace_root, max_bytes, max_files
-    )
-    if limit_hit == "max_files":
-        return j(handler, {
-            "error": "too many files",
-            "limit": max_files,
-            "configure": "HERMES_WEBUI_FOLDER_ZIP_MAX_FILES",
-        }, status=413)
-    if limit_hit == "max_bytes":
-        return j(handler, {
-            "error": "folder too large",
-            "limit_bytes": max_bytes,
-            "configure": "HERMES_WEBUI_FOLDER_ZIP_MAX_MB",
-        }, status=413)
-
-    zip_name = (target.name or "workspace") + ".zip"
-    handler.send_response(200)
-    handler.send_header("Content-Type", "application/zip")
-    handler.send_header(
-        "Content-Disposition",
-        _content_disposition_value("attachment", zip_name),
-    )
-    handler.send_header("Cache-Control", "no-store")
-    # Under HTTP/1.1 (Handler.protocol_version, see server.py post-#2836)
-    # a response with no Content-Length and no Transfer-Encoding requires
-    # Connection: close so the client knows the body ends at FIN. The ZIP
-    # is built on-the-fly so we cannot send Content-Length up front; mirror
-    # the SSE-endpoint pattern #2836 uses. Without this header the client
-    # hangs waiting for the next pipelined response after the central
-    # directory bytes finish. Caught by Opus pre-release advisor on
-    # stage-batch11.
-    handler.send_header("Connection", "close")
-    handler.end_headers()
-
-    written = 0
-    with zipfile.ZipFile(handler.wfile, mode="w", compression=zipfile.ZIP_DEFLATED, allowZip64=True) as zf:
-        for fp, arcname in files:
-            fd = None
-            try:
-                fd = open_anchored_fd(workspace_root, fp.resolve(), want_dir=False)
-                info = zipfile.ZipInfo(arcname)
-                info.compress_type = zipfile.ZIP_DEFLATED
-                with os.fdopen(fd, "rb", closefd=True) as src:
-                    fd = None
-                    with zf.open(info, "w") as dst:
-                        shutil.copyfileobj(src, dst, length=1024 * 1024)
-                written += 1
-            except (ValueError, OSError, PermissionError) as e:
-                logger.warning("folder-download: skipping %s: %s", fp, e)
-            finally:
-                if fd is not None:
-                    try:
-                        os.close(fd)
-                    except OSError:
-                        pass
-    logger.info(
-        "folder-download: streamed %d/%d files (~%d bytes) from %s",
-        written, len(files), total_bytes, target,
+    return _files_impl_handle_folder_download(
+        handler,
+        parsed,
+        _content_disposition_value=_content_disposition_value,
+        _folder_download_collect=_folder_download_collect,
+        _folder_zip_max_bytes=_folder_zip_max_bytes,
+        _folder_zip_max_files=_folder_zip_max_files,
+        bad=bad,
+        get_session_for_file_ops=get_session_for_file_ops,
+        j=j,
+        logger=logger,
+        open_anchored_fd=open_anchored_fd,
+        safe_resolve=safe_resolve,
     )
 
 
 def _handle_file_raw(handler, parsed):
-    qs = parse_qs(parsed.query)
-    sid = qs.get("session_id", [""])[0]
-    if not sid:
-        return bad(handler, "session_id is required")
-    try:
-        s = get_session_for_file_ops(sid)
-    except KeyError:
-        return bad(handler, "Session not found", 404)
-    rel = qs.get("path", [""])[0]
-    force_download = qs.get("download", [""])[0] == "1"
-    resolved = _file_raw_target(s, sid, rel)
-    if resolved is None:
-        return j(handler, {"error": "not found"}, status=404)
-    anchor_root, target = resolved
-    ext = target.suffix.lower()
-    mime = MIME_MAP.get(ext, "application/octet-stream")
-    # Security: force download for dangerous MIME types to prevent XSS.
-    # Exception: ?inline=1 permits text/html to be served inline for the
-    # sandboxed workspace HTML preview iframe (sandbox="allow-scripts" with no
-    # allow-same-origin, so the iframe cannot access parent cookies/storage).
-    inline_preview = qs.get("inline", [""])[0] == "1"
-    dangerous_types = {"text/html", "application/xhtml+xml", "image/svg+xml"}
-    html_inline_ok = inline_preview and mime == "text/html"
-    disposition = "attachment" if force_download or (mime in dangerous_types and not html_inline_ok) else "inline"
-    # Defense-in-depth for ?inline=1 HTML: even though the workspace.js iframe
-    # sets sandbox="allow-scripts", a user could be tricked into opening the
-    # ?inline=1 URL directly in a top-level tab (e.g. via a chat link), which
-    # would render the HTML in the WebUI's origin without iframe sandbox. The
-    # CSP sandbox directive applies the same isolation server-side: without
-    # allow-same-origin, the document is treated as a unique opaque origin and
-    # cannot read WebUI cookies, localStorage, or postMessage to the parent.
-    sandbox_csp = "sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox"
-    csp = sandbox_csp if (inline_preview and not force_download and disposition == "inline") else None
-    # _serve_file_bytes sends Content-Security-Policy when csp is set.
-    if html_inline_ok:
-        return _serve_inline_html_preview(handler, target, "no-store", csp=sandbox_csp, anchor_root=anchor_root)
-    return _serve_file_bytes(handler, target, mime, disposition, "no-store", csp=csp, anchor_root=anchor_root)
+    return _files_impl_handle_file_raw(
+        handler,
+        parsed,
+        MIME_MAP=MIME_MAP,
+        _file_raw_target=_file_raw_target,
+        _serve_file_bytes=_serve_file_bytes,
+        _serve_inline_html_preview=_serve_inline_html_preview,
+        bad=bad,
+        get_session_for_file_ops=get_session_for_file_ops,
+        j=j,
+    )
 
 
 def _handle_file_read(handler, parsed):
-    qs = parse_qs(parsed.query)
-    sid = qs.get("session_id", [""])[0]
-    if not sid:
-        return bad(handler, "session_id is required")
-    try:
-        s = get_session_for_file_ops(sid)
-    except KeyError:
-        return bad(handler, "Session not found", 404)
-    rel = qs.get("path", [""])[0]
-    if not rel:
-        return bad(handler, "path is required")
-    try:
-        return j(handler, read_file_content(Path(s.workspace), rel))
-    except ImportError as e:
-        return bad(handler, str(e), 503)
-    except (FileNotFoundError, ValueError) as e:
-        return bad(handler, _sanitize_error(e), 404)
+    return _files_impl_handle_file_read(
+        handler,
+        parsed,
+        _sanitize_error=_sanitize_error,
+        bad=bad,
+        get_session_for_file_ops=get_session_for_file_ops,
+        j=j,
+        read_file_content=read_file_content,
+    )
 
 
 def _read_anchored_file_bytes(ws_root: Path, target: Path) -> bytes:
-    fd = open_anchored_fd(ws_root, target, want_dir=False)
-    with os.fdopen(fd, "rb", closefd=True) as fh:
-        st = os.fstat(fh.fileno())
-        if not _stat.S_ISREG(st.st_mode):
-            raise FileNotFoundError(f"Not a file: {target}")
-        if st.st_size > MAX_FILE_BYTES:
-            raise ValueError(f"File too large ({st.st_size} bytes, max {MAX_FILE_BYTES})")
-        return fh.read(MAX_FILE_BYTES + 1)
+    return _files_impl_read_anchored_file_bytes(
+        ws_root,
+        target,
+        MAX_FILE_BYTES=MAX_FILE_BYTES,
+        open_anchored_fd=open_anchored_fd,
+    )
 
 
 def _handle_approval_pending(handler, parsed):
@@ -21075,46 +19071,23 @@ def _handle_cron_recent(handler, parsed):
         return j(handler, {"completions": [], "since": since})
 
 
-_PROJECT_CONTEXT_HERMES_NAMES = (".hermes.md", "HERMES.md")
-# Mirror the agent's lowercase filename variants (agents.md / claude.md) so the
-# tab does not under-report on case-sensitive filesystems.
-_PROJECT_CONTEXT_CWD_NAMES = (
-    "AGENTS.md",
-    "agents.md",
-    "CLAUDE.md",
-    "claude.md",
-    ".cursorrules",
+from api.route_memory import (
+    _PROJECT_CONTEXT_CURSOR_RULES_GLOB,
+    _PROJECT_CONTEXT_CWD_NAMES,
+    _PROJECT_CONTEXT_HERMES_NAMES,
+    _PROJECT_CONTEXT_MAX_BYTES,
+    _strip_project_context_frontmatter,
+    _project_context_git_root,
+    _project_context_candidates as _memory_impl_project_context_candidates,
+    _memory_project_context_workspace as _memory_impl_memory_project_context_workspace,
+    _read_active_project_context as _memory_impl_read_active_project_context,
+    _handle_memory_read as _memory_impl_handle_memory_read,
+    _handle_memory_write as _memory_impl_handle_memory_write,
 )
-# Modern Cursor rules live in a directory of .mdc files, which the agent also loads.
-_PROJECT_CONTEXT_CURSOR_RULES_GLOB = ".cursor/rules/*.mdc"
-_PROJECT_CONTEXT_MAX_BYTES = 20_000
 
 
-def _strip_project_context_frontmatter(content: str) -> str:
-    """Strip a leading YAML frontmatter block, mirroring the agent's loader.
-
-    The agent removes a leading ``---\\n ... \\n---`` block before injecting a
-    context file. Without this the tab would display frontmatter the agent never
-    sends to the model.
-    """
-    if not content.startswith("---"):
-        return content
-    lines = content.splitlines(keepends=True)
-    if not lines or lines[0].strip() != "---":
-        return content
-    for idx in range(1, len(lines)):
-        if lines[idx].strip() in ("---", "..."):
-            return "".join(lines[idx + 1:]).lstrip("\n")
-    return content
 
 
-def _project_context_git_root(start: Path) -> Path | None:
-    """Return the nearest git root for project context discovery."""
-    current = start.resolve()
-    for parent in [current, *current.parents]:
-        if (parent / ".git").exists():
-            return parent
-    return None
 
 
 def _project_context_candidates(workspace: Path) -> list[Path]:
@@ -21137,190 +19110,46 @@ def _project_context_candidates(workspace: Path) -> list[Path]:
     will under-report context files that live *above* a non-git workspace,
     which is strictly less surprising than over-reporting them.
     """
-    cwd = workspace.resolve()
-    candidates: list[Path] = []
-    git_root = _project_context_git_root(cwd)
-    # When inside a git tree, walk up to the git root as before. When not,
-    # bound the walk at the workspace itself so we never surface files
-    # above the user's workspace.
-    stop_at = git_root if git_root is not None else cwd
-
-    for directory in [cwd, *cwd.parents]:
-        for name in _PROJECT_CONTEXT_HERMES_NAMES:
-            candidates.append(directory / name)
-        if directory == stop_at:
-            break
-
-    for name in _PROJECT_CONTEXT_CWD_NAMES:
-        candidates.append(cwd / name)
-
-    # Modern Cursor rules: the agent reads .cursor/rules/*.mdc in addition to
-    # the legacy .cursorrules file. Sort for deterministic ordering.
-    try:
-        candidates.extend(sorted(cwd.glob(_PROJECT_CONTEXT_CURSOR_RULES_GLOB)))
-    except OSError:
-        pass
-
-    return candidates
+    return _memory_impl_project_context_candidates(
+        workspace,
+        _PROJECT_CONTEXT_CURSOR_RULES_GLOB=_PROJECT_CONTEXT_CURSOR_RULES_GLOB,
+        _PROJECT_CONTEXT_CWD_NAMES=_PROJECT_CONTEXT_CWD_NAMES,
+        _PROJECT_CONTEXT_HERMES_NAMES=_PROJECT_CONTEXT_HERMES_NAMES,
+        _project_context_git_root=_project_context_git_root,
+    )
 
 
 def _memory_project_context_workspace(parsed) -> Path | None:
-    qs = parse_qs(parsed.query or "") if parsed is not None else {}
-    sid = qs.get("session_id", [""])[0]
-    if sid:
-        try:
-            # A blank session workspace (freshly-created/draft sessions) must not
-            # fall through to Path("").resolve(), which returns the server's own
-            # CWD and would surface the install's AGENTS.md/HERMES.md as if it
-            # were the user's project context.
-            ws = (get_session(sid).workspace or "").strip()
-            if not ws:
-                return None
-            return Path(ws).expanduser().resolve()
-        except Exception:
-            return None
-
-    raw_workspace = qs.get("workspace", [""])[0] or os.environ.get("TERMINAL_CWD", "") or get_last_workspace()
-    if not raw_workspace:
-        return None
-    try:
-        return Path(resolve_trusted_workspace(raw_workspace)).expanduser().resolve()
-    except Exception:
-        logger.debug("Skipping project context for untrusted workspace %s", raw_workspace, exc_info=True)
-        return None
+    return _memory_impl_memory_project_context_workspace(
+        parsed,
+        get_last_workspace=get_last_workspace,
+        get_session=get_session,
+        logger=logger,
+        resolve_trusted_workspace=resolve_trusted_workspace,
+    )
 
 
 def _read_active_project_context(workspace: Path | None) -> dict:
-    payload = {
-        "content": "",
-        "path": "",
-        "mtime": None,
-        "workspace": str(workspace) if workspace else "",
-        "shadowed": [],
-    }
-    if not workspace:
-        return payload
-    try:
-        if not workspace.exists() or not workspace.is_dir():
-            return payload
-    except OSError:
-        return payload
-
-    seen: set[str] = set()
-    readable: list[dict] = []
-    for candidate in _project_context_candidates(workspace):
-        try:
-            if not candidate.is_file():
-                continue
-            resolved = candidate.resolve()
-            key = os.path.normcase(str(resolved)).casefold()
-            if key in seen:
-                continue
-            seen.add(key)
-            content = resolved.read_text(encoding="utf-8", errors="replace")
-            # Mirror what the agent actually injects: strip YAML frontmatter and
-            # cap each source, so the tab reports the effective context rather
-            # than raw file bytes the agent never sends to the model.
-            content = _strip_project_context_frontmatter(content)
-            if len(content) > _PROJECT_CONTEXT_MAX_BYTES:
-                content = content[:_PROJECT_CONTEXT_MAX_BYTES]
-            if not content.strip():
-                continue
-            readable.append(
-                {
-                    "name": resolved.name,
-                    "path": str(resolved),
-                    "content": content,
-                    "mtime": resolved.stat().st_mtime,
-                }
-            )
-        except Exception:
-            logger.debug("Could not read project context candidate %s", candidate, exc_info=True)
-
-    if not readable:
-        return payload
-
-    active = readable[0]
-    payload.update(
-        {
-            "content": active["content"],
-            "path": active["path"],
-            "mtime": active["mtime"],
-            "name": active["name"],
-            "shadowed": [
-                {
-                    "name": item["name"],
-                    "path": item["path"],
-                    "mtime": item["mtime"],
-                    "shadowed_by": active["name"],
-                    "shadowed_by_path": active["path"],
-                }
-                for item in readable[1:]
-            ],
-        }
+    return _memory_impl_read_active_project_context(
+        workspace,
+        _PROJECT_CONTEXT_MAX_BYTES=_PROJECT_CONTEXT_MAX_BYTES,
+        _project_context_candidates=_project_context_candidates,
+        _strip_project_context_frontmatter=_strip_project_context_frontmatter,
+        logger=logger,
     )
-    return payload
 
 
 def _handle_memory_read(handler, parsed=None):
-    try:
-        from api.profiles import get_active_hermes_home
-
-        home = get_active_hermes_home()
-        mem_dir = home / "memories"
-    except ImportError:
-        home = Path.home() / ".hermes"
-        mem_dir = home / "memories"
-
-    # Respect memory_enabled and user_profile_enabled config flags (#6406)
-    # Use get_config_snapshot() for per-profile isolation — get_config() returns
-    # the process-global mutable _cfg_cache which races across profiles.
-    # The flags are nested under cfg["memory"] in Hermes Agent's schema.
-    cfg = get_config_snapshot()
-    mem = cfg.get("memory") if isinstance(cfg, dict) else None
-    mem_cfg = mem if isinstance(mem, dict) else {}
-    memory_enabled = _webui_truthy(mem_cfg.get("memory_enabled", True))
-    user_profile_enabled = _webui_truthy(mem_cfg.get("user_profile_enabled", True))
-
-    mem_file = mem_dir / "MEMORY.md" if memory_enabled else None
-    user_file = mem_dir / "USER.md" if user_profile_enabled else None
-    soul_file = home / "SOUL.md"
-    memory = (
-        mem_file.read_text(encoding="utf-8", errors="replace")
-        if mem_file and mem_file.exists()
-        else ""
-    )
-    user = (
-        user_file.read_text(encoding="utf-8", errors="replace")
-        if user_file and user_file.exists()
-        else ""
-    )
-    soul = (
-        soul_file.read_text(encoding="utf-8", errors="replace")
-        if soul_file.exists()
-        else ""
-    )
-    project_context = _read_active_project_context(_memory_project_context_workspace(parsed))
-    return j(
+    return _memory_impl_handle_memory_read(
         handler,
-        {
-            "memory": _redact_text(memory),
-            "user": _redact_text(user),
-            "soul": _redact_text(soul),
-            "project_context": _redact_text(project_context["content"]),
-            "memory_path": str(mem_file) if mem_file else "",
-            "user_path": str(user_file) if user_file else "",
-            "soul_path": str(soul_file),
-            "project_context_path": project_context["path"],
-            "project_context_name": project_context.get("name", ""),
-            "project_context_workspace": project_context["workspace"],
-            "memory_mtime": mem_file.stat().st_mtime if mem_file and mem_file.exists() else None,
-            "user_mtime": user_file.stat().st_mtime if user_file and user_file.exists() else None,
-            "soul_mtime": soul_file.stat().st_mtime if soul_file.exists() else None,
-            "project_context_mtime": project_context["mtime"],
-            "project_context_shadowed": project_context["shadowed"],
-            "external_notes_enabled": _external_notes_sources_enabled(cfg),
-        },
+        parsed,
+        _external_notes_sources_enabled=_external_notes_sources_enabled,
+        _memory_project_context_workspace=_memory_project_context_workspace,
+        _read_active_project_context=_read_active_project_context,
+        _redact_text=_redact_text,
+        _webui_truthy=_webui_truthy,
+        get_config_snapshot=get_config_snapshot,
+        j=j,
     )
 
 
@@ -23999,819 +21828,381 @@ def _handle_cron_resume(handler, body):
     return bad(handler, "Job not found", 404)
 
 
+from api.route_git import (
+    _git_session as _git_impl_git_session,
+    _git_session_workspace as _git_impl_git_session_workspace,
+    _git_session_and_workspace as _git_impl_git_session_and_workspace,
+    _git_locked_by_active_stream,
+    _git_reject_destructive_if_unsafe as _git_impl_git_reject_destructive_if_unsafe,
+    _handle_git_status as _git_impl_handle_git_status,
+    _handle_git_branches as _git_impl_handle_git_branches,
+    _handle_git_diff as _git_impl_handle_git_diff,
+    _git_bad as _git_impl_git_bad,
+    _git_paths_from_body,
+    _handle_git_stage as _git_impl_handle_git_stage,
+    _handle_git_unstage as _git_impl_handle_git_unstage,
+    _handle_git_discard as _git_impl_handle_git_discard,
+    _llm_git_commit_message as _git_impl_llm_git_commit_message,
+    _handle_git_commit_message as _git_impl_handle_git_commit_message,
+    _handle_git_commit_message_selected as _git_impl_handle_git_commit_message_selected,
+    _handle_git_commit as _git_impl_handle_git_commit,
+    _handle_git_commit_selected as _git_impl_handle_git_commit_selected,
+    _handle_git_remote_action as _git_impl_handle_git_remote_action,
+    _handle_git_checkout as _git_impl_handle_git_checkout,
+    _handle_git_stash_checkout as _git_impl_handle_git_stash_checkout,
+)
+
+
 def _git_session(handler, session_id: str):
-    if not session_id:
-        bad(handler, "session_id required")
-        return None
-    try:
-        return get_session(session_id)
-    except KeyError:
-        bad(handler, "Session not found", 404)
-        return None
+    return _git_impl_git_session(
+        handler,
+        session_id,
+        bad=bad,
+        get_session=get_session,
+    )
 
 
 def _git_session_workspace(handler, session_id: str):
-    session = _git_session(handler, session_id)
-    if session is None:
-        return None
-    return Path(session.workspace)
+    return _git_impl_git_session_workspace(
+        handler,
+        session_id,
+        Path=Path,
+        _git_session=_git_session,
+    )
 
 
 def _git_session_and_workspace(handler, session_id: str):
-    session = _git_session(handler, session_id)
-    if session is None:
-        return None, None
-    return session, Path(session.workspace)
-
-
-def _git_locked_by_active_stream(session) -> bool:
-    stream_id = getattr(session, "active_stream_id", None)
-    if not stream_id:
-        return False
-    try:
-        from api.config import STREAMS, STREAMS_LOCK
-
-        with STREAMS_LOCK:
-            return stream_id in STREAMS
-    except Exception:
-        return False
+    return _git_impl_git_session_and_workspace(
+        handler,
+        session_id,
+        Path=Path,
+        _git_session=_git_session,
+    )
 
 
 def _git_reject_destructive_if_unsafe(handler, session) -> bool:
-    from api.workspace_git import (
-        GitWorkspaceError,
-        WORKSPACE_GIT_DESTRUCTIVE_ENV,
-        workspace_git_destructive_enabled,
+    return _git_impl_git_reject_destructive_if_unsafe(
+        handler,
+        session,
+        _git_bad=_git_bad,
+        _git_locked_by_active_stream=_git_locked_by_active_stream,
     )
-
-    if not workspace_git_destructive_enabled():
-        _git_bad(
-            handler,
-            GitWorkspaceError(
-                f"Destructive workspace Git operations are disabled. Set {WORKSPACE_GIT_DESTRUCTIVE_ENV}=1 to enable them.",
-                "destructive_git_disabled",
-            ),
-            status=403,
-        )
-        return True
-    if _git_locked_by_active_stream(session):
-        _git_bad(
-            handler,
-            GitWorkspaceError(
-                "A session run is active. Wait for it to finish before running this Git operation.",
-                "active_stream",
-            ),
-            status=409,
-        )
-        return True
-    return False
 
 
 def _handle_git_status(handler, parsed):
-    qs = parse_qs(parsed.query)
-    workspace = _git_session_workspace(handler, qs.get("session_id", [""])[0])
-    if workspace is None:
-        return True
-    try:
-        from api.workspace_git import GitWorkspaceError, git_status
-
-        return j(handler, {"git": git_status(workspace)})
-    except GitWorkspaceError as e:
-        return _git_bad(handler, e)
+    return _git_impl_handle_git_status(
+        handler,
+        parsed,
+        _git_bad=_git_bad,
+        _git_session_workspace=_git_session_workspace,
+        j=j,
+        parse_qs=parse_qs,
+    )
 
 
 def _handle_git_branches(handler, parsed):
-    qs = parse_qs(parsed.query)
-    workspace = _git_session_workspace(handler, qs.get("session_id", [""])[0])
-    if workspace is None:
-        return True
-    try:
-        from api.workspace_git import GitWorkspaceError, git_branches
-
-        return j(handler, {"branches": git_branches(workspace)})
-    except GitWorkspaceError as e:
-        return _git_bad(handler, e)
+    return _git_impl_handle_git_branches(
+        handler,
+        parsed,
+        _git_bad=_git_bad,
+        _git_session_workspace=_git_session_workspace,
+        j=j,
+        parse_qs=parse_qs,
+    )
 
 
 def _handle_git_diff(handler, parsed):
-    qs = parse_qs(parsed.query)
-    workspace = _git_session_workspace(handler, qs.get("session_id", [""])[0])
-    if workspace is None:
-        return True
-    path = qs.get("path", [""])[0]
-    kind = qs.get("kind", ["unstaged"])[0]
-    if not path:
-        return bad(handler, "path required")
-    try:
-        from api.workspace_git import GitWorkspaceError, git_diff
-
-        return j(handler, {"diff": git_diff(workspace, path, kind)})
-    except GitWorkspaceError as e:
-        return _git_bad(handler, e)
+    return _git_impl_handle_git_diff(
+        handler,
+        parsed,
+        _git_bad=_git_bad,
+        _git_session_workspace=_git_session_workspace,
+        bad=bad,
+        j=j,
+        parse_qs=parse_qs,
+    )
 
 
 def _git_bad(handler, err, status: int = 400):
-    return j(
+    return _git_impl_git_bad(
         handler,
-        {
-            "error": _sanitize_error(err),
-            "code": getattr(err, "code", "git_failed") or "git_failed",
-        },
-        status=status,
+        err,
+        status,
+        _sanitize_error=_sanitize_error,
+        j=j,
     )
-
-
-def _git_paths_from_body(body) -> list[str]:
-    raw_paths = body.get("paths")
-    if raw_paths is None and body.get("path"):
-        raw_paths = [body.get("path")]
-    if isinstance(raw_paths, str):
-        raw_paths = [raw_paths]
-    if not isinstance(raw_paths, list):
-        raise ValueError("paths must be a list")
-    return [str(path) for path in raw_paths]
 
 
 def _handle_git_stage(handler, body):
-    try:
-        require(body, "session_id")
-        paths = _git_paths_from_body(body)
-        session, workspace = _git_session_and_workspace(handler, body["session_id"])
-        if workspace is None:
-            return True
-        if _git_reject_destructive_if_unsafe(handler, session):
-            return True
-        from api.workspace_git import GitWorkspaceError, git_stage
-
-        return j(handler, {"ok": True, "git": git_stage(workspace, paths)})
-    except ValueError as e:
-        return bad(handler, str(e))
-    except GitWorkspaceError as e:
-        return _git_bad(handler, e)
+    return _git_impl_handle_git_stage(
+        handler,
+        body,
+        _git_bad=_git_bad,
+        _git_paths_from_body=_git_paths_from_body,
+        _git_reject_destructive_if_unsafe=_git_reject_destructive_if_unsafe,
+        _git_session_and_workspace=_git_session_and_workspace,
+        bad=bad,
+        j=j,
+        require=require,
+    )
 
 
 def _handle_git_unstage(handler, body):
-    try:
-        require(body, "session_id")
-        paths = _git_paths_from_body(body)
-        session, workspace = _git_session_and_workspace(handler, body["session_id"])
-        if workspace is None:
-            return True
-        if _git_reject_destructive_if_unsafe(handler, session):
-            return True
-        from api.workspace_git import GitWorkspaceError, git_unstage
-
-        return j(handler, {"ok": True, "git": git_unstage(workspace, paths)})
-    except ValueError as e:
-        return bad(handler, str(e))
-    except GitWorkspaceError as e:
-        return _git_bad(handler, e)
+    return _git_impl_handle_git_unstage(
+        handler,
+        body,
+        _git_bad=_git_bad,
+        _git_paths_from_body=_git_paths_from_body,
+        _git_reject_destructive_if_unsafe=_git_reject_destructive_if_unsafe,
+        _git_session_and_workspace=_git_session_and_workspace,
+        bad=bad,
+        j=j,
+        require=require,
+    )
 
 
 def _handle_git_discard(handler, body):
-    try:
-        require(body, "session_id")
-        paths = _git_paths_from_body(body)
-        session, workspace = _git_session_and_workspace(handler, body["session_id"])
-        if workspace is None:
-            return True
-        if _git_reject_destructive_if_unsafe(handler, session):
-            return True
-        from api.workspace_git import GitWorkspaceError, git_discard
-
-        return j(
-            handler,
-            {
-                "ok": True,
-                "git": git_discard(
-                    workspace,
-                    paths,
-                    delete_untracked=bool(body.get("delete_untracked")),
-                ),
-            },
-        )
-    except ValueError as e:
-        return bad(handler, str(e))
-    except GitWorkspaceError as e:
-        return _git_bad(handler, e)
+    return _git_impl_handle_git_discard(
+        handler,
+        body,
+        _git_bad=_git_bad,
+        _git_paths_from_body=_git_paths_from_body,
+        _git_reject_destructive_if_unsafe=_git_reject_destructive_if_unsafe,
+        _git_session_and_workspace=_git_session_and_workspace,
+        bad=bad,
+        j=j,
+        require=require,
+    )
 
 
 def _llm_git_commit_message(system_prompt: str, user_prompt: str, session=None) -> str:
-    from api import profiles as profiles_api
-
-    active_profile = profiles_api.get_active_profile_name() or "default"
-    with profiles_api.profile_env_for_background_worker(
-        active_profile,
-        "git commit message",
-        logger_override=logger,
-    ):
-        from api.config import (
-            get_effective_default_model,
-            model_with_provider_context,
-            resolve_custom_provider_connection,
-            resolve_model_provider,
-        )
-
-        session_model = str(getattr(session, "model", "") or "").strip()
-        session_provider = str(getattr(session, "model_provider", "") or "").strip() or None
-        model_for_resolution = (
-            model_with_provider_context(session_model, session_provider)
-            if session_model
-            else get_effective_default_model()
-        )
-        _main_model, _main_provider, _main_base_url = resolve_model_provider(model_for_resolution)
-        _main_api_key = None
-        try:
-            from api.oauth import resolve_runtime_provider_with_anthropic_env_lock
-            from hermes_cli.runtime_provider import resolve_runtime_provider
-
-            _rt = resolve_runtime_provider_with_anthropic_env_lock(
-                resolve_runtime_provider,
-                requested=_main_provider,
-            )
-            _main_api_key = _rt.get("api_key")
-            if not _main_provider:
-                _main_provider = _rt.get("provider")
-            if not _main_base_url:
-                _main_base_url = _rt.get("base_url")
-        except Exception as _e:
-            logger.debug("git commit message runtime provider resolution failed: %s", _e)
-        if isinstance(_main_provider, str) and _main_provider.startswith("custom:"):
-            _cp_key, _cp_base = resolve_custom_provider_connection(_main_provider)
-            if not _main_api_key and _cp_key:
-                _main_api_key = _cp_key
-            if not _main_base_url and _cp_base:
-                _main_base_url = _cp_base
-
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ]
-        main_runtime = {
-            "provider": _main_provider,
-            "model": _main_model,
-            "base_url": _main_base_url,
-            "api_key": _main_api_key,
-        }
-        ensure_agent_runtime_current()
-        try:
-            from agent.auxiliary_client import get_text_auxiliary_client
-
-            aux_client, aux_model = get_text_auxiliary_client(
-                "compression",
-                main_runtime=main_runtime,
-            )
-            if aux_client is not None and aux_model:
-                response = aux_client.chat.completions.create(
-                    model=aux_model,
-                    messages=messages,
-                )
-                return str(response.choices[0].message.content or "").strip()
-        except Exception as _e:
-            logger.debug("git commit message auxiliary model failed; falling back to main model: %s", _e)
-
-        AIAgent = require_ai_agent_class()
-
-        agent = AIAgent(
-            model=_main_model,
-            provider=_main_provider,
-            base_url=_main_base_url,
-            api_key=_main_api_key,
-            platform="webui",
-            quiet_mode=True,
-            enabled_toolsets=[],
-            session_id=f"git-commit-message-{uuid.uuid4().hex[:8]}",
-        )
-        result = agent.run_conversation(
-            user_message=user_prompt,
-            system_message=system_prompt,
-            conversation_history=[],
-            task_id=f"git-commit-message-{uuid.uuid4().hex[:8]}",
-        )
-        return str(result.get("final_response") or "").strip()
+    return _git_impl_llm_git_commit_message(
+        system_prompt,
+        user_prompt,
+        session,
+        ensure_agent_runtime_current=ensure_agent_runtime_current,
+        logger=logger,
+        require_ai_agent_class=require_ai_agent_class,
+        uuid=uuid,
+    )
 
 
 def _handle_git_commit_message(handler, body):
-    from api.workspace_git import (
-        GitWorkspaceError,
-        clean_generated_commit_message,
-        staged_commit_message_prompt,
+    return _git_impl_handle_git_commit_message(
+        handler,
+        body,
+        AgentRuntimeChangedError=AgentRuntimeChangedError,
+        Path=Path,
+        _git_bad=_git_bad,
+        _llm_git_commit_message=_llm_git_commit_message,
+        _sanitize_error=_sanitize_error,
+        agent_runtime_stale_payload=agent_runtime_stale_payload,
+        bad=bad,
+        get_session=get_session,
+        j=j,
+        logger=logger,
+        require=require,
     )
-
-    try:
-        require(body, "session_id")
-        session = get_session(body["session_id"])
-        workspace = Path(session.workspace)
-
-        prompt = staged_commit_message_prompt(workspace)
-        message = clean_generated_commit_message(
-            _llm_git_commit_message(prompt["system_prompt"], prompt["user_prompt"], session=session)
-        )
-        if not message:
-            raise GitWorkspaceError("No commit message was generated")
-        return j(handler, {"ok": True, "message": message, "truncated": bool(prompt.get("truncated"))})
-    except KeyError:
-        return bad(handler, "Session not found", 404)
-    except ValueError as e:
-        return bad(handler, str(e))
-    except GitWorkspaceError as e:
-        return _git_bad(handler, e)
-    except AgentRuntimeChangedError as e:
-        return j(handler, agent_runtime_stale_payload(e), status=409)
-    except Exception as e:
-        logger.exception("git commit message generation failed")
-        return bad(handler, _sanitize_error(e), 500)
 
 
 def _handle_git_commit_message_selected(handler, body):
-    from api.workspace_git import (
-        GitWorkspaceError,
-        clean_generated_commit_message,
-        selected_commit_message_prompt,
+    return _git_impl_handle_git_commit_message_selected(
+        handler,
+        body,
+        AgentRuntimeChangedError=AgentRuntimeChangedError,
+        Path=Path,
+        _git_bad=_git_bad,
+        _git_paths_from_body=_git_paths_from_body,
+        _llm_git_commit_message=_llm_git_commit_message,
+        _sanitize_error=_sanitize_error,
+        agent_runtime_stale_payload=agent_runtime_stale_payload,
+        bad=bad,
+        get_session=get_session,
+        j=j,
+        logger=logger,
+        require=require,
     )
-
-    try:
-        require(body, "session_id")
-        paths = _git_paths_from_body(body)
-        session = get_session(body["session_id"])
-        workspace = Path(session.workspace)
-
-        prompt = selected_commit_message_prompt(workspace, paths)
-        message = clean_generated_commit_message(
-            _llm_git_commit_message(prompt["system_prompt"], prompt["user_prompt"], session=session)
-        )
-        if not message:
-            raise GitWorkspaceError("No commit message was generated")
-        return j(handler, {"ok": True, "message": message, "truncated": bool(prompt.get("truncated"))})
-    except KeyError:
-        return bad(handler, "Session not found", 404)
-    except ValueError as e:
-        return bad(handler, str(e))
-    except GitWorkspaceError as e:
-        return _git_bad(handler, e)
-    except AgentRuntimeChangedError as e:
-        return j(handler, agent_runtime_stale_payload(e), status=409)
-    except Exception as e:
-        logger.exception("selected git commit message generation failed")
-        return bad(handler, _sanitize_error(e), 500)
 
 
 def _handle_git_commit(handler, body):
-    try:
-        require(body, "session_id", "message")
-        session, workspace = _git_session_and_workspace(handler, body["session_id"])
-        if workspace is None:
-            return True
-        if _git_reject_destructive_if_unsafe(handler, session):
-            return True
-        from api.workspace_git import GitWorkspaceError, git_commit
-
-        return j(handler, git_commit(workspace, body.get("message", "")))
-    except ValueError as e:
-        return bad(handler, str(e))
-    except GitWorkspaceError as e:
-        return _git_bad(handler, e)
+    return _git_impl_handle_git_commit(
+        handler,
+        body,
+        _git_bad=_git_bad,
+        _git_reject_destructive_if_unsafe=_git_reject_destructive_if_unsafe,
+        _git_session_and_workspace=_git_session_and_workspace,
+        bad=bad,
+        j=j,
+        require=require,
+    )
 
 
 def _handle_git_commit_selected(handler, body):
-    try:
-        require(body, "session_id", "message")
-        paths = _git_paths_from_body(body)
-        session, workspace = _git_session_and_workspace(handler, body["session_id"])
-        if workspace is None:
-            return True
-        if _git_reject_destructive_if_unsafe(handler, session):
-            return True
-        from api.workspace_git import GitWorkspaceError, git_commit_selected
-
-        return j(handler, git_commit_selected(workspace, body.get("message", ""), paths))
-    except ValueError as e:
-        return bad(handler, str(e))
-    except GitWorkspaceError as e:
-        return _git_bad(handler, e)
+    return _git_impl_handle_git_commit_selected(
+        handler,
+        body,
+        _git_bad=_git_bad,
+        _git_paths_from_body=_git_paths_from_body,
+        _git_reject_destructive_if_unsafe=_git_reject_destructive_if_unsafe,
+        _git_session_and_workspace=_git_session_and_workspace,
+        bad=bad,
+        j=j,
+        require=require,
+    )
 
 
 def _handle_git_remote_action(handler, body, action: str):
-    try:
-        require(body, "session_id")
-        session, workspace = _git_session_and_workspace(handler, body["session_id"])
-        if workspace is None:
-            return True
-        if action in {"pull", "push"} and _git_reject_destructive_if_unsafe(handler, session):
-            return True
-        from api.workspace_git import GitWorkspaceError, git_fetch, git_pull, git_push
-
-        actions = {
-            "fetch": git_fetch,
-            "pull": git_pull,
-            "push": git_push,
-        }
-        return j(handler, actions[action](workspace))
-    except ValueError as e:
-        return bad(handler, str(e))
-    except GitWorkspaceError as e:
-        return _git_bad(handler, e)
+    return _git_impl_handle_git_remote_action(
+        handler,
+        body,
+        action,
+        _git_bad=_git_bad,
+        _git_reject_destructive_if_unsafe=_git_reject_destructive_if_unsafe,
+        _git_session_and_workspace=_git_session_and_workspace,
+        bad=bad,
+        j=j,
+        require=require,
+    )
 
 
 def _handle_git_checkout(handler, body):
-    try:
-        require(body, "session_id", "ref", "mode")
-        session, workspace = _git_session_and_workspace(handler, body["session_id"])
-        if workspace is None:
-            return True
-        if _git_reject_destructive_if_unsafe(handler, session):
-            return True
-        from api.workspace_git import GitWorkspaceError, git_checkout
-
-        result = git_checkout(
-            workspace,
-            str(body.get("ref", "")),
-            str(body.get("mode", "local")),
-            new_branch=body.get("new_branch"),
-            track=bool(body.get("track")),
-            dirty_mode=str(body.get("dirty_mode", "block")),
-        )
-        return j(
-            handler,
-            {
-                "ok": True,
-                "git": result.get("status"),
-                "branches": result.get("branches"),
-                "current_branch": result.get("current_branch"),
-                "message": result.get("message", ""),
-            },
-        )
-    except ValueError as e:
-        return bad(handler, str(e))
-    except GitWorkspaceError as e:
-        return _git_bad(handler, e)
+    return _git_impl_handle_git_checkout(
+        handler,
+        body,
+        _git_bad=_git_bad,
+        _git_reject_destructive_if_unsafe=_git_reject_destructive_if_unsafe,
+        _git_session_and_workspace=_git_session_and_workspace,
+        bad=bad,
+        j=j,
+        require=require,
+    )
 
 
 def _handle_git_stash_checkout(handler, body):
-    try:
-        require(body, "session_id", "ref", "mode")
-        session, workspace = _git_session_and_workspace(handler, body["session_id"])
-        if workspace is None:
-            return True
-        if _git_reject_destructive_if_unsafe(handler, session):
-            return True
-        from api.workspace_git import GitWorkspaceError, git_stash_and_checkout
-
-        result = git_stash_and_checkout(
-            workspace,
-            str(body.get("ref", "")),
-            str(body.get("mode", "local")),
-            new_branch=body.get("new_branch"),
-            track=bool(body.get("track")),
-        )
-        return j(
-            handler,
-            {
-                "ok": True,
-                "git": result.get("status"),
-                "branches": result.get("branches"),
-                "current_branch": result.get("current_branch"),
-                "message": result.get("message", ""),
-                "stash_name": result.get("stash_name", ""),
-                "stashed": bool(result.get("stashed")),
-                "restored_stash": result.get("restored_stash"),
-                "restore_failed": bool(result.get("restore_failed")),
-                "restore_error": result.get("restore_error", ""),
-                "restore_stash": result.get("restore_stash"),
-            },
-        )
-    except ValueError as e:
-        return bad(handler, str(e))
-    except GitWorkspaceError as e:
-        return _git_bad(handler, e)
+    return _git_impl_handle_git_stash_checkout(
+        handler,
+        body,
+        _git_bad=_git_bad,
+        _git_reject_destructive_if_unsafe=_git_reject_destructive_if_unsafe,
+        _git_session_and_workspace=_git_session_and_workspace,
+        bad=bad,
+        j=j,
+        require=require,
+    )
 
 
 def _handle_file_delete(handler, body):
-    try:
-        require(body, "session_id", "path")
-    except ValueError as e:
-        return bad(handler, str(e))
-    try:
-        s = get_session_for_file_ops(body["session_id"])
-    except KeyError:
-        return bad(handler, "Session not found", 404)
-    try:
-        ws_root = Path(s.workspace)
-        target = safe_resolve(ws_root, body["path"])
-        # Reject a symlinked entry BEFORE the follow-based exists() check: a
-        # dangling symlink resolves to a missing target, so an exists()-first
-        # order would misclassify it as 404 "File not found" and leave it
-        # permanently undeletable. is_symlink() is a no-follow lstat on the
-        # lexically-requested path, so it catches both live and dangling links.
-        if (ws_root / body["path"]).is_symlink():
-            return bad(handler, "Cannot delete a symlinked entry")
-        if not target.exists():
-            return bad(handler, "File not found", 404)
-        if target.is_dir():
-            if not body.get("recursive"):
-                return bad(handler, "Set recursive=true to delete directories")
-            rmtree_anchored(ws_root, target)
-        else:
-            unlink_anchored(ws_root, target)
-        return j(handler, {"ok": True, "path": body["path"]})
-    except (ValueError, FileNotFoundError, PermissionError, OSError) as e:
-        return bad(handler, _sanitize_error(e))
+    return _files_impl_handle_file_delete(
+        handler,
+        body,
+        _sanitize_error=_sanitize_error,
+        bad=bad,
+        get_session_for_file_ops=get_session_for_file_ops,
+        j=j,
+        require=require,
+        rmtree_anchored=rmtree_anchored,
+        safe_resolve=safe_resolve,
+        unlink_anchored=unlink_anchored,
+    )
 
 
 def _handle_file_save(handler, body):
-    try:
-        require(body, "session_id", "path")
-    except ValueError as e:
-        return bad(handler, str(e))
-    try:
-        s = get_session_for_file_ops(body["session_id"])
-    except KeyError:
-        return bad(handler, "Session not found", 404)
-    try:
-        ws_root = Path(s.workspace)
-        target = safe_resolve(ws_root, body["path"])
-        if (ws_root / body["path"]).is_symlink():
-            return bad(handler, "Cannot save to a symlinked entry")
-        if not target.exists():
-            return bad(handler, "File not found", 404)
-        if target.is_dir():
-            return bad(handler, "Cannot save: path is a directory")
-        if Path(str(body["path"])).suffix.lower() in {".docx", ".xlsx", ".pptx"}:
-            return bad(handler, "Use /api/file/office-save for Office documents")
-        data = str(body.get("content", "")).encode("utf-8")
-        fd = open_anchored_write_fd(ws_root, target)
-        with os.fdopen(fd, "wb", closefd=True) as fh:
-            fh.write(data)
-        return j(
-            handler, {"ok": True, "path": body["path"], "size": len(data)}
-        )
-    except (ValueError, FileNotFoundError, PermissionError, OSError) as e:
-        return bad(handler, _sanitize_error(e))
+    return _files_impl_handle_file_save(
+        handler,
+        body,
+        _sanitize_error=_sanitize_error,
+        bad=bad,
+        get_session_for_file_ops=get_session_for_file_ops,
+        j=j,
+        open_anchored_write_fd=open_anchored_write_fd,
+        require=require,
+        safe_resolve=safe_resolve,
+    )
 
 
 def _handle_office_file_save(handler, body):
-    try:
-        require(body, "session_id", "path")
-    except ValueError as e:
-        return bad(handler, str(e))
-    try:
-        s = get_session_for_file_ops(body["session_id"])
-    except KeyError:
-        return bad(handler, "Session not found", 404)
-    try:
-        ws_root = Path(s.workspace)
-        target = safe_resolve(ws_root, body["path"])
-        if (ws_root / body["path"]).is_symlink():
-            return bad(handler, "Cannot save to a symlinked entry")
-        if not target.exists():
-            return bad(handler, "File not found", 404)
-        if target.is_dir():
-            return bad(handler, "Cannot save: path is a directory")
-        if Path(str(body["path"])).suffix.lower() not in {".docx", ".xlsx", ".pptx"}:
-            return bad(handler, "Office save is only available for .docx, .xlsx, and .pptx files")
-        from api.office_documents import save_office_document
-
-        current_bytes = _read_anchored_file_bytes(ws_root, target)
-        preview, updated_bytes = save_office_document(body["path"], current_bytes, body.get("content", ""))
-        fd = open_anchored_write_fd(ws_root, target)
-        with os.fdopen(fd, "wb", closefd=True) as fh:
-            fh.write(updated_bytes)
-        preview.update({"ok": True, "path": body["path"], "size": len(updated_bytes)})
-        return j(handler, preview)
-    except ImportError as e:
-        return bad(handler, str(e), 503)
-    except (ValueError, FileNotFoundError, PermissionError, OSError) as e:
-        return bad(handler, _sanitize_error(e))
+    return _files_impl_handle_office_file_save(
+        handler,
+        body,
+        _read_anchored_file_bytes=_read_anchored_file_bytes,
+        _sanitize_error=_sanitize_error,
+        bad=bad,
+        get_session_for_file_ops=get_session_for_file_ops,
+        j=j,
+        open_anchored_write_fd=open_anchored_write_fd,
+        require=require,
+        safe_resolve=safe_resolve,
+    )
 
 
 def _handle_file_create(handler, body):
-    try:
-        require(body, "session_id", "path")
-    except ValueError as e:
-        return bad(handler, str(e))
-    try:
-        s = get_session_for_file_ops(body["session_id"])
-    except KeyError:
-        return bad(handler, "Session not found", 404)
-    try:
-        ws_root = Path(s.workspace)
-        target = safe_resolve(ws_root, body["path"])
-        if target.exists():
-            return bad(handler, "File already exists")
-        data = str(body.get("content", "")).encode("utf-8")
-        fd = open_anchored_create_fd(ws_root, target)
-        with os.fdopen(fd, "wb", closefd=True) as fh:
-            fh.write(data)
-        return j(
-            handler, {"ok": True, "path": target.relative_to(ws_root.resolve()).as_posix()}
-        )
-    except FileExistsError:
-        return bad(handler, "File already exists")
-    except (ValueError, FileNotFoundError, PermissionError, OSError) as e:
-        return bad(handler, _sanitize_error(e))
+    return _files_impl_handle_file_create(
+        handler,
+        body,
+        _sanitize_error=_sanitize_error,
+        bad=bad,
+        get_session_for_file_ops=get_session_for_file_ops,
+        j=j,
+        open_anchored_create_fd=open_anchored_create_fd,
+        require=require,
+        safe_resolve=safe_resolve,
+    )
 
 
 def _handle_file_rename(handler, body):
-    try:
-        require(body, "session_id", "path", "new_name")
-    except ValueError as e:
-        return bad(handler, str(e))
-    try:
-        s = get_session_for_file_ops(body["session_id"])
-    except KeyError:
-        return bad(handler, "Session not found", 404)
-    try:
-        ws_root = Path(s.workspace)
-        ws_root_resolved = ws_root.resolve()
-        source = safe_resolve(ws_root, body["path"])
-        # Reject a symlinked entry BEFORE the follow-based exists() check (see
-        # _handle_file_delete): a dangling symlink would otherwise 404 and stay
-        # unrenameable. is_symlink() is a no-follow lstat on the requested path.
-        if (ws_root / body["path"]).is_symlink():
-            return bad(handler, "Cannot rename a symlinked entry")
-        if not source.exists():
-            return bad(handler, "File not found", 404)
-        new_name = body["new_name"].strip()
-        if not new_name or "/" in new_name or "\\" in new_name or ".." in new_name:
-            return bad(handler, "Invalid file name")
-        dest = source.parent / new_name
-        if dest.exists():
-            return bad(handler, f'A file named "{new_name}" already exists')
-        rename_anchored(ws_root, source, dest)
-        new_rel = dest.relative_to(ws_root_resolved).as_posix()
-        return j(handler, {"ok": True, "old_path": body["path"], "new_path": new_rel})
-    except FileExistsError:
-        return bad(handler, f'A file named "{body.get("new_name", "")}" already exists')
-    except (ValueError, PermissionError, OSError) as e:
-        return bad(handler, _sanitize_error(e))
+    return _files_impl_handle_file_rename(
+        handler,
+        body,
+        _sanitize_error=_sanitize_error,
+        bad=bad,
+        get_session_for_file_ops=get_session_for_file_ops,
+        j=j,
+        rename_anchored=rename_anchored,
+        require=require,
+        safe_resolve=safe_resolve,
+    )
 
 
 def _handle_file_move(handler, body):
-    try:
-        require(body, "session_id", "path", "dest_dir")
-    except ValueError as e:
-        return bad(handler, str(e))
-    try:
-        s = get_session_for_file_ops(body["session_id"])
-    except KeyError:
-        return bad(handler, "Session not found", 404)
-    try:
-        ws_root = Path(s.workspace)
-        # safe_resolve() returns paths under the RESOLVED root, so compute
-        # returned relative paths against the resolved root too — otherwise a
-        # symlinked workspace root (e.g. macOS /tmp -> /private/tmp) makes
-        # dest.relative_to(ws_root) raise after a successful on-disk move,
-        # returning a confusing 400 for a move that actually happened.
-        ws_root_resolved = ws_root.resolve()
-        source = safe_resolve(ws_root, body["path"])
-        # Reject a symlinked SOURCE entry BEFORE the follow-based exists() check.
-        # safe_resolve() follows the final symlink, so source.name/source.parent
-        # would point at the link's TARGET, not the dragged entry — moving
-        # link.txt would silently move dir/real.txt and leave link.txt dangling.
-        # Detect the symlink on the lexically-requested final component (lstat,
-        # no-follow) and refuse; running this before exists() also means a
-        # dangling symlink is rejected (400) rather than misclassified as 404
-        # (matches the delete/rename ordering).
-        if (ws_root / body["path"]).is_symlink():
-            return bad(handler, "Cannot move a symlinked entry")
-        if not source.exists():
-            return bad(handler, "File not found", 404)
-        dest_dir_raw = (body.get("dest_dir") or ".").strip()
-        if not dest_dir_raw:
-            dest_dir_raw = "."
-        if ".." in dest_dir_raw.split("/"):
-            return bad(handler, "Invalid destination")
-        dest_parent = safe_resolve(ws_root, dest_dir_raw)
-        if not dest_parent.is_dir():
-            return bad(handler, "Destination folder not found", 404)
-        if source.is_dir():
-            try:
-                dest_parent.resolve().relative_to(source.resolve())
-                return bad(handler, "Cannot move a folder into itself or its subfolder")
-            except ValueError:
-                pass
-        dest = dest_parent / source.name
-        if dest.resolve() == source.resolve():
-            new_rel = source.relative_to(ws_root_resolved).as_posix()
-            return j(
-                handler,
-                {"ok": True, "old_path": body["path"], "new_path": new_rel},
-            )
-        # Perform the move race-safely. The path-based checks above can be raced
-        # (TOCTOU): between validating dest_parent and renaming, dest_dir could be
-        # swapped to a symlink pointing outside the workspace, and a path-based
-        # rename would follow it. Open BOTH parent directories as workspace-anchored
-        # fds (openat + O_NOFOLLOW — every component verified non-symlink), do the
-        # collision check by fd, then rename via src_dir_fd/dst_dir_fd so the kernel
-        # operates on the verified directories, not re-resolved pathnames.
-        leaf = source.name
-        if os.open in getattr(os, "supports_dir_fd", set()):
-            src_parent_fd = open_anchored_fd(ws_root, source.parent, want_dir=True)
-            try:
-                dst_parent_fd = open_anchored_fd(ws_root, dest_parent, want_dir=True)
-                try:
-                    try:
-                        os.stat(leaf, dir_fd=dst_parent_fd, follow_symlinks=False)
-                        return bad(
-                            handler,
-                            f'A file named "{leaf}" already exists in that folder',
-                        )
-                    except FileNotFoundError:
-                        pass
-                    os.rename(
-                        leaf, leaf,
-                        src_dir_fd=src_parent_fd, dst_dir_fd=dst_parent_fd,
-                    )
-                finally:
-                    os.close(dst_parent_fd)
-            finally:
-                os.close(src_parent_fd)
-        else:
-            # Windows / no openat: no new race protection available, but creating
-            # symlinks needs admin there. Fall back to the path-based rename.
-            if dest.exists():
-                return bad(
-                    handler,
-                    f'A file named "{source.name}" already exists in that folder',
-                )
-            source.rename(dest)
-        new_rel = dest.relative_to(ws_root_resolved).as_posix()
-        return j(
-            handler,
-            {"ok": True, "old_path": body["path"], "new_path": new_rel},
-        )
-    except (ValueError, FileNotFoundError, PermissionError, OSError) as e:
-        return bad(handler, _sanitize_error(e))
+    return _files_impl_handle_file_move(
+        handler,
+        body,
+        _sanitize_error=_sanitize_error,
+        bad=bad,
+        get_session_for_file_ops=get_session_for_file_ops,
+        j=j,
+        open_anchored_fd=open_anchored_fd,
+        require=require,
+        safe_resolve=safe_resolve,
+    )
 
 
 def _handle_create_dir(handler, body):
-    try:
-        require(body, "session_id", "path")
-    except ValueError as e:
-        return bad(handler, str(e))
-    try:
-        s = get_session_for_file_ops(body["session_id"])
-    except KeyError:
-        return bad(handler, "Session not found", 404)
-    try:
-        ws_root = Path(s.workspace)
-        target = safe_resolve(ws_root, body["path"])
-        if target.exists():
-            return bad(handler, "Path already exists")
-        make_anchored_dir(ws_root, target)
-        return j(
-            handler, {"ok": True, "path": target.relative_to(ws_root.resolve()).as_posix()}
-        )
-    except (ValueError, FileNotFoundError, PermissionError, OSError) as e:
-        return bad(handler, _sanitize_error(e))
+    return _files_impl_handle_create_dir(
+        handler,
+        body,
+        _sanitize_error=_sanitize_error,
+        bad=bad,
+        get_session_for_file_ops=get_session_for_file_ops,
+        j=j,
+        make_anchored_dir=make_anchored_dir,
+        require=require,
+        safe_resolve=safe_resolve,
+    )
 
 
 def _handle_file_reveal(handler, body):
-    try:
-        require(body, "session_id", "path")
-    except ValueError as e:
-        return bad(handler, str(e))
-    try:
-        s = get_session_for_file_ops(body["session_id"])
-    except KeyError:
-        return bad(handler, "Session not found", 404)
-    try:
-        target = safe_resolve(Path(s.workspace), body["path"])
-        if not target.exists():
-            # Include the resolved server-side path in the error message so
-            # the frontend toast can show *which* file the system expected.
-            # Useful when a stale session row still references a deleted file
-            # (#1764 — Cygnus's screenshot showed a "Failed to reveal: not
-            # found" toast that dropped the path entirely, leaving no clue
-            # what was missing).
-            return bad(handler, f"File not found: {target}", 404)
-
-        target_str = str(target)
-
-        # Optional Docker host/container path translation (mirrors _handle_file_open_vscode).
-        from api.config import get_config as _get_cfg  # noqa: PLC0415
-        vscode_cfg = _get_cfg().get("vscode", {})
-        if not isinstance(vscode_cfg, dict):
-            vscode_cfg = {}
-        container_prefix = vscode_cfg.get("container_path_prefix", "")
-        host_prefix = vscode_cfg.get("host_path_prefix", "")
-        if container_prefix and host_prefix:
-            _norm = container_prefix.rstrip('/') + '/'
-            if target_str.startswith(_norm) or target_str == container_prefix.rstrip('/'):
-                target_str = host_prefix + target_str[len(container_prefix):]
-
-        system = platform.system()
-        if system == "Darwin":
-            subprocess.Popen(["open", "-R", target_str])
-        elif system == "Windows":
-            subprocess.Popen(["explorer.exe", "/select," + target_str])
-        else:
-            # Linux / other — open parent directory
-            subprocess.Popen(["xdg-open", str(Path(target_str).parent)])
-
-        return j(handler, {"ok": True, "path": body["path"]})
-    except (ValueError, PermissionError, OSError) as e:
-        return bad(handler, _sanitize_error(e))
+    return _files_impl_handle_file_reveal(
+        handler,
+        body,
+        _sanitize_error=_sanitize_error,
+        bad=bad,
+        get_session_for_file_ops=get_session_for_file_ops,
+        j=j,
+        platform=platform,
+        require=require,
+        safe_resolve=safe_resolve,
+    )
 
 
 def _handle_file_path(handler, body):
@@ -24828,19 +22219,16 @@ def _handle_file_path(handler, body):
     just-deleted file is still useful, and refusing would force callers
     to special-case 404s for an action that cannot fail destructively.
     """
-    try:
-        require(body, "session_id", "path")
-    except ValueError as e:
-        return bad(handler, str(e))
-    try:
-        s = get_session_for_file_ops(body["session_id"])
-    except KeyError:
-        return bad(handler, "Session not found", 404)
-    try:
-        target = safe_resolve(Path(s.workspace), body["path"])
-        return j(handler, {"ok": True, "path": str(target)})
-    except (ValueError, PermissionError, OSError) as e:
-        return bad(handler, _sanitize_error(e))
+    return _files_impl_handle_file_path(
+        handler,
+        body,
+        _sanitize_error=_sanitize_error,
+        bad=bad,
+        get_session_for_file_ops=get_session_for_file_ops,
+        j=j,
+        require=require,
+        safe_resolve=safe_resolve,
+    )
 
 
 def _handle_file_open_vscode(handler, body):
@@ -24858,75 +22246,16 @@ def _handle_file_open_vscode(handler, body):
     host prefix before being handed to VS Code.  This lets users running
     Hermes WebUI inside Docker still open files in their local editor.
     """
-    try:
-        require(body, "session_id", "path")
-    except ValueError as e:
-        return bad(handler, str(e))
-    try:
-        s = get_session_for_file_ops(body["session_id"])
-    except KeyError:
-        return bad(handler, "Session not found", 404)
-    try:
-        target = safe_resolve(Path(s.workspace), body["path"])
-        if not target.exists():
-            return bad(handler, f"File not found: {target}", 404)
-
-        target_str = str(target)
-
-        # Optional Docker host/container path translation
-        from api.config import get_config as _get_cfg  # noqa: PLC0415
-        vscode_cfg = _get_cfg().get("vscode", {})
-        if not isinstance(vscode_cfg, dict):
-            vscode_cfg = {}
-        container_prefix = vscode_cfg.get("container_path_prefix", "")
-        host_prefix = vscode_cfg.get("host_path_prefix", "")
-        if container_prefix and host_prefix:
-            _norm = container_prefix.rstrip('/') + '/'
-            if target_str.startswith(_norm) or target_str == container_prefix.rstrip('/'):
-                target_str = host_prefix + target_str[len(container_prefix):]
-
-        cmd = vscode_cfg.get("command", "code")
-        # Resolve the command to an absolute path so subprocess.Popen finds it
-        # even when the server process inherits a minimal PATH (e.g. when
-        # launched via start.sh on macOS where /usr/local/bin may be absent).
-        resolved_cmd = shutil.which(cmd)
-        if resolved_cmd is None:
-            # Try common VS Code installation paths as fallback.
-            # macOS: /usr/local/bin/code (symlink) or app bundle CLI
-            # Linux: /usr/bin/code or snap
-            # Windows: user-install under %LOCALAPPDATA%, system-install under %PROGRAMFILES%
-            _local_app_data = os.environ.get("LOCALAPPDATA", "")
-            _prog_files = os.environ.get("PROGRAMFILES", "C:\\Program Files")
-            _prog_files_x86 = os.environ.get("PROGRAMFILES(X86)", "C:\\Program Files (x86)")
-            _vscode_fallbacks = [
-                # macOS
-                "/usr/local/bin/code",
-                "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code",
-                # Linux
-                "/usr/bin/code",
-                "/snap/bin/code",
-                # Windows (user install)
-                os.path.join(_local_app_data, "Programs", "Microsoft VS Code", "bin", "code.cmd"),
-                # Windows (system install)
-                os.path.join(_prog_files, "Microsoft VS Code", "bin", "code.cmd"),
-                os.path.join(_prog_files_x86, "Microsoft VS Code", "bin", "code.cmd"),
-            ]
-            for fb in _vscode_fallbacks:
-                if fb and Path(fb).exists():
-                    resolved_cmd = fb
-                    break
-        if resolved_cmd is None:
-            return bad(
-                handler,
-                f"VS Code command not found: {cmd!r}. "
-                "Install VS Code and ensure the 'code' CLI is on PATH, "
-                "or set vscode.command in config.yaml to the full path.",
-            )
-        subprocess.Popen([resolved_cmd, target_str])
-
-        return j(handler, {"ok": True, "path": body["path"]})
-    except (ValueError, PermissionError, OSError) as e:
-        return bad(handler, _sanitize_error(e))
+    return _files_impl_handle_file_open_vscode(
+        handler,
+        body,
+        _sanitize_error=_sanitize_error,
+        bad=bad,
+        get_session_for_file_ops=get_session_for_file_ops,
+        j=j,
+        require=require,
+        safe_resolve=safe_resolve,
+    )
 
 
 def _handle_workspace_add(handler, body):
@@ -24936,76 +22265,42 @@ def _handle_workspace_add(handler, body):
     # Doing this at the route entry means every downstream check (blocked
     # system path, validate_workspace_to_add, duplicate detection) sees the
     # cleaned form.
-    path_str = _strip_surrounding_quotes(body.get("path", "").strip())
-    name = body.get("name", "").strip()
-    auto_create = body.get("create", False)
-    if not path_str:
-        return bad(handler, "path is required")
-    # Validate the path is NOT a blocked system root BEFORE any filesystem mutation.
-    # This prevents creating orphan directories on rejected paths (#782 review).
-    # _is_blocked_system_path honours user-tmp carve-outs (e.g. /var/folders on
-    # macOS) so pytest's tmp_path_factory paths and other legit user-tmp dirs
-    # still register cleanly.
-    try:
-        candidate = Path(path_str).expanduser().resolve()
-    except (ValueError, OSError, RuntimeError) as e:
-        # Invalid path (e.g. embedded null byte) — fail closed with a clean 400
-        # instead of letting .resolve() raise an uncaught 500.
-        return bad(handler, f"Invalid path: {_sanitize_error(e)}")
-    if _is_blocked_system_path(candidate):
-        # Home-directory carve-out, mirroring the validators
-        # (resolve_trusted_workspace / validate_workspace_to_add): a workspace
-        # at or under the active user's home must stay allowed even when that
-        # home lives under an otherwise-blocked root (e.g. systemd-homed
-        # /var/home/<user>/...). Without this the route rejects valid
-        # /var/home workspaces before validate_workspace_to_add()'s carve-out
-        # can run.
-        _home = _home_path()
-        if not (_home != Path("/") and (candidate == _home or _is_within(candidate, _home))):
-            return bad(handler, f"Path points to a system directory: {candidate}")
-    # Now safe to create the directory if requested
-    if auto_create:
-        try:
-            candidate.mkdir(parents=True, exist_ok=True)
-        except (OSError, PermissionError) as e:
-            return bad(handler, f"Could not create directory: {_sanitize_error(e)}")
-    # Full validation (exists, is_dir) — should pass now that dir exists
-    try:
-        p = validate_workspace_to_add(path_str)
-    except ValueError as e:
-        return bad(handler, str(e))
-    wss = load_workspaces()
-    if any(w["path"] == str(p) for w in wss):
-        return bad(handler, "Workspace already in list")
-    wss.append({"path": str(p), "name": name or p.name})
-    save_workspaces(wss)
-    return j(handler, {"ok": True, "workspaces": wss})
+    return _files_impl_handle_workspace_add(
+        handler,
+        body,
+        _home_path=_home_path,
+        _is_blocked_system_path=_is_blocked_system_path,
+        _is_within=_is_within,
+        _sanitize_error=_sanitize_error,
+        _strip_surrounding_quotes=_strip_surrounding_quotes,
+        bad=bad,
+        j=j,
+        load_workspaces=load_workspaces,
+        save_workspaces=save_workspaces,
+        validate_workspace_to_add=validate_workspace_to_add,
+    )
 
 
 def _handle_workspace_remove(handler, body):
-    path_str = body.get("path", "").strip()
-    if not path_str:
-        return bad(handler, "path is required")
-    wss = load_workspaces()
-    wss = [w for w in wss if w["path"] != path_str]
-    save_workspaces(wss)
-    return j(handler, {"ok": True, "workspaces": wss})
+    return _files_impl_handle_workspace_remove(
+        handler,
+        body,
+        bad=bad,
+        j=j,
+        load_workspaces=load_workspaces,
+        save_workspaces=save_workspaces,
+    )
 
 
 def _handle_workspace_rename(handler, body):
-    path_str = body.get("path", "").strip()
-    name = body.get("name", "").strip()
-    if not path_str or not name:
-        return bad(handler, "path and name are required")
-    wss = load_workspaces()
-    for w in wss:
-        if w["path"] == path_str:
-            w["name"] = name
-            break
-    else:
-        return bad(handler, "Workspace not found", 404)
-    save_workspaces(wss)
-    return j(handler, {"ok": True, "workspaces": wss})
+    return _files_impl_handle_workspace_rename(
+        handler,
+        body,
+        bad=bad,
+        j=j,
+        load_workspaces=load_workspaces,
+        save_workspaces=save_workspaces,
+    )
 
 
 def _handle_workspace_reorder(handler, body):
@@ -25015,25 +22310,14 @@ def _handle_workspace_reorder(handler, body):
     rewritten so that entries appear in the given order. Any workspace
     not included in the request is appended at the end (preserves data).
     """
-    paths = body.get("paths", [])
-    if not paths or not isinstance(paths, list):
-        return bad(handler, "paths is required and must be a list")
-    wss = load_workspaces()
-    by_path = {w["path"]: w for w in wss}
-    # Build reordered list: given order first, then any omitted entries
-    reordered = []
-    seen = set()
-    for p in paths:
-        p = p.strip()
-        if p in by_path and p not in seen:
-            reordered.append(by_path[p])
-            seen.add(p)
-    # Append any workspaces not mentioned (safety net)
-    for w in wss:
-        if w["path"] not in seen:
-            reordered.append(w)
-    save_workspaces(reordered)
-    return j(handler, {"ok": True, "workspaces": reordered})
+    return _files_impl_handle_workspace_reorder(
+        handler,
+        body,
+        bad=bad,
+        j=j,
+        load_workspaces=load_workspaces,
+        save_workspaces=save_workspaces,
+    )
 
 
 def _resolve_approval_legacy(sid: str, approval_id: str, choice: str, run_id: str = "") -> bool:
@@ -27106,75 +24390,45 @@ def _handle_handoff_summary(handler, body):
 
 
 def _handle_skill_save(handler, body):
-    try:
-        require(body, "name", "content")
-    except ValueError as e:
-        return bad(handler, str(e))
-    skill_name = body["name"].strip().lower().replace(" ", "-")
-    if not skill_name or "/" in skill_name or ".." in skill_name:
-        return bad(handler, "Invalid skill name")
-    category = body.get("category", "").strip()
-    if category and ("/" in category or ".." in category):
-        return bad(handler, "Invalid category")
-    skills_dir = _active_skills_dir()
-
-    if category:
-        skill_dir = skills_dir / category / skill_name
-    else:
-        skill_dir = skills_dir / skill_name
-    # Validate resolved path stays within the active profile skills dir.
-    try:
-        skill_dir.resolve().relative_to(skills_dir.resolve())
-    except ValueError:
-        return bad(handler, "Invalid skill path")
-    skill_dir.mkdir(parents=True, exist_ok=True)
-    skill_file = skill_dir / "SKILL.md"
-    if skill_file.is_symlink():
-        return bad(handler, "Cannot save to a symlinked skill file")
-    skill_file.write_text(body["content"], encoding="utf-8")
-    _SKILLS_STATS_CACHE.clear()
-    return j(handler, {"ok": True, "name": skill_name, "path": str(skill_file)})
+    return _skills_impl_handle_skill_save(
+        handler,
+        body,
+        _SKILLS_STATS_CACHE=_SKILLS_STATS_CACHE,
+        _active_skills_dir=_active_skills_dir,
+        bad=bad,
+        j=j,
+        require=require,
+    )
 
 
 def _handle_skill_delete(handler, body):
-    try:
-        require(body, "name")
-    except ValueError as e:
-        return bad(handler, str(e))
-    import shutil
-
-    skill_name = str(body["name"]).strip().lower().replace(" ", "-")
-    if not skill_name or "/" in skill_name or ".." in skill_name:
-        return bad(handler, "Invalid skill name")
-    skills_dir = _active_skills_dir()
-    matches = [p for p in skills_dir.rglob("SKILL.md") if p.parent.name == skill_name]
-    if not matches:
-        return bad(handler, "Skill not found", 404)
-    skill_dir = matches[0].parent
-    shutil.rmtree(str(skill_dir))
-    _SKILLS_STATS_CACHE.clear()
-    return j(handler, {"ok": True, "name": body["name"]})
+    return _skills_impl_handle_skill_delete(
+        handler,
+        body,
+        _SKILLS_STATS_CACHE=_SKILLS_STATS_CACHE,
+        _active_skills_dir=_active_skills_dir,
+        bad=bad,
+        j=j,
+        require=require,
+    )
 
 
 def _normalize_names_list(names) -> list[str]:
     """Normalize a config value (None/str/list) into a deduplicated str list."""
-    if names is None:
-        return []
-    if isinstance(names, str):
-        names = _parse_config_string_list(names)
-    elif not isinstance(names, list):
-        names = list(names) if names else []
-    return list(dict.fromkeys(str(d).strip() for d in names if str(d).strip()))
+    return _skills_impl_normalize_names_list(
+        names,
+        _parse_config_string_list=_parse_config_string_list,
+    )
 
 
 def _toggle_name_in_list(names, name: str, enabled: bool) -> list[str]:
     """Add or remove *name* from *names*, returning a new list."""
-    names = _normalize_names_list(names)
-    if enabled:
-        return [d for d in names if d != name]
-    if name not in names:
-        names.append(name)
-    return names
+    return _skills_impl_toggle_name_in_list(
+        names,
+        name,
+        enabled,
+        _normalize_names_list=_normalize_names_list,
+    )
 
 
 def _handle_skill_toggle(handler, body):
@@ -27185,116 +24439,35 @@ def _handle_skill_toggle(handler, body):
     ``get_disabled_skill_names`` checks platform-specific lists first when
     ``HERMES_SESSION_PLATFORM`` is set).
     """
-    try:
-        require(body, "name", "enabled")
-    except ValueError as e:
-        return bad(handler, str(e))
-
-    name = body["name"].strip()
-    enabled = bool(body["enabled"])
-
-    # Validate the skill exists in the filesystem
-    skills_dir = _active_skills_dir()
-    search_dirs = _active_skill_search_dirs(skills_dir)
-    skill_dir, skill_md = _find_skill_in_dirs(name, search_dirs)
-    if not skill_md:
-        return bad(handler, f"Skill '{name}' not found", 404)
-
-    config_path = _active_profile_config_path()
-    with _cfg_lock:
-        cfg = _load_yaml_config_file(config_path)
-
-        # Ensure skills section exists as a dict
-        if "skills" not in cfg or not isinstance(cfg["skills"], dict):
-            cfg["skills"] = {}
-        skills_cfg = cfg["skills"]
-
-        # Always update the global disabled list
-        skills_cfg["disabled"] = _toggle_name_in_list(
-            skills_cfg.get("disabled"), name, enabled
-        )
-
-        # Write-through to platform_disabled.webui if it exists so that the
-        # toggle takes effect for WebUI sessions (the agent checks the
-        # platform-specific list first when HERMES_SESSION_PLATFORM=webui).
-        platform_disabled = skills_cfg.get("platform_disabled")
-        if isinstance(platform_disabled, dict) and "webui" in platform_disabled:
-            platform_disabled["webui"] = _toggle_name_in_list(
-                platform_disabled["webui"], name, enabled
-            )
-
-        cfg["skills"] = skills_cfg
-        _save_yaml_config_file(config_path, cfg)
-
-    reload_config()  # outside with block — reload_config() acquires the lock itself
-    _SKILLS_STATS_CACHE.clear()
-    return j(handler, {"ok": True, "name": name, "enabled": enabled})
+    return _skills_impl_handle_skill_toggle(
+        handler,
+        body,
+        _SKILLS_STATS_CACHE=_SKILLS_STATS_CACHE,
+        _active_profile_config_path=_active_profile_config_path,
+        _active_skill_search_dirs=_active_skill_search_dirs,
+        _active_skills_dir=_active_skills_dir,
+        _cfg_lock=_cfg_lock,
+        _find_skill_in_dirs=_find_skill_in_dirs,
+        _load_yaml_config_file=_load_yaml_config_file,
+        _save_yaml_config_file=_save_yaml_config_file,
+        _toggle_name_in_list=_toggle_name_in_list,
+        bad=bad,
+        j=j,
+        reload_config=reload_config,
+        require=require,
+    )
 
 
 def _handle_memory_write(handler, body):
-    try:
-        require(body, "section", "content")
-    except ValueError as e:
-        return bad(handler, str(e))
-    section = body["section"]
-
-    # Respect memory_enabled and user_profile_enabled config flags (#6406)
-    # Use get_config_snapshot() for per-profile isolation — get_config() returns
-    # the process-global mutable _cfg_cache which races across profiles.
-    # The flags are nested under cfg["memory"] in Hermes Agent's schema.
-    cfg = get_config_snapshot()
-    mem = cfg.get("memory") if isinstance(cfg, dict) else None
-    mem_cfg = mem if isinstance(mem, dict) else {}
-    if section == "memory":
-        if not _webui_truthy(mem_cfg.get("memory_enabled", True)):
-            return bad(handler, "Memory is disabled by configuration (memory_enabled: false)", 403)
-    elif section == "user":
-        if not _webui_truthy(mem_cfg.get("user_profile_enabled", True)):
-            return bad(handler, "User profile is disabled by configuration (user_profile_enabled: false)", 403)
-
-    try:
-        from api.profiles import get_active_hermes_home
-
-        home = get_active_hermes_home()
-        mem_dir = home / "memories"
-    except ImportError:
-        home = Path.home() / ".hermes"
-        mem_dir = home / "memories"
-    mem_dir.mkdir(parents=True, exist_ok=True)
-    if section == "memory":
-        target = mem_dir / "MEMORY.md"
-    elif section == "user":
-        target = mem_dir / "USER.md"
-    elif section == "soul":
-        target = home / "SOUL.md"
-    else:
-        return bad(handler, 'section must be "memory", "user", or "soul"')
-    # Refuse to write through a symlinked target file: a symlink planted at the
-    # memory path (e.g. via a restored/imported workspace) would otherwise let a
-    # memory write clobber an arbitrary file outside the memories directory. This
-    # mirrors the symlink-rejection hardening already shipped for skills/plugins
-    # (#4217/#4234/#4240).
-    if target.is_symlink():
-        return bad(handler, "Cannot write to a symlinked memory file")
-    try:
-        target.write_text(body["content"], encoding="utf-8")
-    except OSError as exc:
-        if not isinstance(exc, PermissionError) and getattr(exc, "errno", None) != errno.EROFS:
-            raise
-        mode_hint = ""
-        try:
-            mode_hint = f" (mode {target.stat().st_mode & 0o777:o})"
-        except OSError:
-            pass
-        return bad(
-            handler,
-            (
-                f"{target.name} is not writable{mode_hint}: {target}. "
-                "Run chmod 644 on the file or fix ownership on the shared volume."
-            ),
-            403,
-        )
-    return j(handler, {"ok": True, "section": section, "path": str(target)})
+    return _memory_impl_handle_memory_write(
+        handler,
+        body,
+        _webui_truthy=_webui_truthy,
+        bad=bad,
+        get_config_snapshot=get_config_snapshot,
+        j=j,
+        require=require,
+    )
 
 
 def _normalize_message_for_import_refresh(message: object) -> object:
