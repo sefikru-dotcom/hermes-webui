@@ -23,6 +23,29 @@ from api.helpers import bad, j
 from api.workspace import resolve_trusted_workspace
 
 BOARD_COLUMNS = ["triage", "todo", "ready", "running", "blocked", "done"]
+
+# Rendered board: the user sees five meaningful lanes, not six internal
+# status strings. `triage` + `todo` collapse into "Новая" (draft, never picked
+# up automatically); `ready`/`review` are the spawnable queue ("В ожидании");
+# `running`; `blocked`/`scheduled` need attention ("Сбой/Уточнение"); `done`.
+# DISPLAY_COLUMNS is the ordered list of output lanes; DISPLAY_MAP groups
+# internal statuses under each lane. The internal status stays canonical on
+# the task (dispatcher, reclaim, watchers all rely on it); only the board
+# payload is re-laned, and display names are aliased back to canonical
+# statuses in _validate_status so drag-drop can speak lane names.
+DISPLAY_COLUMNS = ["new", "waiting", "running", "fault", "done"]
+DISPLAY_MAP = {
+    "new": ["triage", "todo"],
+    "waiting": ["ready", "review"],
+    "running": ["running"],
+    "fault": ["blocked", "scheduled"],
+    "done": ["done"],
+}
+_INTERNAL_FOR_DISPLAY = {
+    internal: display for display, internals in DISPLAY_MAP.items() for internal in internals
+}
+_DISPLAY_ALIASES = {"new": "triage", "waiting": "ready", "fault": "blocked"}
+
 _TASK_PREFIX = "/api/kanban/tasks/"
 
 
@@ -231,8 +254,12 @@ def _board_payload(parsed):
             return data
 
         columns = [
-            {"name": name, "tasks": [row(task) for task in tasks if task.status == name]}
-            for name in BOARD_COLUMNS
+            {
+                "name": display,
+                "statuses": internals,
+                "tasks": [row(task) for task in tasks if _INTERNAL_FOR_DISPLAY.get(task.status) == display],
+            }
+            for display, internals in DISPLAY_MAP.items()
         ]
         if include_archived:
             columns.append({
@@ -258,8 +285,15 @@ def _board_payload(parsed):
 
 
 def _validate_status(status: str) -> str:
-    """Validate a status string against BOARD_COLUMNS, raising ValueError for unrecognised values."""
+    """Validate a status string, raising ValueError for unrecognised values.
+
+    Display-lane names from the five-column board ("new"/"waiting"/"fault")
+    are aliased to their canonical internal statuses so drag-drop and the
+    task modal can speak the board's language; canonical names pass through
+    unchanged for backward compatibility with CLI/API clients.
+    """
     value = str(status or "").strip().lower()
+    value = _DISPLAY_ALIASES.get(value, value)
     allowed = set(BOARD_COLUMNS) | {"archived"}
     if value not in allowed:
         raise ValueError(f"invalid status: {value}")
@@ -343,12 +377,26 @@ def _create_task_payload(body: dict, *, board=None):
         raise ValueError("priority must be an integer")
     kb = _kb()
     requested_status = body.get("status")
+    assignee = body.get("assignee") or None
+    if not assignee:
+        # Every WebUI-created task gets an owner immediately: fall back to
+        # kanban.default_assignee (then the literal "default" profile). The
+        # dispatcher would apply the same default at spawn time anyway
+        # (#27145); assigning at create time just makes ownership visible on
+        # the card right away instead of showing "Unassigned".
+        try:
+            from hermes_cli.config import load_config
+
+            assignee = (((load_config() or {}).get("kanban") or {}).get("default_assignee") or "").strip() or None
+        except Exception:
+            assignee = None
+        assignee = assignee or "default"
     with _conn(board=board) as conn:
         task_id = kb.create_task(
             conn,
             title=title,
             body=body.get("body") or None,
-            assignee=body.get("assignee") or None,
+            assignee=assignee,
             created_by=body.get("created_by") or "webui",
             tenant=body.get("tenant") or None,
             priority=priority,
@@ -407,16 +455,7 @@ def _patch_task(conn, task_id: str, body: dict):
     if "status" not in body or body.get("status") in (None, ""):
         return
     status = _validate_status(body.get("status"))
-    if status == "done":
-        if not kb.complete_task(conn, task_id, result=body.get("result"), summary=body.get("summary")):
-            raise LookupError("task not found")
-    elif status == "blocked":
-        if not kb.block_task(conn, task_id, reason=body.get("block_reason") or body.get("reason")):
-            raise LookupError("task not found")
-    elif status == "archived":
-        if not kb.archive_task(conn, task_id):
-            raise LookupError("task not found")
-    elif status == "running":
+    if status == "running":
         # The 'running' state is owned by the kanban dispatcher / claim
         # protocol — entering it via raw UPDATE bypasses claim_lock,
         # claim_expires, started_at, and worker_pid, which leaves the task
@@ -428,16 +467,36 @@ def _patch_task(conn, task_id: str, body: dict):
         raise ValueError(
             "Cannot set status to 'running' directly; use the dispatcher/claim path"
         )
-    elif status == "ready":
-        # If the task is currently 'blocked', use the structured unblock
-        # verb so the unblocked event fires. Otherwise it's a legitimate
-        # drag-drop or click move (e.g. todo → ready, running → ready when
-        # the user yanks a stuck worker back to the queue) and we use the
-        # claim-aware direct status write.
-        current = kb.get_task(conn, task_id)
-        if not current:
+    current = kb.get_task(conn, task_id)
+    if not current:
+        raise LookupError("task not found")
+    if current.status == status:
+        # Already in the target state (re-dropping a card on its own lane,
+        # clicking the lane button the task already lives in, or a blocked
+        # card dropped on "Сбой/Уточнение" again): no-op instead of an error
+        # from structured verbs that only fire from *other* states.
+        return
+    if status == "done":
+        # complete_task accepts running|ready|blocked|review. A draft parked in
+        # triage/todo can't complete directly, so promote it to ready first —
+        # the "Отработано" lane action then works from every column.
+        if current.status in ("triage", "todo"):
+            _set_status_direct(conn, task_id, "ready")
+        if not kb.complete_task(conn, task_id, result=body.get("result"), summary=body.get("summary")):
             raise LookupError("task not found")
-        if current.status == "blocked":
+    elif status == "blocked":
+        if not kb.block_task(conn, task_id, reason=body.get("block_reason") or body.get("reason")):
+            raise LookupError("task not found")
+    elif status == "archived":
+        if not kb.archive_task(conn, task_id):
+            raise LookupError("task not found")
+    elif status == "ready":
+        # If the task is currently 'blocked'/'scheduled', use the structured
+        # unblock verb so the unblocked event fires. Otherwise it's a
+        # legitimate drag-drop or click move (e.g. todo → ready, running →
+        # ready when the user yanks a stuck worker back to the queue) and we
+        # use the claim-aware direct status write.
+        if current.status in ("blocked", "scheduled"):
             if not kb.unblock_task(conn, task_id):
                 raise LookupError("task not found")
         else:
@@ -578,7 +637,7 @@ def _config_payload(*, board=None):
         cfg = {}
     k_cfg = ((cfg.get("dashboard") or {}).get("kanban") or {})
     return {
-        "columns": BOARD_COLUMNS,
+        "columns": DISPLAY_COLUMNS,
         "assignees": assignees,
         "default_tenant": k_cfg.get("default_tenant") or "",
         "lane_by_profile": bool(k_cfg.get("lane_by_profile", True)),

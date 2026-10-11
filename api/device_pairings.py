@@ -246,3 +246,29 @@ def clear_pairings() -> None:
     with _LOCK, _connection() as conn:
         conn.execute("DELETE FROM device_pairings")
         conn.execute("DELETE FROM device_credentials")
+
+
+def issue_device_token_by_password(password: str, device_name: str = "native_client") -> dict | None:
+    """Issue a durable native device credential directly using the server password."""
+    from api.auth import verify_password
+    if not password or not verify_password(password):
+        return None
+    with _LOCK, _connection() as conn:
+        now = time.time()
+        token = "hdev_" + secrets.token_urlsafe(32)
+        device_id = f"dev_{secrets.token_hex(8)}"
+        ttl = 10 * 365 * 86400  # 10 years
+        expires_at = now + ttl
+        scope = {"role": "owner", "device_name": str(device_name)[:64]}
+        credential_hash = _digest(token)
+        conn.execute(
+            "INSERT INTO device_credentials VALUES (?, ?, ?, ?, 0)",
+            (credential_hash, expires_at, _json_dump(scope), device_id),
+        )
+        return {
+            "access_token": token,
+            "token_type": "Bearer",
+            "expires_in": ttl,
+            "device_id": device_id,
+            "scopes": ["owner"],
+        }

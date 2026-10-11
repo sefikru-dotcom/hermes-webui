@@ -2287,7 +2287,13 @@ async function cronResume(id) {
 let _editingCronId = null;
 
 // ── Kanban panel (read-only) ──
-function _kanbanColumnLabel(name){ return t('kanban_status_' + name) || name; }
+// Internal statuses render through their display-lane names so every surface
+// (board columns, sidebar list, stats, modal hints) speaks the same
+// five-column language: Новая / В ожидании / В работе / Сбой-Уточнение /
+// Отработано. Keep in sync with DISPLAY_MAP in api/kanban_bridge.py.
+const KANBAN_STATUS_ALIAS = {triage:'new', todo:'new', ready:'waiting', blocked:'fault', review:'waiting', scheduled:'fault'};
+function _kanbanStatusKey(name){ return KANBAN_STATUS_ALIAS[name] || name; }
+function _kanbanColumnLabel(name){ return t('kanban_status_' + _kanbanStatusKey(name)) || name; }
 function _kanbanTaskTitle(task){ return task.title || task.summary || task.id || t('kanban_task'); }
 function _kanbanTaskBody(task){ return task.body || task.description || task.prompt || ''; }
 function _kanbanTaskMeta(task){
@@ -3468,11 +3474,10 @@ function openKanbanCreate(){
   _kanbanTaskModalMode = 'create';
   _kanbanTaskModalEditingId = null;
   _kanbanTaskModalInitialDisplayedStatus = null;  // create mode: always send status
-  // Default new tasks to "ready" so they're immediately claimable by the
-  // dispatcher (assuming the user picks an assignee).  Triage is for staging
-  // tasks that need human review before being marked actionable; users who
-  // want it can still pick it from the status dropdown.
-  _kanbanResetTaskModalFields({status: 'ready'});
+  // Default new tasks to "waiting" (ready) so the dispatcher picks them up in
+  // the next quiet window; "new" is the staging lane for drafts the planner
+  // must not touch (users can still pick it from the status dropdown).
+  _kanbanResetTaskModalFields({status: 'waiting'});
   _kanbanSetTaskModalStatusHint(null);
   _kanbanSetTaskModalLabels('create');
   _kanbanPopulateAssigneeSelect('').then(() => {
@@ -3556,12 +3561,14 @@ async function openKanbanEdit(taskId){
 }
 
 function _kanbanEditableStatusFor(status){
-  // The modal's status select only offers triage/todo/ready (the user-writable
-  // states).  blocked/running/done/archived are reached via the detail-view
-  // status buttons or the dispatcher.  Map non-editable states to a sensible
-  // default so the user can still change them via the buttons after saving.
-  const editable = new Set(['triage', 'todo', 'ready']);
-  return editable.has(status) ? status : 'triage';
+  // The modal's status select offers the four user-writable lanes (new /
+  // waiting / fault / done); "running" is owned by the dispatcher and
+  // "archived" by the archive action. Non-editable states map to a sensible
+  // default so the dropdown still renders; submit only sends the status when
+  // the user actually changed it (see _kanbanTaskModalInitialDisplayedStatus).
+  const editable = new Set(['new', 'waiting', 'fault', 'done']);
+  const display = KANBAN_STATUS_ALIAS[status] || status;
+  return editable.has(display) ? display : 'new';
 }
 
 function _kanbanResetTaskModalFields(values){
@@ -3572,7 +3579,7 @@ function _kanbanResetTaskModalFields(values){
   };
   set('kanbanTaskModalTitleInput', v.title || '');
   set('kanbanTaskModalBody', v.body || '');
-  set('kanbanTaskModalStatus', v.status || 'triage');
+  set('kanbanTaskModalStatus', v.status || 'new');
   // Assignee handled separately by _kanbanPopulateAssigneeSelect() because
   // it's a <select> populated from /api/profiles + board history; setting
   // .value before the options exist would silently fail.
@@ -3615,12 +3622,16 @@ function _kanbanSetTaskModalLabels(mode){
 function _kanbanSetTaskModalStatusHint(realStatus, editableStatus){
   const hintEl = document.getElementById('kanbanTaskModalStatusOriginalHint');
   if (!hintEl) return;
-  if (!realStatus || realStatus === editableStatus) {
+  // realStatus is the canonical internal status (e.g. 'blocked'); the dropdown
+  // speaks lane names ('fault'). Compare in lane space so an untouched
+  // dropdown never shows a stale hint.
+  const display = realStatus ? _kanbanStatusKey(realStatus) : null;
+  if (!realStatus || display === editableStatus) {
     hintEl.hidden = true;
     hintEl.textContent = '';
     return;
   }
-  const statusLabel = t(`kanban_status_${realStatus}`) || realStatus;
+  const statusLabel = _kanbanColumnLabel(realStatus);
   hintEl.textContent = String(t('kanban_status_original_hint')).replace('{0}', statusLabel);
   hintEl.hidden = false;
 }
@@ -3814,21 +3825,9 @@ async function submitKanbanTaskModal(){
     }
     if (parentsRaw) payload.parents = [parentsRaw];
   }
-  // Soft warning: a Ready task with the explicit "Unassigned" option will sit
-  // forever because the dispatcher skips unassigned rows (kanban_db.py:3567).
-  // The dropdown now makes this an explicit choice (the user picked "—
-  // Unassigned (won't auto-run) —"), but we still surface a one-time confirm
-  // so they don't lose work to a typo.
-  if (statusVal === 'ready' && !assigneeVal) {
-    if (errEl && !errEl.dataset.warningShown) {
-      errEl.textContent = t('kanban_ready_needs_assignee')
-        || 'You picked Unassigned + Ready. The dispatcher will skip this task. Submit again to confirm, or pick a profile.';
-      errEl.dataset.warningShown = '1';
-      const sel = document.getElementById('kanbanTaskModalAssignee');
-      if (sel) sel.focus();
-      return;
-    }
-  }
+  // Unassigned is no longer a trap: the bridge fills kanban.default_assignee
+  // when a create/resume has no owner, so the dispatcher never has to skip the
+  // card (see _create_task_payload in api/kanban_bridge.py).
   if (submitBtn) submitBtn.disabled = true;
   if (errEl) { errEl.textContent = ''; delete errEl.dataset.warningShown; }
   try {
@@ -3929,14 +3928,13 @@ function _kanbanRenderTaskDetail(data){
   const events = data.events || [];
   const links = data.links || {};
   const runs = data.runs || [];
-  // Note: 'running' is intentionally absent — entering 'running' is the
-  // dispatcher/claim_task path's responsibility, not a user UI write. The
-  // bridge rejects PATCH status='running' with HTTP 400 to match the agent
-  // dashboard plugin's contract. UI users want to claim/promote a ready task
-  // via the dispatcher Nudge button, not flip it to running by hand.
-  const statusButtons = ['triage', 'todo', 'ready', 'blocked', 'done', 'archived'].map(status =>
+  // Five lane actions a human sets by hand — Новая / В ожидании / Сбой /
+  // Отработано / Архив. 'running' is intentionally absent: entering it is the
+  // dispatcher/claim_task path's responsibility (the bridge rejects raw
+  // 'running' writes with HTTP 400); claim a task via the dispatcher buttons.
+  const statusButtons = ['new', 'waiting', 'fault', 'done', 'archived'].map(status =>
     `<button class="btn secondary" onclick="updateKanbanTask(${jsArg(task.id)},{status:'${status}'})">${esc(_kanbanColumnLabel(status))}</button>`
-  ).join('') + `<button class="btn secondary" onclick="blockKanbanTask(${jsArg(task.id)})">${esc(t('kanban_block'))}</button><button class="btn secondary" onclick="unblockKanbanTask(${jsArg(task.id)})">${esc(t('kanban_unblock'))}</button>`;
+  ).join('');
   return `<div class="kanban-task-preview-header">
       <button class="btn secondary kanban-back-btn" onclick="closeKanbanTaskDetail()">${esc(t('kanban_back_to_board'))}</button>
       <div class="kanban-task-preview-title">${esc(title)}</div>
@@ -3977,7 +3975,10 @@ async function loadKanbanTask(taskId){
       preview.innerHTML = _kanbanRenderTaskDetail(data);
     }
     _closeMobileSidebarAfterPanelSelection();
-    showToast(`${t('kanban_task')}: ${title}`);
+    // No toast on task open: detail header already shows the title, and a toast
+    // here re-fired after every status button click (updateKanbanTask →
+    // loadKanbanTask), read as an error and added noise. Silent success now;
+    // errors still toast via the catch below.
   } catch(e) { showToast(t('kanban_unavailable') + ': ' + (e.message || e), 'error'); }
 }
 

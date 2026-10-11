@@ -5544,16 +5544,17 @@ def _csrf_exempt_path(path: str) -> bool:
     """Paths that cannot or must not carry a session CSRF token."""
     return path in {
         "/api/auth/login",
+        "/api/auth/token", "/api/v1/auth/token",
         "/api/auth/device-pairings", "/api/v1/auth/device-pairings",
-        "/api/v1/auth/device-pairings/status",
+        "/api/auth/device-pairings/status", "/api/v1/auth/device-pairings/status",
         "/api/auth/device-credentials/revoke", "/api/v1/auth/device-credentials/revoke",
         "/api/csp-report",
         "/api/auth/passkey/options",
         "/api/auth/passkey/login",
     } or (
-        path.startswith("/api/v1/auth/device-pairings/") and path.endswith("/exchange")
+        path.startswith(("/api/auth/device-pairings/", "/api/v1/auth/device-pairings/")) and path.endswith("/exchange")
     ) or (
-        path.startswith("/api/v1/auth/devices/") and path.endswith("/revoke")
+        path.startswith(("/api/auth/devices/", "/api/v1/auth/devices/")) and path.endswith("/revoke")
     )
 
 
@@ -12819,12 +12820,11 @@ def handle_get(handler, parsed) -> bool:
         from api.device_pairings import pairing_status
         query = parse_qs(parsed.query or "")
         pair_id = str(query.get("pair_id", [""])[0] or "").strip()
-        # Secrets are deliberately not accepted in URLs or custom headers.
-        if query.get("poll_secret") or handler.headers.get("X-Hermes-Poll-Secret"):
+        if handler.headers.get("X-Hermes-Poll-Secret") or query.get("poll_secret"):
             return bad(handler, "poll_secret is accepted only by exchange", 400)
         result = pairing_status(pair_id)
         if result is None:
-            return bad(handler, "Pairing not found or invalid secret", 404)
+            return bad(handler, "Pairing not found", 404)
         return j(handler, result, extra_headers={"Cache-Control": "no-store"})
 
     if parsed.path == "/api/auth/status":
@@ -16617,6 +16617,20 @@ def handle_post(handler, parsed) -> bool:
         return _handle_session_import_cli(handler, body)
 
     # ── Auth endpoints (POST) ──
+    if parsed.path in {"/api/auth/token", "/api/v1/auth/token"}:
+        from api.auth import is_auth_enabled
+        from api.device_pairings import issue_device_token_by_password
+        if not is_auth_enabled():
+            return j(handler, {"access_token": "native_open", "token_type": "Bearer", "device_id": "open", "expires_in": 315360000, "scopes": ["owner"]})
+        password = str(body.get("password") or "")
+        device_name = str(body.get("device_name") or "native_client")
+        if not password:
+            return bad(handler, "password is required", 400)
+        result = issue_device_token_by_password(password, device_name)
+        if result is None:
+            return bad(handler, "Invalid password", 401)
+        return j(handler, result, extra_headers={"Cache-Control": "no-store"})
+
     if parsed.path in {"/api/auth/device-pairings", "/api/v1/auth/device-pairings"}:
         from api.auth import is_auth_enabled
         from api.device_pairings import create_pairing
@@ -16650,17 +16664,19 @@ def handle_post(handler, parsed) -> bool:
             return bad(handler, "Invalid or expired native device credential", 401)
         return j(handler, {"status": "revoked"}, extra_headers={"Cache-Control": "no-store"})
 
-    if parsed.path.startswith("/api/v1/auth/devices/") and parsed.path.endswith("/revoke"):
+    if parsed.path.startswith(("/api/auth/devices/", "/api/v1/auth/devices/")) and parsed.path.endswith("/revoke"):
+        prefix = "/api/auth/devices/" if parsed.path.startswith("/api/auth/devices/") else "/api/v1/auth/devices/"
         from api.device_pairings import extract_bearer, revoke_device
         credential = extract_bearer(handler.headers.get_all("Authorization", []))
-        device_id = parsed.path[len("/api/v1/auth/devices/"):-len("/revoke")].strip("/")
+        device_id = parsed.path[len(prefix):-len("/revoke")].strip("/")
         if not credential or not device_id or not revoke_device(credential, device_id):
             return bad(handler, "Invalid or expired native device credential", 401)
         return j(handler, {"status": "revoked", "device_id": device_id}, extra_headers={"Cache-Control": "no-store"})
 
-    if parsed.path.startswith("/api/v1/auth/device-pairings/") and parsed.path.endswith("/exchange"):
+    if parsed.path.startswith(("/api/auth/device-pairings/", "/api/v1/auth/device-pairings/")) and parsed.path.endswith("/exchange"):
+        prefix = "/api/auth/device-pairings/" if parsed.path.startswith("/api/auth/device-pairings/") else "/api/v1/auth/device-pairings/"
         from api.device_pairings import exchange_pairing
-        pair_id = parsed.path[len("/api/v1/auth/device-pairings/"):-len("/exchange")].strip("/")
+        pair_id = parsed.path[len(prefix):-len("/exchange")].strip("/")
         poll_secret = str(body.get("poll_secret") or "").strip()
         if not pair_id or not poll_secret or set(body) != {"poll_secret"}:
             return bad(handler, "poll_secret is required", 400)
@@ -22833,10 +22849,10 @@ def _is_silent_control_message(message) -> bool:
 def _handle_chat_start(handler, body, diag=None):
     try:
         diag.stage("validate_session_id") if diag else None
-        try:
-            require(body, "session_id")
-        except ValueError as e:
-            return bad(handler, str(e))
+        sid = str(body.get("session_id") or "").strip()
+        if not sid:
+            s = new_session(profile=_get_active_profile_name())
+            body["session_id"] = s.session_id
         if _is_silent_control_message(body.get("message")):
             return j(
                 handler,

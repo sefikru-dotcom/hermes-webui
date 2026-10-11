@@ -324,10 +324,8 @@ window._marsFallbackActivityCycle=function(btn){
         <label class="kanban-check"><input id="kanbanOnlyMine" type="checkbox" onchange="loadKanban(true)"> <span data-i18n="kanban_only_mine">Only mine</span></label>
         <div id="kanbanStats" class="kanban-stats" aria-live="polite"></div>
         <div id="kanbanBulkBar" class="kanban-bulk-bar">
-          <select id="kanbanBulkStatus" aria-label="Bulk status"><option value="">Status</option><option value="ready">Ready</option><option value="blocked">Blocked</option><option value="done">Done</option><option value="archived">Archived</option></select>
+          <select id="kanbanBulkStatus" aria-label="Bulk status"><option value="">Status</option><option value="waiting" data-i18n="kanban_status_waiting">Waiting</option><option value="fault" data-i18n="kanban_status_fault">Needs attention</option><option value="done" data-i18n="kanban_status_done">Done</option><option value="archived" data-i18n="kanban_status_archived">Archived</option></select>
           <button class="btn secondary" onclick="bulkUpdateKanban()" data-i18n="kanban_bulk_action">Bulk action</button>
-          <button class="btn secondary kanban-nudge-dispatch-btn" onclick="nudgeKanbanDispatcher()" data-i18n="kanban_nudge_dispatcher" title="Dry-run: shows what would be claimed without spawning workers">Preview</button>
-          <button class="btn primary kanban-run-dispatch-btn" onclick="runKanbanDispatcher()" data-i18n="kanban_run_dispatcher" title="Claims Ready tasks and spawns worker subprocesses">Run dispatcher</button>
         </div>
         <div class="kanban-new-task-row">
           <input id="kanbanNewTaskTitle" placeholder="New task" data-i18n-placeholder="kanban_new_task" onkeydown="if(event.key==='Enter')createKanbanTask()">
@@ -1985,19 +1983,19 @@ window._marsFallbackActivityCycle=function(btn){
   </div>
 </div>
 <div class="toast" id="toast"></div>
-<script src="static/i18n.js?v=__WEBUI_VERSION__-mars-chat-release-v2" defer></script>
-<script src="static/chat_activity.js?v=__WEBUI_VERSION__-mars-chat-release-v2" defer></script>
+<script src="static/i18n.js?v=__WEBUI_VERSION__-mars-kanban-v2" defer></script>
+<script src="static/chat_activity.js?v=__WEBUI_VERSION__-mars-kanban-v2" defer></script>
 <script src="static/approval_i18n.js?v=__WEBUI_VERSION__-am3" defer></script>
 <script src="static/icons.js?v=__WEBUI_VERSION__-am2" defer></script>
 <script src="static/assistant_turn_anchors.js?v=__WEBUI_VERSION__-am2" defer></script>
-<script src="static/ui.js?v=__WEBUI_VERSION__-mars-chat-release-v2" defer></script>
+<script src="static/ui.js?v=__WEBUI_VERSION__-mars-kanban-v2" defer></script>
 <script src="static/workspace.js?v=__WEBUI_VERSION__-am2" defer></script>
 <script src="static/terminal.js?v=__WEBUI_VERSION__-am2" defer></script>
 <script src="static/sessions.js?v=__WEBUI_VERSION__-mars-chatnav-v14-workers" defer></script>
 <script src="static/commands.js?v=__WEBUI_VERSION__-am2" defer></script>
-<script src="static/messages.js?v=__WEBUI_VERSION__-mars-chat-release-v2" defer></script>
+<script src="static/messages.js?v=__WEBUI_VERSION__-mars-kanban-v2" defer></script>
 <script src="static/extension_settings.js?v=__WEBUI_VERSION__-am2" defer></script>
-<script src="static/panels.js?v=__WEBUI_VERSION__-mars-chat-release-v2" defer></script>
+<script src="static/panels.js?v=__WEBUI_VERSION__-mars-kanban-v2" defer></script>
 <script src="static/onboarding.js?v=__WEBUI_VERSION__-am2" defer></script>
 <script src="static/boot.js?v=__WEBUI_VERSION__-mars-chatnav-v13" defer></script>
 <script src="static/outline.js?v=__WEBUI_VERSION__-am2" defer></script>
@@ -2060,9 +2058,10 @@ window._marsFallbackActivityCycle=function(btn){
         <label for="kanbanTaskModalStatus" data-i18n="kanban_status">Status</label>
         <span id="kanbanTaskModalStatusOriginalHint" class="kanban-status-original-hint" hidden></span>
         <select id="kanbanTaskModalStatus">
-          <option value="triage" data-i18n="kanban_status_triage">Triage</option>
-          <option value="todo" data-i18n="kanban_status_todo">Todo</option>
-          <option value="ready" data-i18n="kanban_status_ready">Ready</option>
+          <option value="new" data-i18n="kanban_status_new">New</option>
+          <option value="waiting" data-i18n="kanban_status_waiting">Waiting</option>
+          <option value="fault" data-i18n="kanban_status_fault">Needs attention</option>
+          <option value="done" data-i18n="kanban_status_done">Done</option>
         </select>
       </div>
       <div class="kanban-modal-row">

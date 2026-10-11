@@ -51,6 +51,7 @@ def _resolve_session_ttl() -> int:
 PUBLIC_PATHS = frozenset({
     '/login', '/pair', '/health', '/favicon.ico', '/sw.js',
     '/api/auth/login', '/api/auth/status',
+    '/api/auth/token', '/api/v1/auth/token',
     '/api/auth/device-pairings', '/api/auth/device-pairings/status',
     '/api/auth/device-credentials/revoke',
     '/api/v1/auth/device-pairings', '/api/v1/auth/device-pairings/status',
@@ -1108,7 +1109,7 @@ def check_auth(handler, parsed) -> bool:
     if (
         parsed.path in PUBLIC_PATHS
         or (
-            parsed.path.startswith('/api/v1/auth/device-pairings/')
+            parsed.path.startswith(('/api/auth/device-pairings/', '/api/v1/auth/device-pairings/'))
             and parsed.path.endswith('/exchange')
         )
         or parsed.path.startswith('/share/')
@@ -1120,15 +1121,15 @@ def check_auth(handler, parsed) -> bool:
         or parsed.path.startswith('/session/static/')
     ):
         return True
-    if parsed.path.startswith('/api/v1/auth/devices/') and parsed.path.endswith('/revoke'):
+    if parsed.path.startswith(('/api/auth/devices/', '/api/v1/auth/devices/')) and parsed.path.endswith('/revoke'):
         from api.device_pairings import verify_native_credential, extract_bearer
         credential = extract_bearer(handler.headers.get_all('Authorization', []))
         return bool(credential and verify_native_credential(credential))
-    # Native clients authenticate chat requests with a short-lived Bearer
-    # credential instead of a browser session cookie.  If an Authorization
-    # header is present on a chat route, fail closed rather than falling back
+    # Native clients authenticate API requests with a Bearer
+    # credential instead of a browser session cookie. If an Authorization
+    # header is present, fail closed rather than falling back
     # to a cookie (prevents an invalid native token from masking auth errors).
-    if parsed.path == '/api/chat' or parsed.path.startswith('/api/chat/'):
+    if parsed.path.startswith(('/api/chat', '/api/sessions', '/api/session', '/api/models', '/api/upload', '/api/profiles')):
         from api.device_pairings import extract_bearer, verify_native_credential
         authorization = handler.headers.get_all('Authorization', [])
         if authorization:
