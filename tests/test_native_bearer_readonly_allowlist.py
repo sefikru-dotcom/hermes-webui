@@ -2,7 +2,8 @@
 
 Covers the read-only fast-path in api/auth.py for the new native screens:
 GET/HEAD on the single ``/api/kanban/`` prefix plus the exact paths
-``/api/insights``, ``/api/logs`` and ``/api/provider/quota``.
+``/api/insights``, ``/api/logs``, ``/api/provider/quota`` and
+``/api/skills/usage``.
 
   * before admission (read-only sets monkeypatched empty) a valid device
     Bearer gets 401 on these routes — after admission the same request
@@ -34,6 +35,7 @@ EXPECTED_READONLY_EXACT_PATHS = {
     '/api/insights',
     '/api/logs',
     '/api/provider/quota',
+    '/api/skills/usage',
 }
 EXPECTED_READONLY_PREFIXES = ('/api/kanban/',)
 SAFE_METHODS = ('GET', 'HEAD')

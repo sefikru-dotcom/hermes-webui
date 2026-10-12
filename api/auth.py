@@ -94,20 +94,21 @@ NATIVE_BEARER_EXACT_PATHS = frozenset({
 })
 
 # ── Native Bearer fast-path: read-only routes for the new Android screens ──
-# Kanban board, insights, server logs and provider-quota screens consume
-# existing GET contracts only (api/kanban_bridge.py under /api/kanban/*,
-# /api/insights in api/routes.py, /api/logs and /api/provider/quota in
-# api/route_readonly.py).  The bearer fast-path on these routes is scoped
-# to safe methods (NATIVE_BEARER_READONLY_METHODS), so kanban mutations
-# (POST /api/kanban/tasks, /api/kanban/boards, /api/kanban/dispatch,
+# Kanban board, insights, server logs, skills usage and provider-quota screens
+# consume existing GET contracts only (api/kanban_bridge.py under /api/kanban/*,
+# /api/insights and /api/skills/usage in api/routes.py, /api/logs and
+# /api/provider/quota in api/route_readonly.py).  The bearer fast-path on these
+# routes is scoped to safe methods (NATIVE_BEARER_READONLY_METHODS), so kanban
+# mutations (POST /api/kanban/tasks, /api/kanban/boards, /api/kanban/dispatch,
 # PATCH/DELETE /api/kanban/*) never accept a device Bearer: they stay on
 # the browser cookie-session + CSRF path exactly as before.  Exact paths
-# only for the three singleton routes; the single kanban prefix requires
+# only for the four singleton routes; the single kanban prefix requires
 # the trailing slash, so /api/kanban and prefix neighbours never match.
 NATIVE_BEARER_READONLY_EXACT_PATHS = frozenset({
     '/api/insights',
     '/api/logs',
     '/api/provider/quota',
+    '/api/skills/usage',
 })
 NATIVE_BEARER_READONLY_PREFIXES = ('/api/kanban/',)
 NATIVE_BEARER_READONLY_METHODS = frozenset({'GET', 'HEAD'})
@@ -1215,10 +1216,10 @@ def check_auth(handler, parsed) -> bool:
     #   * NATIVE_BEARER_EXACT_PATHS — the exact dispatch routes the native
     #     Android client answers with its device Bearer (crons, memory,
     #     skills, workspaces, reasoning, approval, clarify, projects), and
-    #   * the read-only routes for the kanban / insights / logs / provider
-    #     quota screens — exact paths plus the single '/api/kanban/' prefix,
-    #     honoured only for safe methods (GET/HEAD) so kanban mutations stay
-    #     on the cookie + CSRF path.
+    #   * the read-only routes for the kanban / insights / logs / skills-usage /
+    #     provider-quota screens — exact paths plus the single '/api/kanban/'
+    #     prefix, honoured only for safe methods (GET/HEAD) so kanban mutations
+    #     stay on the cookie + CSRF path.
     # On a covered route, fail closed when an Authorization header is
     # present rather than falling back to a cookie (prevents an invalid
     # native token from masking auth errors).
