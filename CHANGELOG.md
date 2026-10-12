@@ -3,6 +3,56 @@
 
 ## [Unreleased]
 
+### Mars wave — 2026-10-12
+
+Mars-customisation release. All changes are Mars-only and were validated by
+the repository gate `scripts/mars-test.sh` (600 passed, 1 skipped) plus live
+checks against the running service on :8787.
+
+#### Fixed
+
+- **Post-render scroll is no longer swallowed.** The chat scroll settle was
+  keyed on wall-clock time, so a late re-render could consume a user scroll-up
+  that happened after the answer arrived. Settling is now keyed on the
+  *input generation* that produced the render (`_compensateScrollForMeasurementDelta`,
+  `inputGeneration`), so measurements are only compensated within the render
+  pass that owns them. Covered by `tests/test_scroll_harness_behavior.py`.
+
+- **`check_auth` no longer crashes on non-`HTTPMessage` header containers.**
+  The Authorization header was read via `handler.headers.get_all(...)`, which
+  only exists on `http.client.HTTPMessage`; any handler exposing a plain dict
+  (test doubles, lightweight wrappers) raised `AttributeError` on every covered
+  bearer route, which kept the release gate red (14 failed in
+  `tests/test_trusted_header_auth.py` since the `f77f876e` checkpoint). A new
+  `_header_values()` helper uses `get_all` when present — the production path is
+  unchanged — and otherwise falls back to `get()`/mapping access.
+
+#### Changed
+
+- **Static assets: serve-time i18n bundle split + `HEAD` support.** The core
+  `static/i18n.js` is no longer shipped whole (1.79 MB on disk): the served core
+  bundle is ~321 KB raw / ~82 KB gzip, with per-locale chunks at
+  `/static/locales/<code>.js` and `Cache-Control: public, max-age=31536000, immutable`
+  for versioned requests. Live measurement: **494.6 KB → 81.6 KB gzip (−83.5%)**.
+  `HEAD` on static assets now returns `200` instead of `501`.
+
+- **`api/routes.py` split into domain modules (04.10 restructure, re-applied).**
+  File, git, memory, skills and wiki route families moved to `api/route_files.py`,
+  `api/route_git.py`, `api/route_memory.py`, `api/route_skills.py` and
+  `api/route_wiki_helpers.py`. All Mars-custom contracts are preserved.
+
+- **Native (Android) bearer allowlist.** Native clients may authenticate API
+  requests with a device Bearer credential on exact dispatch routes
+  (`NATIVE_BEARER_EXACT_PATHS`, 14 paths — crons, memory, skills, workspaces,
+  reasoning, approval, clarify, projects) in addition to the broad client
+  prefixes. Mars-internal contracts (`X-Mars-Internal`, `/api/auth/token`,
+  `/api/v1/*`) are untouched.
+
+#### Repository
+
+- Android release artifacts (`static/apk/*.apk`) are kept out of git via
+  `.gitignore` so a `git clean` cannot delete the shipped APKs.
+
 ### Fixed
 
 - **Opening a session no longer stalls just because Codex refreshed its model cache in the background.** The WebUI keys its 24-hour `/api/models` cache partly on Codex's `~/.codex/models_cache.json`, but that file was fingerprinted by `mtime` + size — and Codex rewrites it on its own refresh timer, bumping those stat fields even when the model catalog is byte-identical (only a volatile `fetched_at` timestamp changed). Every Codex refresh therefore invalidated the cache, and the next session open paid a full live rebuild whose serial provider probes stalled the open (#7540). The Codex cache is now fingerprinted by its *content* with the refresh-timestamp fields (`fetched_at`, `updated_at`) stripped, so a timestamp-only rewrite keeps the cache while any genuine catalog change (models, `etag`, `client_version`) still invalidates it. A malformed or pathologically deep cache file degrades safely to the old stat fingerprint rather than erroring. Thanks @webtecnica. (#7556, closes #7540)
