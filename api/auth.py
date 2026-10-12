@@ -15,6 +15,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
+from typing import Any
 
 from api.config import STATE_DIR, get_config, load_settings
 
@@ -1125,6 +1126,41 @@ def _safe_login_inner_next(query: str | None) -> str:
     return path
 
 
+def _header_values(handler, name: str) -> list:
+    """Read every value of one request header across header containers.
+
+    Production handlers expose ``http.client.HTTPMessage`` (``get_all`` is
+    case-insensitive and returns every copy).  Test doubles and lightweight
+    handlers may expose a plain mapping, so fall back to ``get``/mapping
+    access instead of assuming ``get_all`` exists — previously an
+    AttributeError here could break auth on any covered route.
+    """
+    headers: Any = getattr(handler, "headers", None)
+    if headers is None:
+        return []
+    get_all: Any = getattr(headers, "get_all", None)
+    if callable(get_all):
+        try:
+            return [str(v) for v in get_all(name, [])]
+        except TypeError:
+            return [str(v) for v in (get_all(name) or [])]
+    getter: Any = getattr(headers, "get", None)
+    if callable(getter):
+        value: Any = getter(name)
+    else:
+        try:
+            value = headers[name]
+        except (KeyError, TypeError):
+            value = None
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, (list, tuple)):
+        return [str(v) for v in value]
+    return [str(value)]
+
+
 def check_auth(handler, parsed) -> bool:
     """Check if request is authorized. Returns True if OK.
     If not authorized, sends 401 (API) or 302 redirect (page) and returns False."""
@@ -1152,7 +1188,7 @@ def check_auth(handler, parsed) -> bool:
         return True
     if parsed.path.startswith(('/api/auth/devices/', '/api/v1/auth/devices/')) and parsed.path.endswith('/revoke'):
         from api.device_pairings import verify_native_credential, extract_bearer
-        credential = extract_bearer(handler.headers.get_all('Authorization', []))
+        credential = extract_bearer(_header_values(handler, 'Authorization'))
         return bool(credential and verify_native_credential(credential))
     # Native clients authenticate API requests with a Bearer credential
     # instead of a browser session cookie.  Two disjoint sets are covered:
@@ -1168,7 +1204,7 @@ def check_auth(handler, parsed) -> bool:
         or parsed.path in NATIVE_BEARER_EXACT_PATHS
     ):
         from api.device_pairings import extract_bearer, verify_native_credential
-        authorization = handler.headers.get_all('Authorization', [])
+        authorization = _header_values(handler, 'Authorization')
         if authorization:
             credential = extract_bearer(authorization)
             native_device = verify_native_credential(credential) if credential else None
