@@ -27,3 +27,4 @@ tests/test_auth.py
 tests/test_auth_sessions.py
 tests/test_trusted_header_auth.py
 tests/test_auth_settings_safety.py
+tests/test_native_bearer_readonly_allowlist.py

@@ -93,6 +93,25 @@ NATIVE_BEARER_EXACT_PATHS = frozenset({
     '/api/workspaces',
 })
 
+# ── Native Bearer fast-path: read-only routes for the new Android screens ──
+# Kanban board, insights, server logs and provider-quota screens consume
+# existing GET contracts only (api/kanban_bridge.py under /api/kanban/*,
+# /api/insights in api/routes.py, /api/logs and /api/provider/quota in
+# api/route_readonly.py).  The bearer fast-path on these routes is scoped
+# to safe methods (NATIVE_BEARER_READONLY_METHODS), so kanban mutations
+# (POST /api/kanban/tasks, /api/kanban/boards, /api/kanban/dispatch,
+# PATCH/DELETE /api/kanban/*) never accept a device Bearer: they stay on
+# the browser cookie-session + CSRF path exactly as before.  Exact paths
+# only for the three singleton routes; the single kanban prefix requires
+# the trailing slash, so /api/kanban and prefix neighbours never match.
+NATIVE_BEARER_READONLY_EXACT_PATHS = frozenset({
+    '/api/insights',
+    '/api/logs',
+    '/api/provider/quota',
+})
+NATIVE_BEARER_READONLY_PREFIXES = ('/api/kanban/',)
+NATIVE_BEARER_READONLY_METHODS = frozenset({'GET', 'HEAD'})
+
 COOKIE_NAME = 'hermes_session'
 CSRF_HEADER_NAME = 'X-Hermes-CSRF-Token'
 
@@ -1191,17 +1210,30 @@ def check_auth(handler, parsed) -> bool:
         credential = extract_bearer(_header_values(handler, 'Authorization'))
         return bool(credential and verify_native_credential(credential))
     # Native clients authenticate API requests with a Bearer credential
-    # instead of a browser session cookie.  Two disjoint sets are covered:
-    #   * the broad Mars client prefixes below, and
+    # instead of a browser session cookie.  Three disjoint sets are covered:
+    #   * the broad Mars client prefixes below,
     #   * NATIVE_BEARER_EXACT_PATHS — the exact dispatch routes the native
     #     Android client answers with its device Bearer (crons, memory,
-    #     skills, workspaces, reasoning, approval, clarify, projects).
+    #     skills, workspaces, reasoning, approval, clarify, projects), and
+    #   * the read-only routes for the kanban / insights / logs / provider
+    #     quota screens — exact paths plus the single '/api/kanban/' prefix,
+    #     honoured only for safe methods (GET/HEAD) so kanban mutations stay
+    #     on the cookie + CSRF path.
     # On a covered route, fail closed when an Authorization header is
     # present rather than falling back to a cookie (prevents an invalid
     # native token from masking auth errors).
+    readonly_native_route = (
+        str(getattr(handler, 'command', '') or '').upper()
+        in NATIVE_BEARER_READONLY_METHODS
+        and (
+            parsed.path in NATIVE_BEARER_READONLY_EXACT_PATHS
+            or parsed.path.startswith(NATIVE_BEARER_READONLY_PREFIXES)
+        )
+    )
     if (
         parsed.path.startswith(('/api/chat', '/api/sessions', '/api/session', '/api/models', '/api/upload', '/api/profiles'))
         or parsed.path in NATIVE_BEARER_EXACT_PATHS
+        or readonly_native_route
     ):
         from api.device_pairings import extract_bearer, verify_native_credential
         authorization = _header_values(handler, 'Authorization')

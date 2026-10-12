@@ -48,6 +48,18 @@ checks against the running service on :8787.
   prefixes. Mars-internal contracts (`X-Mars-Internal`, `/api/auth/token`,
   `/api/v1/*`) are untouched.
 
+- **Native (Android) bearer allowlist: read-only screens extension.** The new
+  native screens (kanban board, insights, server logs, provider quota)
+  authenticate safe-method (GET/HEAD) requests with the device Bearer:
+  the single `/api/kanban/` prefix plus the exact paths `/api/insights`,
+  `/api/logs` and `/api/provider/quota` (`NATIVE_BEARER_READONLY_*` in
+  `api/auth.py`). Mutating kanban verbs (POST/PUT/PATCH/DELETE), prefix
+  neighbours and trailing-slash variants stay on the browser cookie-session +
+  CSRF path; the cookie/CSRF policy, `PUBLIC_PATHS` and
+  `NATIVE_BEARER_EXACT_PATHS` are unchanged. Covered by
+  `tests/test_native_bearer_readonly_allowlist.py` (401 before admission,
+  authorized after; fail-closed on garbage/missing/revoked credentials).
+
 #### Repository
 
 - Android release artifacts (`static/apk/*.apk`) are kept out of git via
