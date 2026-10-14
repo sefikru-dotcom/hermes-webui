@@ -67,31 +67,40 @@ PUBLIC_PATHS = frozenset({
 # ── Native Bearer fast-path: exact API paths ──────────────────────────────
 # Routes the native Android client answers with its device Bearer credential
 # instead of a browser session cookie.  These are the exact dispatch paths
-# verified against api/routes.py (cron list/run/pause/resume, memory and
-# skills reads, workspace list, reasoning get/set, approval/clarify
-# pending+respond, projects list).  Exact matches only — no prefixes, no
-# PUBLIC_PATHS entry (authentication is still required on every route here),
-# so mutating siblings (/api/crons/{create,update,delete},
-# /api/skills/{save,delete,toggle}, /api/memory/write, /api/projects/*,
-# /api/workspaces/{add,remove,rename,reorder}, /api/workspaces/suggest) and
-# the SSE ``stream`` / loopback-only ``inject_test`` routes stay on the
-# browser-cookie path.
+# verified against api/routes.py (cron list/run/pause/resume plus cron
+# create/update/delete CRUD, memory read AND write, skills reads plus
+# save/delete/toggle, workspace list, reasoning get/set, approval/clarify
+# pending+respond, projects list, FCM register/unregister).  Exact matches
+# only — no prefixes, no PUBLIC_PATHS entry (authentication is still required
+# on every route here).  By explicit owner decision the memory/skills write
+# routes and the cron CRUD routes are deliberately granted to the device
+# token so the native client can manage them; the remaining mutating
+# siblings (/api/projects/*, /api/workspaces/{add,remove,rename,reorder},
+# /api/workspaces/suggest) and the SSE ``stream`` / loopback-only
+# ``inject_test`` routes stay on the browser-cookie path.
 NATIVE_BEARER_EXACT_PATHS = frozenset({
     '/api/approval/pending',
     '/api/approval/respond',
     '/api/clarify/pending',
     '/api/clarify/respond',
     '/api/crons',
+    '/api/crons/create',
+    '/api/crons/delete',
     '/api/crons/pause',
     '/api/crons/resume',
     '/api/crons/run',
+    '/api/crons/update',
     '/api/memory',
+    '/api/memory/write',
     '/api/projects',
     '/api/push/fcm/register',
     '/api/push/fcm/unregister',
     '/api/reasoning',
     '/api/skills',
     '/api/skills/content',
+    '/api/skills/delete',
+    '/api/skills/save',
+    '/api/skills/toggle',
     '/api/workspaces',
 })
 
@@ -99,14 +108,20 @@ NATIVE_BEARER_EXACT_PATHS = frozenset({
 # Kanban board, insights, server logs, skills usage and provider-quota screens
 # consume existing GET contracts only (api/kanban_bridge.py under /api/kanban/*,
 # /api/insights and /api/skills/usage in api/routes.py, /api/logs and
-# /api/provider/quota in api/route_readonly.py).  The bearer fast-path on these
-# routes is scoped to safe methods (NATIVE_BEARER_READONLY_METHODS), so kanban
-# mutations (POST /api/kanban/tasks, /api/kanban/boards, /api/kanban/dispatch,
-# PATCH/DELETE /api/kanban/*) never accept a device Bearer: they stay on
-# the browser cookie-session + CSRF path exactly as before.  Exact paths
-# only for the four singleton routes; the single kanban prefix requires
-# the trailing slash, so /api/kanban and prefix neighbours never match.
+# /api/provider/quota in api/route_readonly.py).  The cron history listing
+# and delivery-options picker are also GET-only reads (see
+# _handle_cron_history / _handle_cron_delivery_options in api/routes.py) and
+# are added here so the native client can render them without a browser
+# session.  The bearer fast-path on these routes is scoped to safe methods
+# (NATIVE_BEARER_READONLY_METHODS), so kanban mutations (POST
+# /api/kanban/tasks, /api/kanban/boards, /api/kanban/dispatch, PATCH/DELETE
+# /api/kanban/*) never accept a device Bearer: they stay on the browser
+# cookie-session + CSRF path exactly as before.  Exact paths only for the
+# singleton routes; the single kanban prefix requires the trailing slash,
+# so /api/kanban and prefix neighbours never match.
 NATIVE_BEARER_READONLY_EXACT_PATHS = frozenset({
+    '/api/crons/delivery-options',
+    '/api/crons/history',
     '/api/insights',
     '/api/logs',
     '/api/provider/quota',

@@ -23,27 +23,31 @@ EXPECTED_EXACT_PATHS = {
     '/api/clarify/pending',
     '/api/clarify/respond',
     '/api/crons',
+    '/api/crons/create',
+    '/api/crons/delete',
     '/api/crons/pause',
     '/api/crons/resume',
     '/api/crons/run',
+    '/api/crons/update',
     '/api/memory',
+    '/api/memory/write',
     '/api/projects',
     '/api/push/fcm/register',
     '/api/push/fcm/unregister',
     '/api/reasoning',
     '/api/skills',
     '/api/skills/content',
+    '/api/skills/delete',
+    '/api/skills/save',
+    '/api/skills/toggle',
     '/api/workspaces',
 }
 
 # Not allowlisted: mutating/sibling routes must stay on the cookie path and
-# therefore reject a native Bearer credential.
+# therefore reject a native Bearer credential.  (cron CRUD + memory/skills
+# writes were deliberately added to the exact set by owner decision; see
+# tests/test_native_bearer_write_paths.py.)
 NON_ALLOWLISTED_SIBLINGS = (
-    '/api/crons/create',
-    '/api/crons/delete',
-    '/api/memory/write',
-    '/api/skills/save',
-    '/api/skills/delete',
     '/api/workspaces/add',
     '/api/workspaces/remove',
     '/api/projects/create',

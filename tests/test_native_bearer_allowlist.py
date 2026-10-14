@@ -11,14 +11,23 @@ EXPECTED_EXACT_PATHS = frozenset({
     '/api/clarify/pending',
     '/api/clarify/respond',
     '/api/crons',
+    '/api/crons/create',
+    '/api/crons/delete',
     '/api/crons/pause',
     '/api/crons/resume',
     '/api/crons/run',
+    '/api/crons/update',
     '/api/memory',
+    '/api/memory/write',
     '/api/projects',
+    '/api/push/fcm/register',
+    '/api/push/fcm/unregister',
     '/api/reasoning',
     '/api/skills',
     '/api/skills/content',
+    '/api/skills/delete',
+    '/api/skills/save',
+    '/api/skills/toggle',
     '/api/workspaces',
 })
 
@@ -77,9 +86,13 @@ def test_native_bearer_allowlist_gate(monkeypatch):
             status = request("GET", "/api/crons", {"Authorization": "Bearer hdev_invalidcredential"})
             assert status in (400, 401)
 
-            # Mutating siblings are NOT allow-listed: a valid Bearer does not
-            # authenticate them and, without a cookie, they stay 401.
-            status = request("GET", "/api/crons/create", bearer)
+            # Mutating siblings OUTSIDE the exact set are NOT allow-listed:
+            # a valid Bearer does not authenticate them and, without a
+            # cookie, they stay 401.  (cron CRUD and memory/skills writes
+            # ARE allow-listed by owner decision — see
+            # tests/test_native_bearer_write_paths.py.)  GET keeps this
+            # check on the auth gate without tripping the POST CSRF check.
+            status = request("GET", "/api/workspaces/add", bearer)
             assert status == 401
 
             # Prefix-adjacent paths must not match the exact allow-list.

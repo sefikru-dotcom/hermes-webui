@@ -2,7 +2,8 @@
 
 Covers the read-only fast-path in api/auth.py for the new native screens:
 GET/HEAD on the single ``/api/kanban/`` prefix plus the exact paths
-``/api/insights``, ``/api/logs``, ``/api/provider/quota`` and
+``/api/crons/delivery-options``, ``/api/crons/history``, ``/api/insights``,
+``/api/logs``, ``/api/provider/quota``, ``/api/push/fcm/status`` and
 ``/api/skills/usage``.
 
   * before admission (read-only sets monkeypatched empty) a valid device
@@ -32,6 +33,8 @@ import pytest
 
 # Routes admitted for the new Android screens (kept in sync with api/auth.py).
 EXPECTED_READONLY_EXACT_PATHS = {
+    '/api/crons/delivery-options',
+    '/api/crons/history',
     '/api/insights',
     '/api/logs',
     '/api/provider/quota',
@@ -73,26 +76,37 @@ MUTATING_TARGETS = (
     ('POST', '/api/insights'),
     ('POST', '/api/logs'),
     ('POST', '/api/provider/quota'),
+    # The cron history / delivery-options reads are GET/HEAD-only too.
+    ('POST', '/api/crons/history'),
+    ('POST', '/api/crons/delivery-options'),
 )
 
-# The pre-existing exact-path allowlist, pinned so this change can never
-# silently widen it (scope-creep regression guard).
+# The exact-path allowlist, pinned so it can never silently widen beyond the
+# owner-approved set (scope-creep regression guard).  Includes the cron CRUD
+# and memory/skills write paths deliberately granted to the device token.
 PINNED_EXACT_PATHS = {
     '/api/approval/pending',
     '/api/approval/respond',
     '/api/clarify/pending',
     '/api/clarify/respond',
     '/api/crons',
+    '/api/crons/create',
+    '/api/crons/delete',
     '/api/crons/pause',
     '/api/crons/resume',
     '/api/crons/run',
+    '/api/crons/update',
     '/api/memory',
+    '/api/memory/write',
     '/api/projects',
     '/api/push/fcm/register',
     '/api/push/fcm/unregister',
     '/api/reasoning',
     '/api/skills',
     '/api/skills/content',
+    '/api/skills/delete',
+    '/api/skills/save',
+    '/api/skills/toggle',
     '/api/workspaces',
 }
 
@@ -317,6 +331,8 @@ def test_prefix_neighbours_not_covered(native_server):
         '/api/provider/',         # parent of the exact quota path
         '/api/provider/quotas',   # neighbour
         '/api/provider/quota/x',  # suffix is not an exact match
+        '/api/crons/histories',   # suffix is not an exact match
+        '/api/crons/delivery-option',  # missing trailing 's'
     ):
         dispatched.clear()
         status, _payload = _request(port, "GET", path, headers)

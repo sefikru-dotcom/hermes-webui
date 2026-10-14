@@ -30,4 +30,5 @@ tests/test_auth_settings_safety.py
 tests/test_native_bearer_readonly_allowlist.py
 tests/test_native_allowlist_auth.py
 tests/test_native_bearer_exact_paths.py
+tests/test_native_bearer_write_paths.py
 tests/test_push_fcm.py
