@@ -11425,6 +11425,13 @@ def handle_get(handler, parsed) -> bool:
         from api.push import status as push_status
         return j(handler, push_status())
 
+    # ── FCM push (HTTP v1) — native clients ──
+    # Read-only channel introspection; admitted for the native device Bearer
+    # via NATIVE_BEARER_READONLY_EXACT_PATHS (api/auth.py).
+    if parsed.path == "/api/push/fcm/status":
+        from api.push_fcm import status as push_fcm_status
+        return j(handler, push_fcm_status())
+
     if parsed.path == "/api/settings":
         settings = load_settings()
         settings["persisted_speech_keys"] = persisted_speech_settings_keys()
@@ -14315,6 +14322,31 @@ def handle_post(handler, parsed) -> bool:
         title = str((body or {}).get("title") or "Марс")[:120]
         message = str((body or {}).get("body") or "Проверка push-уведомлений.")[:400]
         return j(handler, send_push(title, message, tag="hermes-push-test", urgent=True))
+
+    # ── FCM push (HTTP v1) — native clients ──
+    # Body: {"token": "<fcm-registration-token>", "platform": "android|ios|web",
+    #        "device_name": "<optional label>"}. The device_id is bound to the
+    # authenticated native credential (handler._native_auth_device set by
+    # api.auth.check_auth) — never client-supplied.
+    if parsed.path == "/api/push/fcm/register":
+        from api.push_fcm import register_token
+        _fcm_device = getattr(handler, "_native_auth_device", None) or {}
+        try:
+            return j(handler, register_token(
+                body or {}, device_id=str(_fcm_device.get("device_id") or "")
+            ))
+        except ValueError as e:
+            return bad(handler, str(e), 400)
+
+    if parsed.path == "/api/push/fcm/unregister":
+        from api.push_fcm import unregister_token
+        _fcm_device = getattr(handler, "_native_auth_device", None) or {}
+        try:
+            return j(handler, unregister_token(
+                body or {}, device_id=str(_fcm_device.get("device_id") or "")
+            ))
+        except ValueError as e:
+            return bad(handler, str(e), 400)
 
     # ── Settings (POST) ──
     if parsed.path == "/api/settings":

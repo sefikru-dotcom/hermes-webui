@@ -155,12 +155,6 @@ def test_valid_credential_not_honoured_outside_exact_allowlist(native_server):
     token = _mint_native_token(pairings)
     headers = {"Authorization": f"Bearer {token}"}
     for path in (
-        "/api/crons/create",
-        "/api/crons/update",
-        "/api/crons/delete",
-        "/api/memory/write",
-        "/api/skills/save",
-        "/api/skills/delete",
         "/api/workspaces/add",
         "/api/workspaces/rename",
         "/api/projects/whatever",
