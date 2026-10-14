@@ -11944,14 +11944,17 @@ def _run_agent_streaming(
                         _push_on = True
                     if _push_on:
                         def _dispatch_push_notification(_sid=s.session_id, _msgs=list(s.messages or [])):
+                            # Bound before both channels: the FCM block below
+                            # reuses the preview even if the Web Push import
+                            # fails (each channel is independently guarded).
+                            _preview = ""
+                            for _m in reversed(_msgs):
+                                if isinstance(_m, dict) and _m.get("role") == "assistant":
+                                    _preview = str(_m.get("content") or "").strip()
+                                    break
+                            _preview = " ".join(_preview.split())[:200]
                             try:
                                 from api.push import send_push as _send_push
-                                _preview = ""
-                                for _m in reversed(_msgs):
-                                    if isinstance(_m, dict) and _m.get("role") == "assistant":
-                                        _preview = str(_m.get("content") or "").strip()
-                                        break
-                                _preview = " ".join(_preview.split())[:200]
                                 _push_res = _send_push(
                                     "Марс: ответ готов",
                                     _preview or "Задача завершена.",
@@ -11968,6 +11971,28 @@ def _run_agent_streaming(
                                     )
                             except Exception:
                                 logger.debug("push notify skipped", exc_info=True)
+                            # FCM (HTTP v1) rides the SAME gate, thread and
+                            # payload as Web Push: native clients (Android/TV)
+                            # register device tokens instead of browser
+                            # PushSubscriptions, and send_fcm is a silent
+                            # no-op when the service key or google-auth stack
+                            # is missing — Web Push behaviour is untouched.
+                            try:
+                                from api.push_fcm import send_fcm as _send_fcm
+                                _fcm_res = _send_fcm(
+                                    "Марс: ответ готов",
+                                    _preview or "Задача завершена.",
+                                    url=f"session/{_sid}",
+                                    tag=f"hermes-{_sid}",
+                                )
+                                if _fcm_res.get("total"):
+                                    logger.info(
+                                        "push_fcm: turn-complete sent=%s pruned=%s total=%s errors=%s",
+                                        _fcm_res.get("sent"), _fcm_res.get("pruned"),
+                                        _fcm_res.get("total"), _fcm_res.get("errors"),
+                                    )
+                            except Exception:
+                                logger.debug("fcm notify skipped", exc_info=True)
 
                         import threading as _threading_push
                         _threading_push.Thread(

@@ -87,6 +87,8 @@ NATIVE_BEARER_EXACT_PATHS = frozenset({
     '/api/crons/run',
     '/api/memory',
     '/api/projects',
+    '/api/push/fcm/register',
+    '/api/push/fcm/unregister',
     '/api/reasoning',
     '/api/skills',
     '/api/skills/content',
@@ -108,6 +110,7 @@ NATIVE_BEARER_READONLY_EXACT_PATHS = frozenset({
     '/api/insights',
     '/api/logs',
     '/api/provider/quota',
+    '/api/push/fcm/status',
     '/api/skills/usage',
 })
 NATIVE_BEARER_READONLY_PREFIXES = ('/api/kanban/',)

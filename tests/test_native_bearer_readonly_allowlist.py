@@ -35,6 +35,7 @@ EXPECTED_READONLY_EXACT_PATHS = {
     '/api/insights',
     '/api/logs',
     '/api/provider/quota',
+    '/api/push/fcm/status',
     '/api/skills/usage',
 }
 EXPECTED_READONLY_PREFIXES = ('/api/kanban/',)
@@ -87,6 +88,8 @@ PINNED_EXACT_PATHS = {
     '/api/crons/run',
     '/api/memory',
     '/api/projects',
+    '/api/push/fcm/register',
+    '/api/push/fcm/unregister',
     '/api/reasoning',
     '/api/skills',
     '/api/skills/content',

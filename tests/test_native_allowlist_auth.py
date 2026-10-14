@@ -28,6 +28,8 @@ EXPECTED_EXACT_PATHS = {
     '/api/crons/run',
     '/api/memory',
     '/api/projects',
+    '/api/push/fcm/register',
+    '/api/push/fcm/unregister',
     '/api/reasoning',
     '/api/skills',
     '/api/skills/content',
