@@ -1047,6 +1047,15 @@ def _run_gateway_chat_streaming(
             put_gateway_event("context_status", {
                 "session_id": session_id,
                 "prefill": _public_prefill_context_status(prefill_context),
+                # Turn-start model attribution: on the gateway backend these
+                # parameters ARE the authoritative pair — the same model/provider
+                # forwarded in the gateway request below and stamped onto the
+                # session (s.model / s.model_provider) for the done frame's
+                # session payload. Additive keys, named like that payload, so
+                # clients can label the answer card while the turn streams
+                # instead of only after the final payload arrives.
+                "model": model,
+                "model_provider": model_provider,
             })
         except Exception:
             logger.debug("Failed to load WebUI gateway prefill context", exc_info=True)

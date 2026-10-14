@@ -10363,6 +10363,23 @@ def _run_agent_streaming(
             put('context_status', {
                 'session_id': session_id,
                 'prefill': _public_prefill_context_status(_prefill_context),
+                # Turn-start model attribution: resolved_model/resolved_provider
+                # are exactly the values the AIAgent below is constructed with —
+                # the authoritative route this turn actually takes, and the same
+                # pair the done frame later reports (usage.used_model falls back
+                # to them; the session payload carries the route-resolved
+                # model/model_provider). Clients previously learned the served
+                # model ONLY from that final payload, so during streaming they
+                # labeled the answer card with their own stale picker state.
+                # Additive keys, named like the final session payload
+                # (Session.compact(): model / model_provider). For named custom
+                # providers prefer _session_requested_provider — resolved_provider
+                # is rewritten to bare "custom" for SDK routing right above, while
+                # the session payload keeps the custom:<slug> identity. A mid-run
+                # fallback can still mutate agent.model; the post-run truth keeps
+                # arriving via usage.used_model / the message _usedModel stamp.
+                'model': resolved_model or model,
+                'model_provider': _session_requested_provider or resolved_provider or provider_context,
             })
 
             # Per-profile toolsets — use _resolve_cli_toolsets() so MCP
