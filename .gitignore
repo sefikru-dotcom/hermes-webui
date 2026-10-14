@@ -91,3 +91,7 @@ vendor/
 # APK релизов Mars (Android) — отдаются клиентам через /static/apk/, не в git
 static/apk/
 static/apk-backup-*/
+
+# Runtime SQLite (создаётся сервисом, не источник) — удаляется при рестарте
+state.db
+state.db-*
