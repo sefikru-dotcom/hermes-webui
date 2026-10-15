@@ -1,9 +1,9 @@
 """Native Bearer admission for the owner-approved mutating paths.
 
-The cron CRUD, memory-write and skills-save/delete/toggle routes are
-deliberately granted to the device token so the native Android client can
-manage them without a browser session (owner decision).  This module pins
-that contract:
+The cron CRUD, memory-write, skills-save/delete/toggle, tts-synthesis and
+share-create/revoke routes are deliberately granted to the device token so
+the native Android client can manage them without a browser session (owner
+decision).  This module pins that contract:
 
   * a valid device Bearer authenticates every one of these POST routes and
     reaches dispatch (200);
@@ -37,6 +37,9 @@ WRITE_PATHS = (
     '/api/skills/save',
     '/api/skills/delete',
     '/api/skills/toggle',
+    '/api/tts',
+    '/api/share/create',
+    '/api/share/revoke',
 )
 
 
@@ -187,6 +190,13 @@ def test_prefix_suffix_neighbours_still_reject_bearer(native_server):
         "/api/skills/save/",      # trailing slash
         "/api/skills/deletes",    # suffix neighbour
         "/api/skills/toggles",    # suffix neighbour
+        "/api/ttsx",              # suffix neighbour
+        "/api/tts/",              # trailing slash
+        # NB: no '/api/share/…' neighbours here — the /api/share/ prefix is
+        # public in check_auth (token viewer), so a neighbour such as
+        # /api/share/creates passes the gate and only 404s in real dispatch;
+        # exact-match semantics of the mutations are pinned by the
+        # EXPECTED_EXACT_PATHS equality tests instead.
     ):
         dispatched.clear()
         status, _payload = _request(port, "POST", path, headers)

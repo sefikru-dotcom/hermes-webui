@@ -163,3 +163,74 @@ def test_valid_credential_not_honoured_outside_exact_allowlist(native_server):
         status, _payload = _request(port, "POST", path, headers)
         assert status == 401, (path, status)
     assert dispatched == []
+
+
+def test_post_tts_with_native_bearer_reaches_real_handler(monkeypatch):
+    """End-to-end: a device Bearer clears BOTH /api/tts barriers.
+
+    Unlike the sentinel tests above, dispatch is real here: the request goes
+    through check_auth (whitelist barrier) and then through the
+    handler-internal auth gate in api/route_tts.py (second barrier).
+    edge_tts is faked in-process, so no network call happens; a 200 audio
+    response proves the request travelled the whole route.  Cookie auth is
+    dead for the test, so only the device Bearer can admit it.
+    """
+    import sys
+    from types import SimpleNamespace
+
+    import api.auth as auth
+    import api.device_pairings as pairings
+    import api.routes as routes
+    import server
+
+    class FakeCommunicate:
+        def __init__(self, text, voice, **kwargs):
+            pass
+
+        def stream_sync(self):
+            yield {"type": "audio", "data": b"RIFFfakeaudio"}
+
+    def _drop_limiter():
+        try:
+            delattr(routes._handle_tts, "_tts_limiter")
+        except AttributeError:
+            pass
+
+    monkeypatch.setitem(sys.modules, "edge_tts", SimpleNamespace(Communicate=FakeCommunicate))
+    _drop_limiter()
+    try:
+        with tempfile.TemporaryDirectory() as state:
+            state_path = Path(state)
+            monkeypatch.setattr(pairings, "STATE_DIR", state_path)
+            monkeypatch.setattr(pairings, "_DB_PATH", state_path / "native_auth.db")
+            monkeypatch.setattr(auth, "is_auth_enabled", lambda: True)
+            monkeypatch.setattr(auth, "verify_session", lambda value: False)
+            monkeypatch.setattr(server, "check_auth", auth.check_auth)
+            httpd = server.QuietHTTPServer(("127.0.0.1", 0), server.Handler)
+            thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+            thread.start()
+            try:
+                token = _mint_native_token(pairings)
+                body = json.dumps({"text": "hello", "voice": "en-US-AriaNeural"}).encode("utf-8")
+                conn = http.client.HTTPConnection("127.0.0.1", httpd.server_address[1], timeout=15)
+                try:
+                    conn.request(
+                        "POST",
+                        "/api/tts",
+                        body=body,
+                        headers={
+                            "Authorization": f"Bearer {token}",
+                            "Content-Type": "application/json",
+                        },
+                    )
+                    response = conn.getresponse()
+                    response.read()
+                    assert response.status == 200, response.status
+                finally:
+                    conn.close()
+            finally:
+                httpd.shutdown()
+                httpd.server_close()
+                thread.join(timeout=5)
+    finally:
+        _drop_limiter()

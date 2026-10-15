@@ -72,10 +72,17 @@ def handle_tts(handler, parsed, *, limiter_owner, deps):
     from api.auth import is_auth_enabled, parse_cookie, verify_session
     cv = None
     if is_auth_enabled():
-        cv = parse_cookie(handler)
-        if not (cv and verify_session(cv)):
-            from api.helpers import bad as _bad
-            return _bad(handler, "unauthorized", 401)
+        # check_auth (server.py) admitted this request before dispatch: either
+        # a browser cookie session or a verified native device Bearer —
+        # /api/tts is in NATIVE_BEARER_EXACT_PATHS and a successful Bearer
+        # verification sets handler._native_auth_device.  Honour that flag;
+        # the former cookie-only re-check 401'd every device-Bearer client
+        # (the Android app had to fall back to on-device synthesis).
+        if getattr(handler, "_native_auth_device", None) is None:
+            cv = parse_cookie(handler)
+            if not (cv and verify_session(cv)):
+                from api.helpers import bad as _bad
+                return _bad(handler, "unauthorized", 401)
 
     # High-quality per-client rate limiting for TTS.
     if not hasattr(limiter_owner, "_tts_limiter"):

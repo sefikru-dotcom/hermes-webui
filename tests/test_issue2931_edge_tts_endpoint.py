@@ -16,6 +16,10 @@ import api.routes as routes
 
 
 class _FakeHandler:
+    # Simulates the flag check_auth sets after verifying a native device
+    # Bearer; tests assign it per instance when the request is bearer-admitted.
+    _native_auth_device: dict | None = None
+
     def __init__(self, body: bytes, command: str = "POST", headers=None, client="1.2.3.4"):
         self.command = command
         self.rfile = io.BytesIO(body)
@@ -243,3 +247,71 @@ def test_tts_rejects_unauthenticated_client_before_limiter(monkeypatch):
     assert handler.status == 401
     assert handler.payload()["error"] == "unauthorized"
     assert not hasattr(routes._handle_tts, "_tts_limiter")
+
+
+def _install_fake_edge_tts(monkeypatch, captured):
+    """In-process edge_tts double: no network, records the synthesis args."""
+
+    class FakeCommunicate:
+        def __init__(self, text, voice, **kwargs):
+            captured["text"] = text
+            captured["voice"] = voice
+            captured["kwargs"] = kwargs
+
+        def stream_sync(self):
+            yield {"type": "audio", "data": b"abc"}
+
+    monkeypatch.setitem(sys.modules, "edge_tts", SimpleNamespace(Communicate=FakeCommunicate))
+
+
+def test_tts_accepts_native_device_bearer_admitted_request(monkeypatch):
+    # /api/tts is in NATIVE_BEARER_EXACT_PATHS: check_auth (server.py) admits
+    # the device Bearer and marks handler._native_auth_device.  The
+    # handler-internal gate must honour that flag — the former cookie-only
+    # re-check 401'd every native client (the Android app had to fall back to
+    # on-device synthesis).  The cookie path is poisoned here (no cookie,
+    # verify_session False), so only the bearer flag can get through.
+    import api.auth as auth
+
+    captured = {}
+    _install_fake_edge_tts(monkeypatch, captured)
+    monkeypatch.setattr(auth, "is_auth_enabled", lambda: True)
+    monkeypatch.setattr(auth, "parse_cookie", lambda _handler: None)
+    monkeypatch.setattr(auth, "verify_session", lambda _cookie: False)
+    handler = _post({"text": "hello", "voice": "en-US-AriaNeural"}, client="10.0.0.9")
+    handler._native_auth_device = {"device_id": "hdev_test_device", "label": "unit-test"}
+    routes._handle_tts(handler, None)
+    assert handler.status == 200
+    assert captured["text"] == "hello"
+    assert captured["voice"] == "en-US-AriaNeural"
+
+
+def test_tts_still_fails_closed_without_bearer_flag_or_cookie(monkeypatch):
+    # Fail-closed regression: no _native_auth_device flag and no valid cookie
+    # session → 401 even with the bearer-aware gate.
+    import api.auth as auth
+
+    monkeypatch.setattr(auth, "is_auth_enabled", lambda: True)
+    monkeypatch.setattr(auth, "parse_cookie", lambda _handler: None)
+    monkeypatch.setattr(auth, "verify_session", lambda _cookie: False)
+    handler = _post({"text": "hello", "voice": "en-US-AriaNeural"}, client="10.0.0.10")
+    routes._handle_tts(handler, None)
+    assert handler.status == 401
+    assert (handler.payload() or {})["error"] == "unauthorized"
+    assert not hasattr(routes._handle_tts, "_tts_limiter")
+
+
+def test_tts_accepts_valid_browser_cookie_session(monkeypatch):
+    # Browser regression: the cookie-session path through the handler-internal
+    # gate keeps working (no device flag involved).
+    import api.auth as auth
+
+    captured = {}
+    _install_fake_edge_tts(monkeypatch, captured)
+    monkeypatch.setattr(auth, "is_auth_enabled", lambda: True)
+    monkeypatch.setattr(auth, "parse_cookie", lambda _handler: "browser-session")
+    monkeypatch.setattr(auth, "verify_session", lambda _cookie: True)
+    handler = _post({"text": "hello", "voice": "en-US-AriaNeural"}, client="10.0.0.11")
+    routes._handle_tts(handler, None)
+    assert handler.status == 200
+    assert captured["text"] == "hello"

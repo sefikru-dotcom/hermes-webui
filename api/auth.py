@@ -70,10 +70,11 @@ PUBLIC_PATHS = frozenset({
 # verified against api/routes.py (cron list/run/pause/resume plus cron
 # create/update/delete CRUD, memory read AND write, skills reads plus
 # save/delete/toggle, workspace list, reasoning get/set, approval/clarify
-# pending+respond, projects list, FCM register/unregister).  Exact matches
-# only — no prefixes, no PUBLIC_PATHS entry (authentication is still required
-# on every route here).  By explicit owner decision the memory/skills write
-# routes and the cron CRUD routes are deliberately granted to the device
+# pending+respond, projects list, FCM register/unregister, TTS synthesis
+# and share create/revoke).  Exact matches only — no prefixes, no
+# PUBLIC_PATHS entry (authentication is still required on every route here).
+# By explicit owner decision the memory/skills write routes, the cron CRUD
+# routes and the tts/share mutations are deliberately granted to the device
 # token so the native client can manage them; the remaining mutating
 # siblings (/api/projects/*, /api/workspaces/{add,remove,rename,reorder},
 # /api/workspaces/suggest) and the SSE ``stream`` / loopback-only
@@ -96,11 +97,14 @@ NATIVE_BEARER_EXACT_PATHS = frozenset({
     '/api/push/fcm/register',
     '/api/push/fcm/unregister',
     '/api/reasoning',
+    '/api/share/create',
+    '/api/share/revoke',
     '/api/skills',
     '/api/skills/content',
     '/api/skills/delete',
     '/api/skills/save',
     '/api/skills/toggle',
+    '/api/tts',
     '/api/workspaces',
 })
 
@@ -1233,7 +1237,8 @@ def check_auth(handler, parsed) -> bool:
     #   * the broad Mars client prefixes below,
     #   * NATIVE_BEARER_EXACT_PATHS — the exact dispatch routes the native
     #     Android client answers with its device Bearer (crons, memory,
-    #     skills, workspaces, reasoning, approval, clarify, projects), and
+    #     skills, workspaces, reasoning, approval, clarify, projects, tts,
+    #     share create/revoke), and
     #   * the read-only routes for the kanban / insights / logs / skills-usage /
     #     provider-quota screens — exact paths plus the single '/api/kanban/'
     #     prefix, honoured only for safe methods (GET/HEAD) so kanban mutations

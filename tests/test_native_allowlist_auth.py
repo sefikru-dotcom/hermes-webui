@@ -35,11 +35,14 @@ EXPECTED_EXACT_PATHS = {
     '/api/push/fcm/register',
     '/api/push/fcm/unregister',
     '/api/reasoning',
+    '/api/share/create',
+    '/api/share/revoke',
     '/api/skills',
     '/api/skills/content',
     '/api/skills/delete',
     '/api/skills/save',
     '/api/skills/toggle',
+    '/api/tts',
     '/api/workspaces',
 }
 

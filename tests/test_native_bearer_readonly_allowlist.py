@@ -82,8 +82,9 @@ MUTATING_TARGETS = (
 )
 
 # The exact-path allowlist, pinned so it can never silently widen beyond the
-# owner-approved set (scope-creep regression guard).  Includes the cron CRUD
-# and memory/skills write paths deliberately granted to the device token.
+# owner-approved set (scope-creep regression guard).  Includes the cron CRUD,
+# memory/skills write and tts/share-create/share-revoke paths deliberately
+# granted to the device token.
 PINNED_EXACT_PATHS = {
     '/api/approval/pending',
     '/api/approval/respond',
@@ -102,11 +103,14 @@ PINNED_EXACT_PATHS = {
     '/api/push/fcm/register',
     '/api/push/fcm/unregister',
     '/api/reasoning',
+    '/api/share/create',
+    '/api/share/revoke',
     '/api/skills',
     '/api/skills/content',
     '/api/skills/delete',
     '/api/skills/save',
     '/api/skills/toggle',
+    '/api/tts',
     '/api/workspaces',
 }
 
