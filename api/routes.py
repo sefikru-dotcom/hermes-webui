@@ -11094,7 +11094,7 @@ def _handle_session_get(handler, parsed) -> bool:
 
 # WebSocket route served by api/voice_gateway.py.  Exact paths only (the auth
 # allow-list in api/auth.py matches exact paths), and it must stay in sync with
-# voice_gateway.WS_PATH — tests/test_voice_gateway_endpoint.py asserts both.
+# voice_gateway.WS_PATH — tests/test_voice_gateway.py asserts both.
 _VOICE_WS_PATHS = frozenset({"/api/voice/session"})
 
 
