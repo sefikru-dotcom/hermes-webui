@@ -1462,7 +1462,7 @@ main.main.showing-plugin > #mainPlugin {
   :root:not(.dark) .msg-body td{border-color:rgba(0,0,0,.08);}
   :root:not(.dark) .preview-badge.code{background:rgba(0,0,0,.05);}
   :root:not(.dark) .ctx-ring-center{background:var(--bg);color:var(--muted);}
-  :root:not(.dark) .ctx-ring-track{stroke:rgba(0,0,0,.12);}
+  :root:not(.dark) .ctx-ring-track{stroke:rgba(0,0,0,.62);}
   :root:not(.dark) .ws-opt:hover{background:rgba(0,0,0,.05);}
   :root:not(.dark) .ws-row:hover{background:rgba(0,0,0,.04);}
   :root:not(.dark) .ws-drag-handle{color:#999;}
@@ -2828,7 +2828,7 @@ main.main.showing-plugin > #mainPlugin {
   .ctx-ring{position:relative;display:flex;width:24px;height:24px;align-items:center;justify-content:center;}
   .ctx-ring-svg{position:absolute;inset:0;width:24px;height:24px;transform:rotate(-90deg);}
   .ctx-ring-track,.ctx-ring-value{fill:none;stroke-width:3;}
-  .ctx-ring-track{stroke:rgba(255,255,255,.12);}
+  .ctx-ring-track{stroke:rgba(255,255,255,.36);}
   .ctx-ring-value{stroke:var(--muted);stroke-linecap:round;stroke-dasharray:61.261056745;stroke-dashoffset:61.261056745;transition:stroke-dashoffset .45s ease,stroke .25s ease;}
   .ctx-ring-center{position:relative;display:flex;width:15px;height:15px;align-items:center;justify-content:center;border-radius:999px;background:var(--bg);font-size:8px;font-weight:600;line-height:1;color:var(--muted);font-variant-numeric:tabular-nums;}
   .ctx-indicator.ctx-mid .ctx-ring-value{stroke:var(--warning);}
