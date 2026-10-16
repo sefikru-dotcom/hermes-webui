@@ -105,6 +105,7 @@ NATIVE_BEARER_EXACT_PATHS = frozenset({
     '/api/skills/save',
     '/api/skills/toggle',
     '/api/tts',
+    '/api/voice/session',
     '/api/workspaces',
 })
 

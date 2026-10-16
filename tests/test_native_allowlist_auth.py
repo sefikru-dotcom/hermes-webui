@@ -43,6 +43,7 @@ EXPECTED_EXACT_PATHS = {
     '/api/skills/save',
     '/api/skills/toggle',
     '/api/tts',
+    '/api/voice/session',
     '/api/workspaces',
 }
 

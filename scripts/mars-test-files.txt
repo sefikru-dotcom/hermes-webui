@@ -33,3 +33,6 @@ tests/test_native_bearer_exact_paths.py
 tests/test_native_bearer_write_paths.py
 tests/test_push_fcm.py
 tests/test_turn_start_model_attribution.py
+# voice gateway: WebSocket transport bound to an existing chat session
+tests/test_voice_gateway.py
+tests/test_voice_gateway_endpoint.py

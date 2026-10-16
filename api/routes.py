@@ -11092,11 +11092,27 @@ def _handle_session_get(handler, parsed) -> bool:
         return j(handler, {"session": public_session_projection(sess)})
 
 
+# WebSocket route served by api/voice_gateway.py.  Exact paths only (the auth
+# allow-list in api/auth.py matches exact paths), and it must stay in sync with
+# voice_gateway.WS_PATH — tests/test_voice_gateway_endpoint.py asserts both.
+_VOICE_WS_PATHS = frozenset({"/api/voice/session"})
+
+
 def handle_get(handler, parsed) -> bool:
     """Handle all GET routes. Returns True if handled, False for 404."""
     proxy_result = _handle_extension_sidecar_proxy(handler, parsed, "GET")
     if proxy_result is not False:
         return proxy_result
+
+    # Voice gateway: GET /api/voice/session upgrades to a WebSocket and speaks
+    # the text voice contract by adapting to the existing chat runtime (see
+    # api/voice_gateway.py and docs/voice-gateway.md). Terminal route:
+    # it answers JSON for a non-upgrade request and owns the socket afterwards,
+    # so it must be dispatched before the generic /api/session* catch-alls.
+    if parsed.path in _VOICE_WS_PATHS:
+        from api.voice_gateway import handle_voice_session
+
+        return handle_voice_session(handler, parsed)
 
     if parsed.path.startswith("/session/static/"):
         # Strip the leading "/session" so _serve_static() sees a path that
