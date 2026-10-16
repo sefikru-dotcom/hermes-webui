@@ -8904,7 +8904,12 @@ function _applyBusyComposerPlaceholder(){
   if(_compressionPlaceholderSaved!==null) return;
   if(input.disabled) return;
   if(_composerHasContent()) return;
-  const idlePlaceholder='Message '+assistantDisplayName()+'\u2026';
+  const idleFallback='Message '+assistantDisplayName()+'\u2026';
+  let idlePlaceholder=idleFallback;
+  if(typeof t==='function'){
+    const idleT=t('composer_placeholder_idle',assistantDisplayName());
+    if(idleT&&idleT!=='composer_placeholder_idle') idlePlaceholder=idleT;
+  }
   if(!window._showBusyPlaceholderHint||!S.busy){
     input.placeholder=idlePlaceholder;
     return;
@@ -17681,7 +17686,9 @@ function renderMessages(options){
     indicator.id='loadOlderIndicator';
     indicator.className='load-older-indicator message-window-load-earlier';
     indicator.textContent=serverOlderCount>0
-      ? `Load earlier messages (${serverOlderCount} older)`
+      ? (typeof t==='function'
+        ? (t('load_older_messages_count',serverOlderCount)||`Load earlier messages (${serverOlderCount} older)`)
+        : `Load earlier messages (${serverOlderCount} older)`)
       : (typeof t==='function'?t('load_older_messages'):'Load earlier messages');
     inner.appendChild(indicator);
     _wireMessageWindowLoadEarlierButton();
