@@ -1,6 +1,7 @@
 """Native Bearer admission for the owner-approved mutating paths.
 
-The cron CRUD, memory-write, skills-save/delete/toggle, tts-synthesis and
+The cron CRUD, memory-write, skills-save/delete/toggle, speech-to-text
+(POST /api/transcribe), tts-synthesis and
 share-create/revoke routes are deliberately granted to the device token so
 the native Android client can manage them without a browser session (owner
 decision).  This module pins that contract:
@@ -37,6 +38,7 @@ WRITE_PATHS = (
     '/api/skills/save',
     '/api/skills/delete',
     '/api/skills/toggle',
+    '/api/transcribe',
     '/api/tts',
     '/api/share/create',
     '/api/share/revoke',
@@ -192,6 +194,8 @@ def test_prefix_suffix_neighbours_still_reject_bearer(native_server):
         "/api/skills/toggles",    # suffix neighbour
         "/api/ttsx",              # suffix neighbour
         "/api/tts/",              # trailing slash
+        "/api/transcribex",       # suffix neighbour
+        "/api/transcribe/",       # trailing slash
         # NB: no '/api/share/…' neighbours here — the /api/share/ prefix is
         # public in check_auth (token viewer), so a neighbour such as
         # /api/share/creates passes the gate and only 404s in real dispatch;

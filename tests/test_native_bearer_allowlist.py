@@ -30,6 +30,7 @@ EXPECTED_EXACT_PATHS = frozenset({
     '/api/skills/delete',
     '/api/skills/save',
     '/api/skills/toggle',
+    '/api/transcribe',
     '/api/tts',
     '/api/workspaces',
 })
