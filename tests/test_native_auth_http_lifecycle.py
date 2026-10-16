@@ -21,6 +21,10 @@ def test_native_auth_real_loopback_lifecycle(monkeypatch):
         state_path = Path(state)
         monkeypatch.setattr(pairings, "STATE_DIR", state_path)
         monkeypatch.setattr(pairings, "_DB_PATH", state_path / "native_auth.db")
+        secret_file = state_path / "internal_secret"
+        secret_file.write_text("test-loopback-secret", encoding="utf-8")
+        secret_file.chmod(0o600)
+        monkeypatch.setenv("HERMES_WEBUI_INTERNAL_SECRET_FILE", str(secret_file))
         monkeypatch.setattr(auth, "is_auth_enabled", lambda: True)
         monkeypatch.setattr(auth, "verify_session", lambda value: True)
         httpd = server.QuietHTTPServer(("127.0.0.1", 0), server.Handler)
@@ -43,7 +47,8 @@ def test_native_auth_real_loopback_lifecycle(monkeypatch):
             pair_id, poll_secret = created["pair_id"], created["poll_secret"]
             status, headers, pending = request("GET", f"/api/v1/auth/device-pairings/status?pair_id={pair_id}")
             assert status == 200 and pending["pair_id"] == pair_id and pending["status"] == "pending" and "access_token" not in pending
-            status, _, approved = request("POST", "/api/v1/auth/device-pairings/approve", {"code": created["code"]}, {"Cookie": "hermes_session=synthetic-verified", "X-Mars-Internal": "1"})
+            internal_secret = (state_path / "internal_secret").read_text(encoding="utf-8").strip()
+            status, _, approved = request("POST", "/api/v1/auth/device-pairings/approve", {"code": created["code"]}, {"Cookie": "hermes_session=synthetic-verified", "X-Mars-Internal": internal_secret})
             assert status == 200 and approved["status"] == "approved"
             status, _, exchanged = request("POST", f"/api/v1/auth/device-pairings/{pair_id}/exchange", {"poll_secret": poll_secret})
             assert status == 200 and exchanged["token_type"] == "Bearer"

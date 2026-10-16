@@ -11,6 +11,7 @@ import logging
 import os
 import re
 import secrets
+import stat
 import tempfile
 import threading
 import time
@@ -1203,14 +1204,135 @@ def _header_values(handler, name: str) -> list:
     return [str(value)]
 
 
+_MAX_DRAIN_BYTES = 1024 * 1024
+
+
+def _force_connection_close(handler) -> None:
+    try:
+        handler.close_connection = True
+    except Exception:
+        pass
+
+
+def _drain_request_body(handler) -> None:
+    """Read and discard the request body before an early (deny) response.
+
+    ``check_auth`` runs before any route handler, so on a 401/403/redirect a
+    POST/PUT/PATCH body is still unread in the socket. Under HTTP/1.1
+    keep-alive ``BaseHTTPRequestHandler`` then parses those leftover bytes as
+    the *next* request line, yielding
+    ``401 -> 501 Unsupported method ('{"x":1}POST')``. Draining the exact
+    Content-Length keeps the framing intact; when the body is unbounded
+    (chunked) or too large to buffer we fall back to Connection: close.
+    """
+    headers = getattr(handler, "headers", None)
+    if headers is None:
+        return
+    raw_length = headers.get("Content-Length")
+    if raw_length is None:
+        if headers.get("Transfer-Encoding"):
+            _force_connection_close(handler)
+        return
+    try:
+        length = int(raw_length)
+    except (TypeError, ValueError):
+        _force_connection_close(handler)
+        return
+    if length <= 0:
+        return
+    rfile = getattr(handler, "rfile", None)
+    if rfile is None or length > _MAX_DRAIN_BYTES:
+        _force_connection_close(handler)
+        return
+    try:
+        remaining = length
+        while remaining > 0:
+            chunk = rfile.read(min(remaining, 65536))
+            if not chunk:
+                _force_connection_close(handler)
+                break
+            remaining -= len(chunk)
+    except Exception:
+        _force_connection_close(handler)
+
+
+_MARS_INTERNAL_SECRET_ENV = "HERMES_WEBUI_INTERNAL_SECRET_FILE"
+_mars_internal_secret_cache: dict[str, Any] = {"path": None, "mtime": None, "value": None}
+
+
+def _mars_internal_secret_path() -> Path:
+    """Locate the shared secret that authenticates local Mars automation."""
+    override = os.getenv(_MARS_INTERNAL_SECRET_ENV, "").strip()
+    if override:
+        return Path(override)
+    return Path(STATE_DIR) / ".mars_internal_secret"
+
+
+def _load_mars_internal_secret() -> str | None:
+    """Read the loopback secret, refusing any file readable beyond its owner.
+
+    A 0600 file owned by the service account is the second factor: a
+    non-privileged process on the box (and any remote caller arriving through
+    the reverse proxy) cannot read it, so it cannot mint a trusted header.
+    """
+    path = _mars_internal_secret_path()
+    try:
+        st = path.stat()
+    except OSError:
+        return None
+    if not stat.S_ISREG(st.st_mode):
+        return None
+    if st.st_mode & 0o077:  # group/other bits set -> do not trust the secret
+        return None
+    if (
+        _mars_internal_secret_cache["path"] == str(path)
+        and _mars_internal_secret_cache["mtime"] == st.st_mtime
+        and _mars_internal_secret_cache["value"]
+    ):
+        return _mars_internal_secret_cache["value"]
+    try:
+        value = path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    if not value:
+        return None
+    _mars_internal_secret_cache["path"] = str(path)
+    _mars_internal_secret_cache["mtime"] = st.st_mtime
+    _mars_internal_secret_cache["value"] = value
+    return value
+
+
+def _mars_internal_authorized(handler) -> bool:
+    """True only for a loopback peer presenting the on-disk secret."""
+    addr = getattr(handler, "client_address", None)
+    peer = addr[0] if isinstance(addr, (tuple, list)) and addr else None
+    if not peer or not _is_loopback(str(peer)):
+        return False
+    headers = getattr(handler, "headers", None)
+    if headers is None:
+        return False
+    presented = headers.get("X-Mars-Internal")
+    # A bare "1" is the retired public bypass; never treat it as a secret.
+    if not presented or presented == "1":
+        return False
+    secret = _load_mars_internal_secret()
+    if not secret:
+        return False
+    return hmac.compare_digest(str(presented), secret)
+
+
 def check_auth(handler, parsed) -> bool:
     """Check if request is authorized. Returns True if OK.
     If not authorized, sends 401 (API) or 302 redirect (page) and returns False."""
     if not is_auth_enabled():
         return True
-    # Local Mars internal loopback automation
-    client_ip = getattr(handler, "client_address", ("", 0))[0]
-    if client_ip in ("127.0.0.1", "::1", "localhost") and handler.headers.get("X-Mars-Internal") == "1":
+    # Local Mars internal automation. Two independent factors are required:
+    # a genuine loopback peer AND a shared secret kept in a 0600 file only
+    # the service account can read. The peer check alone is insufficient —
+    # the reverse proxy (Caddy) forwards every public request to
+    # 127.0.0.1:8787, so a remote caller previously reached this branch with
+    # a plain "X-Mars-Internal: 1" and bypassed authentication entirely.
+    if _mars_internal_authorized(handler):
         return True
     # Public paths don't require auth
     if (
@@ -1267,6 +1389,7 @@ def check_auth(handler, parsed) -> bool:
             if native_device:
                 handler._native_auth_device = native_device
                 return True
+            _drain_request_body(handler)
             body = b'{"error":"Authentication required"}'
             handler.send_response(401)
             handler.send_header('Content-Type', 'application/json')
@@ -1280,6 +1403,7 @@ def check_auth(handler, parsed) -> bool:
     if parsed.path == '/api/auth/logout':
         if has_session:
             return True
+        _drain_request_body(handler)
         body = b'{"error":"Authentication required"}'
         handler.send_response(401)
         handler.send_header('Content-Type', 'application/json')
@@ -1290,6 +1414,7 @@ def check_auth(handler, parsed) -> bool:
     session_info = ensure_trusted_auth_session(handler)
     if session_info:
         if not trusted_session_allows_active_profile(session_info):
+            _drain_request_body(handler)
             if parsed.path.startswith('/api/'):
                 body = b'{"error":"Profile access forbidden"}'
                 handler.send_response(403)
@@ -1304,6 +1429,7 @@ def check_auth(handler, parsed) -> bool:
             return False
         return True
     # Not authorized
+    _drain_request_body(handler)
     if parsed.path.startswith('/api/'):
         body = b'{"error":"Authentication required"}'
         handler.send_response(401)
