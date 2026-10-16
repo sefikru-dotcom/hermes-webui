@@ -33,7 +33,7 @@ Mars WebUI (api/streaming.py, discovery каждый ход)
                      HostName 127.0.0.1 :2222  User SKY
                      IdentityFile /root/.ssh/laptop_ed25519
                         └─ tunnel ноутбук→сервер (обратный, ставит сама PCLite)
-                              └─ python mars_desktop_mcp.py  [ноутбук, Windows]
+                              └─ Mars.Desktop.McpHost.exe    [ноутбук, Windows]
 ```
 
 Туннель ноутбук→сервер уже существовал до этой работы и **не изменялся**.
@@ -45,7 +45,7 @@ Mars WebUI (api/streaming.py, discovery каждый ход)
 |---|---|---|
 | `mars_desktop_launch.sh` | сервер: `/root/.hermes/mcp/` | обёртка stdio↔ssh, выбирает цель |
 | `mars_desktop_mcp.py` | ноутбук: `C:\Users\SKY\.mars-desktop-mcp\` | сам MCP-сервер (текущая реализация) |
-| `Mars.Desktop.McpHost.exe` | ноутбук: `...\mars-desktop\artifacts\publish\win-x64\` | хостат другая зона; подхватится автоматически, когда появится |
+| `Mars.Desktop.McpHost.exe` | ноутбук: `...\mars-desktop\artifacts\publish\win-x64\` | действующий MCP-хост (C#, single-file). Лаунчер выбирает его, когда файл есть |
 | `config.yaml` | сервер: `/root/.hermes/` | регистрация сервера + промпт-хинт |
 
 ## Как это менять
@@ -56,7 +56,7 @@ Mars WebUI (api/streaming.py, discovery каждый ход)
 
 1. `$MARS_DESKTOP_MCP_REMOTE_CMD` — явное переопределение, дословная удалённая команда;
 2. `Mars.Desktop.McpHost.exe` — если файл существует на ноутбуке;
-3. `mars_desktop_mcp.py` — python-заглушка (всегда есть).
+3. `mars_desktop_mcp.py` — python-заглушка (всегда есть; используется, только если exe отсутствует или несовместим).
 
 Чтобы принудительно зафиксировать цель, задайте переменную в конфиге сервера:
 
