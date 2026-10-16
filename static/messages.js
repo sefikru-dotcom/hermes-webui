@@ -1853,6 +1853,15 @@ async function send(){
     }
     const conflictActiveStream=/session already has an active stream/i.test(errMsg);
     if(conflictActiveStream){
+      // The server rejects a second start with the owner stream id. Adopt that
+      // stream locally instead of merely reloading the transcript: otherwise
+      // S.busy/S.activeStreamId stay cleared and every subsequent send repeats
+      // the same 409 forever (#active-stream-reconnect).
+      let _activeStreamId='';
+      try{
+        const _body=e&&e.body?JSON.parse(e.body):null;
+        _activeStreamId=String(_body&&_body.active_stream_id||'');
+      }catch(_){ }
       delete INFLIGHT[activeSid];
       if(typeof clearInflightState==='function') clearInflightState(activeSid);
       stopApprovalPolling();
@@ -1861,10 +1870,16 @@ async function send(){
       const _retryModelState=_chatPayloadModelState();
       queueSessionMessage(activeSid,{text:msgText,files:[],model:_retryModelState.model,model_provider:_retryModelState.model_provider,profile:S.activeProfile||'default'});
       updateQueueBadge(activeSid);
-      showToast('Current session is still running. Reconnected and queued your message.',2600);
       try{
         await loadSession(activeSid);
+        if(_activeStreamId){
+          S.activeStreamId=_activeStreamId;
+          if(S.session&&S.session.session_id===activeSid) S.session.active_stream_id=_activeStreamId;
+          setBusy(true);
+          if(typeof attachLiveStream==='function') attachLiveStream(activeSid,_activeStreamId,[],{reconnecting:true});
+        }
         setComposerStatus('');
+        // A recovered stream is an expected reconnect, not an error toast.
         return;
       }catch(_){
         // Fall through to standard error handling if session reload fails.
