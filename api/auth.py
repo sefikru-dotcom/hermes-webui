@@ -71,15 +71,22 @@ PUBLIC_PATHS = frozenset({
 # verified against api/routes.py (cron list/run/pause/resume plus cron
 # create/update/delete CRUD, memory read AND write, skills reads plus
 # save/delete/toggle, workspace list, reasoning get/set, approval/clarify
-# pending+respond, projects list, FCM register/unregister, TTS synthesis
-# and share create/revoke).  Exact matches only — no prefixes, no
-# PUBLIC_PATHS entry (authentication is still required on every route here).
-# By explicit owner decision the memory/skills write routes, the cron CRUD
-# routes and the tts/share mutations are deliberately granted to the device
-# token so the native client can manage them; the remaining mutating
-# siblings (/api/projects/*, /api/workspaces/{add,remove,rename,reorder},
-# /api/workspaces/suggest) and the SSE ``stream`` / loopback-only
-# ``inject_test`` routes stay on the browser-cookie path.
+# pending+respond, projects list, FCM register/unregister, TTS synthesis,
+# speech-to-text transcription (POST /api/transcribe -> handle_transcribe in
+# api/upload.py) and share create/revoke).  Exact matches only — no prefixes,
+# no PUBLIC_PATHS entry (authentication is still required on every route
+# here).  By explicit owner decision the memory/skills write routes, the cron
+# CRUD routes, the tts/share mutations and the transcribe upload are
+# deliberately granted to the device token so the native client can manage
+# them; the remaining mutating siblings (/api/projects/*,
+# /api/workspaces/{add,remove,rename,reorder}, /api/workspaces/suggest) and
+# the SSE ``stream`` / loopback-only ``inject_test`` routes stay on the
+# browser-cookie path.
+# NB: the read-only capability probe /api/transcribe/capability is
+# deliberately NOT admitted to either allowlist — it is a passive probe the
+# browser UI fires without an Authorization header (static/boot.js
+# _probeServerSttCapability) and no device-token caller consumes it, so there
+# is no precedent for admitting a /capability route to the device token.
 NATIVE_BEARER_EXACT_PATHS = frozenset({
     '/api/approval/pending',
     '/api/approval/respond',
@@ -105,6 +112,7 @@ NATIVE_BEARER_EXACT_PATHS = frozenset({
     '/api/skills/delete',
     '/api/skills/save',
     '/api/skills/toggle',
+    '/api/transcribe',
     '/api/tts',
     '/api/workspaces',
 })
@@ -1360,7 +1368,7 @@ def check_auth(handler, parsed) -> bool:
     #   * NATIVE_BEARER_EXACT_PATHS — the exact dispatch routes the native
     #     Android client answers with its device Bearer (crons, memory,
     #     skills, workspaces, reasoning, approval, clarify, projects, tts,
-    #     share create/revoke), and
+    #     speech-to-text POST /api/transcribe, share create/revoke), and
     #   * the read-only routes for the kanban / insights / logs / skills-usage /
     #     provider-quota screens — exact paths plus the single '/api/kanban/'
     #     prefix, honoured only for safe methods (GET/HEAD) so kanban mutations

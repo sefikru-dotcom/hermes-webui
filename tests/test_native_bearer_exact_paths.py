@@ -12,8 +12,10 @@ server:
     even when a valid native credential is presented.
 
 Dispatch is stubbed, so no real route handler (cron runs, memory writes,
-approval mutations) ever executes. Credentials are synthetic, loopback-only
-and never printed.
+approval mutations) ever executes — except the two end-to-end tests at the
+bottom (/api/tts and POST /api/transcribe), which travel through the real
+check_auth + real dispatch with the network-facing dependency faked.
+Credentials are synthetic, loopback-only and never printed.
 """
 import http.client
 import json
@@ -40,10 +42,10 @@ def _sentinel_router(dispatched):
     return route
 
 
-def _request(port, method, path, headers=None):
+def _request(port, method, path, headers=None, body=None):
     conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
     try:
-        conn.request(method, path, headers=headers or {})
+        conn.request(method, path, body=body, headers=headers or {})
         response = conn.getresponse()
         raw = response.read()
         try:
@@ -62,6 +64,16 @@ def _mint_native_token(pairings):
     exchanged = pairings.exchange_pairing(created["pair_id"], created["poll_secret"])
     assert exchanged and exchanged["token_type"] == "Bearer"
     return exchanged["access_token"]
+
+
+def _multipart_transcribe_body(filename="voice.wav", data=b"RIFFfakewave", boundary="voiceboundary"):
+    """Minimal multipart/form-data body with the ``file`` field /api/transcribe wants."""
+    body = (
+        f"--{boundary}\r\n"
+        f'Content-Disposition: form-data; name="file"; filename="{filename}"\r\n'
+        "Content-Type: audio/wav\r\n\r\n"
+    ).encode() + data + f"\r\n--{boundary}--\r\n".encode()
+    return body, f"multipart/form-data; boundary={boundary}"
 
 
 @pytest.fixture()
@@ -159,10 +171,102 @@ def test_valid_credential_not_honoured_outside_exact_allowlist(native_server):
         "/api/workspaces/rename",
         "/api/projects/whatever",
         "/api/approval/respond/all",
+        # Prefix neighbours of the newly allowlisted POST /api/transcribe:
+        # the trailing slash and the browser-only capability probe stay off
+        # the device-token path.
+        "/api/transcribe/",
+        "/api/transcribe/capability",
     ):
         status, _payload = _request(port, "POST", path, headers)
         assert status == 401, (path, status)
     assert dispatched == []
+
+
+def test_post_transcribe_with_native_bearer_reaches_real_handler(monkeypatch):
+    """End-to-end: POST /api/transcribe is admitted for the device Bearer.
+
+    Dispatch is real: the multipart POST goes through check_auth (the
+    allowlist barrier this wave opened) and then through the real
+    handle_transcribe in api/upload.py, which has no auth gate of its own.
+    tools.transcription_tools is faked in-process, so no STT provider is
+    contacted and no network call happens; the 200 + transcript proves the
+    request travelled the whole route.  Cookie auth is dead for the test, so
+    only the device Bearer can admit it — and the same path with no
+    Authorization header (or a garbage Bearer) must still 401.
+    """
+    import sys
+    import types
+
+    import api.auth as auth
+    import api.device_pairings as pairings
+    import server
+
+    fake_stt = types.ModuleType("tools.transcription_tools")
+    fake_stt.transcribe_audio = lambda path: {
+        "success": True,
+        "transcript": "voice turned into text",
+    }
+    monkeypatch.setitem(sys.modules, "tools.transcription_tools", fake_stt)
+    tools_pkg = sys.modules.get("tools")
+    if tools_pkg is not None:
+        monkeypatch.setattr(tools_pkg, "transcription_tools", fake_stt, raising=False)
+
+    with tempfile.TemporaryDirectory() as state:
+        state_path = Path(state)
+        monkeypatch.setattr(pairings, "STATE_DIR", state_path)
+        monkeypatch.setattr(pairings, "_DB_PATH", state_path / "native_auth.db")
+        monkeypatch.setattr(auth, "is_auth_enabled", lambda: True)
+        monkeypatch.setattr(auth, "verify_session", lambda value: False)
+        monkeypatch.setattr(server, "check_auth", auth.check_auth)
+        httpd = server.QuietHTTPServer(("127.0.0.1", 0), server.Handler)
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        try:
+            port = httpd.server_address[1]
+            token = _mint_native_token(pairings)
+            body, content_type = _multipart_transcribe_body()
+
+            # A valid device Bearer is admitted and the real handler answers.
+            status, payload = _request(
+                port,
+                "POST",
+                "/api/transcribe",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": content_type,
+                },
+                body=body,
+            )
+            assert status == 200, (status, payload)
+            assert payload == {"ok": True, "transcript": "voice turned into text"}
+
+            # No Authorization header: the cookie path is poisoned, so the
+            # route must stay closed (no cookie-free pass).
+            status, payload = _request(
+                port,
+                "POST",
+                "/api/transcribe",
+                headers={"Content-Type": content_type},
+                body=body,
+            )
+            assert status == 401, (status, payload)
+            assert payload == {"error": "Authentication required"}
+
+            # Garbage / non-Bearer credentials fail closed as well.
+            for authorization in ("Bearer hdev_invalidcredential", "Bearer ", "Basic Zm9vOmJhcg=="):
+                status, payload = _request(
+                    port,
+                    "POST",
+                    "/api/transcribe",
+                    headers={"Authorization": authorization, "Content-Type": content_type},
+                    body=body,
+                )
+                assert status == 401, (authorization, status, payload)
+                assert payload == {"error": "Authentication required"}
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+            thread.join(timeout=5)
 
 
 def test_post_tts_with_native_bearer_reaches_real_handler(monkeypatch):

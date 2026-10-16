@@ -83,8 +83,8 @@ MUTATING_TARGETS = (
 
 # The exact-path allowlist, pinned so it can never silently widen beyond the
 # owner-approved set (scope-creep regression guard).  Includes the cron CRUD,
-# memory/skills write and tts/share-create/share-revoke paths deliberately
-# granted to the device token.
+# memory/skills write, tts/share-create/share-revoke and POST /api/transcribe
+# (speech-to-text) paths deliberately granted to the device token.
 PINNED_EXACT_PATHS = {
     '/api/approval/pending',
     '/api/approval/respond',
@@ -110,6 +110,7 @@ PINNED_EXACT_PATHS = {
     '/api/skills/delete',
     '/api/skills/save',
     '/api/skills/toggle',
+    '/api/transcribe',
     '/api/tts',
     '/api/workspaces',
 }

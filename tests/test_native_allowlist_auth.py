@@ -7,7 +7,6 @@ fallback).  Mutating sibling routes outside the allowlist must NOT accept
 the native Bearer credential.  Tokens are never printed.
 """
 import http.client
-import json
 import tempfile
 import threading
 from pathlib import Path
@@ -42,6 +41,7 @@ EXPECTED_EXACT_PATHS = {
     '/api/skills/delete',
     '/api/skills/save',
     '/api/skills/toggle',
+    '/api/transcribe',
     '/api/tts',
     '/api/workspaces',
 }
@@ -56,6 +56,8 @@ NON_ALLOWLISTED_SIBLINGS = (
     '/api/projects/create',
     '/api/crons/',  # trailing slash is not an exact match
     '/api/reasoning/extra',  # suffix is not an exact match
+    '/api/transcribe/',  # trailing slash is not an exact match
+    '/api/transcribe/capability',  # browser-only probe, never device-token
 )
 
 
