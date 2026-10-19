@@ -410,15 +410,17 @@ function _syncMobileSidebarPanelFromMainView(){
 }
 
 function reloadMusicFrame() {
+  if (typeof window.retryEmbeddedFrame === 'function') { window.retryEmbeddedFrame('music'); return; }
   const f = document.getElementById('musicIframe');
-  if (f) {
+  if (f && f.getAttribute('src')) {
     try { f.contentWindow.location.reload(); } catch(e) { f.src = '/music/'; }
   }
 }
 
 function reloadProjectsFrame() {
+  if (typeof window.retryEmbeddedFrame === 'function') { window.retryEmbeddedFrame('dashboard'); return; }
   const f = document.getElementById('projectsIframe');
-  if (f) {
+  if (f && f.getAttribute('src')) {
     try { f.contentWindow.location.reload(); } catch(e) { f.src = '/dashboard/'; }
   }
 }
@@ -513,17 +515,13 @@ async function switchPanel(name, opts = {}) {
     switchSettingsSection(_currentSettingsSection);
     loadSettingsPanel();
   }
-  if (nextPanel === 'projects') {
-    const f = document.getElementById('projectsIframe');
-    if (f && (!f.src || f.src.indexOf('/dashboard') === -1)) {
-      f.src = '/dashboard/';
-    }
+  if (nextPanel === 'projects' && typeof window.ensureEmbeddedFrame === 'function') {
+    // The frame is created on first open, not at boot: a local pack without the
+    // reverse proxy answers /dashboard/ with a JSON 404.
+    window.ensureEmbeddedFrame('dashboard');
   }
-  if (nextPanel === 'music') {
-    const f = document.getElementById('musicIframe');
-    if (f && (!f.src || f.src.indexOf('/music') === -1)) {
-      f.src = '/music/';
-    }
+  if (nextPanel === 'music' && typeof window.ensureEmbeddedFrame === 'function') {
+    window.ensureEmbeddedFrame('music');
   }
   _resyncChatSidebarAfterPanelSwitch();
   if (nextPanel === 'chat' && typeof syncTopbar === 'function') syncTopbar();
@@ -7745,6 +7743,23 @@ function _getHiddenTabs(){
 
 function _setHiddenTabs(panels){
   try{localStorage.setItem(_HIDDEN_TABS_LS_KEY,JSON.stringify(_sanitizeTabPanelList(panels)));}catch(e){}
+}
+
+// A panel whose section is confirmed missing (probe answered 404) is marked
+// here, not written to localStorage: the section may exist on the next server,
+// and a persisted choice would keep the tab hidden after a redeploy.
+var _unavailablePanels=new Set();
+function _markSidebarTabHidden(panel,hide){
+  if(!panel||_ALWAYS_VISIBLE_TABS.has(panel)) return;
+  if(hide) _unavailablePanels.add(panel); else _unavailablePanels.delete(panel);
+  document.querySelectorAll('[data-panel="'+panel+'"]').forEach(function(el){
+    var spec=document.getElementById('panel'+panel.charAt(0).toUpperCase()+panel.slice(1));
+    el.classList.toggle('nav-tab-unavailable',!!hide);
+    if(hide) el.classList.add('nav-tab-hidden');
+    else if(_getHiddenTabs().indexOf(panel)===-1) el.classList.remove('nav-tab-hidden');
+    else el.classList.add('nav-tab-hidden');
+    if(spec) spec.setAttribute('data-unavailable',hide?'1':'0');
+  });
 }
 
 function _getTabOrder(){

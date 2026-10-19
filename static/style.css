@@ -9546,3 +9546,29 @@ button.send-btn:active:not(:disabled),
  .layout.mobile-workspace-split #mainChat{height:calc(45dvh - 56px);max-height:calc(45dvh - 56px);flex:0 0 auto;}
  .layout.mobile-workspace-split #mainChat .messages{min-height:0;}
 }
+
+/* ── Embedded sections (/dashboard/, /music/) ─────────────────────────────────
+   The section is loaded on first open. Until then, and whenever the mount is
+   absent (local pack without the reverse proxy), the host paints a state
+   instead of an empty frame. */
+.embedded-frame-host{position:relative;flex:1;min-height:0;width:100%;height:100%;}
+.embedded-frame-host iframe{position:absolute;inset:0;width:100%;height:100%;}
+.embedded-frame-host iframe[hidden]{display:none;}
+.embedded-frame-state,.embedded-frame-unavailable{
+  position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;gap:12px;padding:32px 24px;text-align:center;color:var(--muted);
+}
+.embedded-frame-state[hidden],.embedded-frame-unavailable[hidden]{display:none;}
+.embedded-frame-spinner{
+  width:22px;height:22px;border-radius:50%;
+  border:2px solid color-mix(in srgb,var(--text) 14%,transparent);
+  border-top-color:var(--accent);animation:spin .9s linear infinite;
+}
+.embedded-frame-unavailable-title{font-size:16px;font-weight:600;color:var(--text);}
+.embedded-frame-unavailable-sub{font-size:13px;line-height:1.55;max-width:420px;}
+.embedded-frame-retry{min-height:36px;padding:0 16px;}
+.nav-tab.nav-tab-unavailable{opacity:.45;}
+.nav-tab.nav-tab-unavailable::after{content:'';position:absolute;top:6px;right:6px;width:6px;height:6px;border-radius:50%;background:var(--warning);}
+@media(prefers-reduced-motion:reduce){
+  .embedded-frame-spinner{animation:none;border-top-color:var(--text);opacity:.5;}
+}
