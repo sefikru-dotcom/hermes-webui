@@ -2905,6 +2905,10 @@ function _effectiveThemeDark(baseIsDark){
   return !!baseIsDark;
 }
 
+// SRI of the vendored Prism theme CSS (static/vendor/prismjs/1.29.0/themes/).
+// <link id="prism-theme"> carries ?v=__WEBUI_VERSION__; compare by pathname, not full href.
+const PRISM_THEME_DARK_SRI='sha384-wFjoQjtV1y5jVHbt0p35Ui8aV8GVpEZkyF99OXWqP/eNJDU93D3Ugxkoyh6Y2I4A';
+const PRISM_THEME_LIGHT_SRI='sha384-rCCjoCPCsizaAAYVoz1Q0CmCTvnctK0JkfCSjx7IIxexTBg+uCKtFYycedUjMyA2';
 function _setResolvedTheme(isDark){
   _resolvedThemeBaseDark=!!isDark;
   const effectiveDark=_effectiveThemeDark(_resolvedThemeBaseDark);
@@ -2912,11 +2916,18 @@ function _setResolvedTheme(isDark){
   const link=document.getElementById('prism-theme');
   if(!link){ _syncThemeColorMeta(); return; }
   const want=effectiveDark
-    ?'https://cdn.jsdelivr.net/npm/prismjs@1.29.0/themes/prism-tomorrow.min.css'
-    :'https://cdn.jsdelivr.net/npm/prismjs@1.29.0/themes/prism.min.css';
-  // No SRI integrity on theme CSS — jsdelivr edge nodes serve different
-  // digests for the same pinned version, causing intermittent blocking (#1100).
-  if(link.href!==want){ link.integrity=''; link.href=want; }
+    ?'static/vendor/prismjs/1.29.0/themes/prism-tomorrow.min.css'
+    :'static/vendor/prismjs/1.29.0/themes/prism.min.css';
+  // Theme CSS is self-hosted, so the digest is stable and SRI stays enforced.
+  const wantIntegrity=effectiveDark?PRISM_THEME_DARK_SRI:PRISM_THEME_LIGHT_SRI;
+  let same=false;
+  try{ same=new URL(link.href,location.href).pathname===new URL(want,location.href).pathname; }catch(_){ same=link.href===want; }
+  if(!same){
+    link.integrity=wantIntegrity;
+    link.href=want+'?v=__WEBUI_VERSION__-mars-chat-final-browser-v1';
+  }else if(!link.integrity){
+    link.integrity=wantIntegrity;
+  }
   _syncThemeColorMeta();
 }
 

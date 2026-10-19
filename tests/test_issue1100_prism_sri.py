@@ -1,74 +1,55 @@
-"""Tests for #1100 — Prism.js SRI integrity check no longer blocks theme CSS."""
+"""Tests for #1100 — Prism.js SRI integrity check no longer blocks theme CSS.
+
+The theme CSS is now self-hosted (`static/vendor/prismjs@1.29.0/`), so the
+edge-node digest drift that motivated #1100 cannot happen: one local file,
+one sha384. SRI is therefore kept for every vendored Prism asset.
+"""
 import re
 
 
-def test_prism_theme_link_has_no_integrity():
-    """The prism-tomorrow.min.css link must not have an integrity attribute."""
-    with open("static/index.html") as f:
+def _prism_theme_tag() -> str:
+    with open("static/index.html", encoding="utf-8") as f:
         src = f.read()
-    # Find the prism-theme link tag
-    m = re.search(
-        r'<link[^>]*id="prism-theme"[^>]*>',
-        src
-    )
+    m = re.search(r'<link[^>]*id="prism-theme"[^>]*>', src)
     assert m, "prism-theme link must exist"
-    link_tag = m.group(0)
-    assert "integrity=" not in link_tag, \
-        "prism-theme link must not have integrity attribute (causes intermittent failures)"
+    return m.group(0)
 
 
-def test_prism_theme_link_has_crossorigin():
-    """The prism-theme link should still have crossorigin for CORS."""
-    with open("static/index.html") as f:
-        src = f.read()
-    m = re.search(
-        r'<link[^>]*id="prism-theme"[^>]*>',
-        src
-    )
-    assert m, "prism-theme link must exist"
-    link_tag = m.group(0)
-    assert "crossorigin" in link_tag, \
-        "prism-theme link should still have crossorigin attribute"
+def test_prism_theme_link_is_vendored_and_has_integrity():
+    """Theme CSS is local, so it must carry a stable SRI hash and no CORS mode."""
+    link_tag = _prism_theme_tag()
+    assert "cdn.jsdelivr.net" not in link_tag
+    assert "static/vendor/prismjs" in link_tag
+    assert re.search(r'integrity="sha384-[A-Za-z0-9+/=]+"', link_tag), \
+        "vendored prism-theme link must carry an SRI hash"
+    assert "crossorigin" not in link_tag, \
+        "a same-origin stylesheet must not be requested in CORS mode"
 
 
 def test_prism_theme_version_pinned():
     """The prism CSS URL must pin the version to prevent breaking changes."""
-    with open("static/index.html") as f:
-        src = f.read()
-    m = re.search(
-        r'<link[^>]*id="prism-theme"[^>]*href="([^"]*)"[^>]*>',
-        src
-    )
-    assert m, "prism-theme link must have href"
-    href = m.group(1)
-    assert "@1.29.0" in href, \
-        f"Prism CSS version must be pinned, found href: {href}"
+    href = re.search(r'href="([^"]*)"', _prism_theme_tag()).group(1)
+    assert "/1.29.0/" in href, f"Prism resources must be pinned to 1.29.0, found href: {href}"
 
 
 def test_prism_js_still_has_integrity():
-    """Prism JS files should keep SRI — they are less affected by CDN edge issues."""
-    with open("static/index.html") as f:
+    """Prism JS files keep SRI — now against the vendored copies."""
+    with open("static/index.html", encoding="utf-8") as f:
         src = f.read()
-    # prism-core.min.js
-    assert re.search(r'prism-core\.min\.js[^>]*integrity=', src), \
-        "prism-core.min.js should still have integrity attribute"
-    # prism-autoloader.min.js
-    assert re.search(r'prism-autoloader\.min\.js[^>]*integrity=', src), \
-        "prism-autoloader.min.js should still have integrity attribute"
+    assert re.search(r'static/vendor/prismjs[^"]*prism-core\.min\.js[^>]*integrity=', src), \
+        "vendored prism-core.min.js should carry an integrity attribute"
+    assert re.search(r'static/vendor/prismjs[^"]*prism-autoloader\.min\.js[^>]*integrity=', src), \
+        "vendored prism-autoloader.min.js should carry an integrity attribute"
 
 
-def test_boot_js_set_resolved_theme_no_integrity():
-    """_setResolvedTheme in boot.js must not re-apply integrity on theme switch."""
-    with open("static/boot.js") as f:
+def test_boot_js_set_resolved_theme_uses_vendored_theme():
+    """_setResolvedTheme must swap the local Prism theme CSS, not a CDN URL."""
+    with open("static/boot.js", encoding="utf-8") as f:
         src = f.read()
-    # _setResolvedTheme function must exist
     assert "_setResolvedTheme" in src, "_setResolvedTheme function must exist"
-    # Must NOT assign link.integrity with a hash value
-    assert not re.search(r'link\.integrity\s*=\s*["\']sha', src), \
-        "_setResolvedTheme must not set link.integrity to an SRI hash"
-    # Must NOT have a wantIntegrity variable
-    assert "wantIntegrity" not in src, \
-        "wantIntegrity variable should be removed from _setResolvedTheme"
-    # Should clear integrity (set to empty) when switching theme
-    assert re.search(r"link\.integrity\s*=\s*['\"]", src), \
-        "_setResolvedTheme should clear link.integrity on theme switch"
+    body = src.split("function _setResolvedTheme", 1)[1][:1500]
+    assert "cdn.jsdelivr.net" not in body, \
+        "_setResolvedTheme must not point at a CDN"
+    assert "static/vendor/prismjs" in body
+    assert re.search(r"link\.integrity\s*=\s*wantIntegrity", body), \
+        "_setResolvedTheme should keep link.integrity in sync with the vendored theme"

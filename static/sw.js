@@ -7,8 +7,8 @@
 
 // Cache version is injected by the server at request time (routes.py /sw.js handler).
 // Bumps automatically whenever the git commit changes — no manual edits needed.
-// MANUAL BUMP: mars-thinkfast-v25 — reasoning stream fast-path (in-place rAF sync, live tail window, incremental echo cache).
-const CACHE_NAME = 'hermes-shell-__WEBUI_VERSION__-mars-chat-final-browser-v1';
+// MANUAL BUMP: mars-chat-final-browser-v2 — self-hosted xterm/Prism in SHELL_ASSETS.
+const CACHE_NAME = 'hermes-shell-__WEBUI_VERSION__-mars-chat-final-browser-v2';
 
 // Static assets that form the app shell.
 //
@@ -21,7 +21,7 @@ const CACHE_NAME = 'hermes-shell-__WEBUI_VERSION__-mars-chat-final-browser-v1';
 // either the authenticated app shell or login code, and stale cached responses
 // can make valid password submits fail until the user clears browser cache.
 // Navigations populate './' only after a successful non-redirect network load.
-const VQ = '?v=__WEBUI_VERSION__-mars-chat-final-browser-v1';
+const VQ = '?v=__WEBUI_VERSION__-mars-chat-final-browser-v2';
 const SHELL_ASSETS = [
   './static/style.css' + VQ,
   './static/pwa-startup.js' + VQ,
@@ -41,6 +41,14 @@ const SHELL_ASSETS = [
   './static/vendor/smd.min.js' + VQ,
   './static/vendor/katex/0.16.22/katex.min.css' + VQ,
   './static/vendor/katex/0.16.22/katex.min.js' + VQ,
+  './static/vendor/xterm/5.3.0/xterm.css' + VQ,
+  './static/vendor/xterm/5.3.0/xterm.js' + VQ,
+  './static/vendor/xterm-addon-fit/0.8.0/xterm-addon-fit.js' + VQ,
+  './static/vendor/xterm-addon-web-links/0.9.0/xterm-addon-web-links.js' + VQ,
+  './static/vendor/prismjs/1.29.0/prism-core.min.js' + VQ,
+  './static/vendor/prismjs/1.29.0/plugins/autoloader/prism-autoloader.min.js' + VQ,
+  './static/vendor/prismjs/1.29.0/themes/prism-tomorrow.min.css' + VQ,
+  './static/vendor/prismjs/1.29.0/themes/prism.min.css' + VQ,
   './static/favicon.svg',
   './static/favicon-32.png',
   './static/favicon-192.png',
