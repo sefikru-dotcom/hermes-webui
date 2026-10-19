@@ -305,7 +305,7 @@ window._marsFallbackActivityCycle=function(btn){
         </div>
       </div>
       <div id="cronGatewayNotice" class="detail-alert cron-gateway-notice" style="display:none"></div>
-      <div class="cron-list" id="cronList"><div style="padding:12px;color:var(--muted);font-size:12px" data-i18n="loading">Loading...</div></div>
+      <div class="cron-list" id="cronList"><div class="panel-skeleton-host" aria-busy="true" data-skeleton-rows="3"></div></div>
     </div>
     <!-- Kanban panel -->
     <div class="panel-view" id="panelKanban">
@@ -391,14 +391,14 @@ window._marsFallbackActivityCycle=function(btn){
         </div>
       </div>
       <div class="skills-search sidebar-search"><svg class="sidebar-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg><input id="skillsSearch" type="search" placeholder="Search skills..." data-i18n-placeholder="search_skills" oninput="filterSkills()" autocomplete="off" data-1p-ignore data-lpignore="true" data-bwignore="true" data-form-type="other"></div>
-      <div class="skills-list" id="skillsList"><div style="padding:12px;color:var(--muted);font-size:12px" data-i18n="loading">Loading...</div></div>
+      <div class="skills-list" id="skillsList"><div class="panel-skeleton-host" aria-busy="true" data-skeleton-rows="4"></div></div>
     </div>
     <!-- Memory panel -->
     <div class="panel-view" id="panelMemory">
       <div class="panel-head">
         <span data-i18n="personal_memory">Personal memory</span>
       </div>
-      <div class="side-menu" id="memoryPanel"><div style="padding:12px;color:var(--muted);font-size:12px" data-i18n="loading">Loading...</div></div>
+      <div class="side-menu" id="memoryPanel"><div class="panel-skeleton-host" aria-busy="true" data-skeleton-rows="4"></div></div>
     </div>
     <!-- Todo panel -->
     <div class="panel-view" id="panelTodos">
@@ -433,7 +433,7 @@ window._marsFallbackActivityCycle=function(btn){
         </div>
       </div>
       <div class="panel-head-sub" data-i18n="workspace_desc">Add and switch workspaces for your sessions.</div>
-      <div style="flex:1;overflow-y:auto;padding:8px" id="workspacesPanel"><div style="color:var(--muted);font-size:12px" data-i18n="loading">Loading...</div></div>
+      <div style="flex:1;overflow-y:auto;padding:8px" id="workspacesPanel"><div class="panel-skeleton-host" aria-busy="true" data-skeleton-rows="3"></div></div>
     </div>
     <!-- Profiles panel -->
     <div class="panel-view" id="panelProfiles">
@@ -443,7 +443,7 @@ window._marsFallbackActivityCycle=function(btn){
           <button class="panel-head-btn has-tooltip has-tooltip--bottom" onclick="openProfileCreate()" data-tooltip="New profile" data-i18n-title="new_profile" aria-label="New profile"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
         </div>
       </div>
-      <div style="flex:1;overflow-y:auto;padding:8px" id="profilesPanel"><div style="color:var(--muted);font-size:12px" data-i18n="loading">Loading...</div></div>
+      <div style="flex:1;overflow-y:auto;padding:8px" id="profilesPanel"><div class="panel-skeleton-host" aria-busy="true" data-skeleton-rows="3"></div></div>
     </div>
     <!-- Logs panel -->
     <div class="panel-view" id="panelLogs">

@@ -1915,6 +1915,22 @@ function _syncNavActionMirrors(){
     if(label)mirror.setAttribute('data-label',label);
   });
 }
+// Panel-list skeletons: the markup ships empty `.panel-skeleton-host[data-skeleton-rows]`
+// placeholders; fill them so side panels paint a content-shaped shimmer instead
+// of a bare "Loading..." line (see static/skeleton.js).
+function _hydratePanelSkeletons(root){
+  const scope=root||document;
+  scope.querySelectorAll('.panel-skeleton-host[aria-busy="true"]').forEach(host=>{
+    if(host.getAttribute('data-skeleton-ready')==='1') return;
+    const rows=Number(host.getAttribute('data-skeleton-rows'))||4;
+    host.textContent='';
+    if(typeof window.panelListSkeleton==='function') host.innerHTML=window.panelListSkeleton(rows);
+    host.setAttribute('data-skeleton-ready','1');
+  });
+}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>_hydratePanelSkeletons(),{once:true});
+else _hydratePanelSkeletons();
+
 function _initNavActionMirrors(){
   _syncNavActionMirrors();
   const rail=document.querySelector('.rail');
@@ -1966,7 +1982,10 @@ async function refreshDashboardStatus(force=false){
   try{
     const status=await api('/api/dashboard/status',{timeoutToast:false});
     _dashboardStatusCache=status||{running:false};
-  }catch(_){
+  }catch(e){
+    // Recoverable (the link hides, the next tick retries) but worth a breadcrumb:
+    // a permanently failing probe is otherwise invisible in the console.
+    console.warn('[dashboard] status probe failed:', e && (e.message||e));
     _dashboardStatusCache={running:false};
   }
   _dashboardStatusFetchedAt=Date.now();
@@ -1987,7 +2006,7 @@ async function loadDashboardSettings(){
     _setDashboardModeForChip(mode);
     if(urlEl) urlEl.value=cfg.url||'';
     if(typeof _renderTabVisibilityChips==='function') _renderTabVisibilityChips();
-  }catch(_){/* leave defaults visible */}
+  }catch(e){console.warn('[dashboard] settings load failed:', e && (e.message||e));}
 }
 async function saveDashboardSettings(opts){
   opts=opts||{};
@@ -9356,7 +9375,11 @@ function copyToastText(btn){
 function showToast(msg,ms,type){
   const el=$('toast');if(!el)return;
   const s=String(msg==null?'':msg);let t=type;
-  if(!t){const low=s.toLowerCase();if(/fail|error|denied|invalid|unavailable|no active|no workspace match|no model match|no personalities/.test(low))t='error';else if(/warn|queued|takes effect|skipped|fallback/.test(low))t='warning';else if(/saved|created|imported|restored|switched|set to|updated|duplicated|moved to|renamed|deleted|complete|pinned|archived|cleared|stopped/.test(low))t='success';else t='info';}
+  // Prefer the caller's explicit severity: showToast(msg, ms, 'error'|'warning'|
+  // 'success'|'info'). The English-keyword heuristic below only serves legacy
+  // call sites and is wrong for every non-English locale, so new call sites
+  // should always pass the severity.
+  if(t!=='error'&&t!=='warning'&&t!=='success'&&t!=='info'){const low=s.toLowerCase();if(/fail|error|denied|invalid|unavailable|no active|no workspace match|no model match|no personalities/.test(low))t='error';else if(/warn|queued|takes effect|skipped|fallback/.test(low))t='warning';else if(/saved|created|imported|restored|switched|set to|updated|duplicated|moved to|renamed|deleted|complete|pinned|archived|cleared|stopped/.test(low))t='success';else t='info';}
   const duration=(ms==null)?(t==='error'?TOAST_ERROR_DEFAULT_MS:TOAST_DEFAULT_MS):ms;
   el.className='toast show '+t;
   el.dataset.toastMessage=s;
@@ -9577,7 +9600,7 @@ function copyStatusSessionId(btn){
     btn.innerHTML=(typeof li==='function')?li('check',13):t('copied');
     btn.classList.add('copied');
     setTimeout(()=>{btn.innerHTML=orig;btn.classList.remove('copied');},1500);
-  }).catch(()=>showToast(t('copy_failed')));
+  }).catch(()=>showToast(t('copy_failed'),null,'error'));
 }
 function copyMsg(btn){
   const row=btn.closest('[data-raw-text]');
@@ -9586,7 +9609,7 @@ function copyMsg(btn){
   _copyText(text).then(()=>{
     const orig=btn.innerHTML;btn.innerHTML=li('check',13);btn.style.color='var(--blue)';
     setTimeout(()=>{btn.innerHTML=orig;btn.style.color='';},1500);
-  }).catch(()=>showToast(t('copy_failed')));
+  }).catch(()=>showToast(t('copy_failed'),null,'error'));
 }
 function _copyThinkingText(btn){
   const card=btn&&btn.closest?btn.closest('.thinking-card'):null;
@@ -9599,7 +9622,7 @@ function _copyThinkingText(btn){
     btn.innerHTML=li('check',12);
     btn.style.color='var(--accent)';
     setTimeout(()=>{btn.innerHTML=orig;btn.style.color='';},1500);
-  }).catch(()=>showToast(t('copy_failed')));
+  }).catch(()=>showToast(t('copy_failed'),null,'error'));
 }
 
 // ── TTS: Text-to-Speech via Web Speech API (#499) ──

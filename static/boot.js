@@ -547,6 +547,18 @@ function _syncSidebarAria(){
     .forEach(function(btn){ btn.setAttribute('aria-expanded','false'); });
   const active=document.querySelector('.rail .rail-btn.nav-tab.active[data-panel]');
   if(active)active.setAttribute('aria-expanded',!_isSidebarCollapsed());
+  // Tab semantics: exactly one rail/sidebar tab reports aria-selected=true and
+  // only the visible panel-view stays exposed to assistive tech. `inert` keeps
+  // hidden panels out of the tab order without relying on disabled controls.
+  document.querySelectorAll('[role="tab"][data-panel]').forEach(function(tab){
+    tab.setAttribute('aria-selected', tab.classList.contains('active') ? 'true' : 'false');
+  });
+  document.querySelectorAll('.panel-view').forEach(function(view){
+    var visible=view.classList.contains('active');
+    view.setAttribute('aria-hidden', visible ? 'false' : 'true');
+    if(visible) view.removeAttribute('inert');
+    else view.setAttribute('inert','');
+  });
 }
 
 function toggleSidebar(forceState){

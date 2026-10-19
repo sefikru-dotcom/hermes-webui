@@ -81,3 +81,11 @@ def test_embedded_frame_styles_exist():
         ".nav-tab.nav-tab-unavailable",
     ):
         assert selector in STYLE_CSS, f"missing style for {selector}"
+
+
+def test_probe_uses_origin_safe_comparison():
+    # `location.origin` is undefined in some embedded webviews; compare the
+    # resolved protocol/host against the document base instead.
+    assert "function _isSameOrigin(url)" in FRAMES_JS
+    assert "url.protocol === base.protocol && url.host === base.host" in FRAMES_JS
+    assert not re.search(r"location\.origin", FRAMES_JS)

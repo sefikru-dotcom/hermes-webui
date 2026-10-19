@@ -1805,6 +1805,8 @@ main.main.showing-plugin > #mainPlugin {
      into loaded content is seamless. Uses theme tokens so it adapts to
      light/dark/skins automatically. (#4662 Phase 1) */
   .skeleton-list{padding:2px 0;}
+  .panel-skeleton-host{padding:8px;}
+  .panel-skeleton-host:empty{display:none;}
   .skeleton-group-label{height:9px;width:58px;margin:10px 10px 6px;border-radius:var(--radius-pill);
     background:var(--skeleton-base,color-mix(in srgb,var(--text) 8%,transparent));opacity:.5;}
   .skeleton-group-label:first-child{margin-top:6px;}
@@ -2196,6 +2198,9 @@ main.main.showing-plugin > #mainPlugin {
      unobstructed; rail buttons carry no `data-label`, so an unscoped rule
      would render an empty styled box on hover. */
   .sidebar-nav .nav-tab:hover::after{content:attr(data-label);position:absolute;bottom:calc(100% + 8px);left:50%;transform:translateX(-50%);background:var(--surface);border:1px solid var(--accent-bg-strong);color:var(--accent-text);font-size:12px;font-weight:700;letter-spacing:.02em;padding:6px 12px;border-radius:8px;white-space:nowrap;pointer-events:none;z-index:50;box-shadow:0 4px 12px rgba(0,0,0,.3);}
+  /* Keyboard focus: rail/sidebar tabs are the primary navigation, so they need a
+     visible focus ring for tab-order users (pointer users are unaffected). */
+  .rail-btn:focus-visible,.nav-tab:focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px;border-radius:8px;}
   .nav-tab.active{color:var(--accent-text);}
   .nav-tab.active::before{content:'';position:absolute;bottom:0;left:50%;transform:translateX(-50%);width:20px;height:2px;background:var(--accent);border-radius:2px 2px 0 0;}
   /* Panel content areas (swapped by tab) */

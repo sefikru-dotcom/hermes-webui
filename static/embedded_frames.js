@@ -16,6 +16,8 @@
   };
   // A probe slower than this is reported as a timeout instead of spinning.
   var PROBE_TIMEOUT_MS = 8000;
+  // Verdicts are never cached: a section can be mounted later (redeploy, proxy
+  // restart), and each panel open is cheap enough to re-probe.
   var _probes = {};
 
   // `$` is defined by ui.js, which parses after this file; resolve lazily.
@@ -33,7 +35,8 @@
     var spec = FRAMES[kind];
     if(_probes[kind]) return _probes[kind];
     var url = _resolveUrl(spec.site);
-    if(!url || url.origin !== location.origin) return Promise.resolve('ok');
+    // Unresolvable or remote target: cannot inspect it, load optimistically.
+    if(!url || !_isSameOrigin(url)) return Promise.resolve('ok');
     var controller = typeof AbortController === 'function' ? new AbortController() : null;
     var timer = null;
     var fetchPromise = fetch(url.href, {
@@ -65,6 +68,14 @@
     }
     _probes[kind] = fetchPromise;
     return fetchPromise;
+  }
+
+  function _isSameOrigin(url){
+    var base = _resolveUrl('.');
+    if(!base) return false;
+    // Compare scheme+host directly: some embedded webviews do not expose the
+    // derived `location` origin property at all.
+    return url.protocol === base.protocol && url.host === base.host;
   }
 
   function _showState(kind, mode){
@@ -137,9 +148,9 @@
       if(result === 'ok'){
         if(opts.force || iframe.dataset.embeddedLoaded !== '1'){
           // Cache-bust so "Повторить" re-requests a section that just came up.
-          iframe.src = opts.force
+          iframe.setAttribute('src', opts.force
             ? spec.site + (spec.site.indexOf('?') === -1 ? '?' : '&') + 'retry=' + Date.now()
-            : spec.site;
+            : spec.site);
         }
         iframe.dataset.embeddedLoaded = '1';
         _showState(kind, 'ready');

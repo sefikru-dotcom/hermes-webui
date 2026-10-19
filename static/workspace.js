@@ -5,9 +5,15 @@ async function api(path,opts={}){
   const timeoutMs=Object.prototype.hasOwnProperty.call(opts,'timeoutMs')?opts.timeoutMs:30000;
   const timeoutToast=opts.timeoutToast!==false;
   const redirect401=opts.redirect401!==false;
-  const maxAttempts=Object.prototype.hasOwnProperty.call(opts,'retries')?Math.max(0,Number(opts.retries)||0)+1:3;
-  const retryTimeouts=opts.retryTimeouts===true;
-  const retryStatuses=Array.isArray(opts.retryStatuses)?opts.retryStatuses.map(Number).filter(Number.isFinite):[];
+  // Retries are only safe for idempotent requests: a POST/PUT/PATCH that timed
+  // out mid-flight may already have been applied server-side, so replaying it
+  // duplicates work (double-sent messages, double-created tasks). Callers must
+  // opt in with `retryUnsafe:true` when the endpoint is replay-safe.
+  const _method=String(opts.method||'GET').toUpperCase();
+  const _retryAllowed=_method==='GET'||_method==='HEAD'||opts.retryUnsafe===true;
+  const maxAttempts=!_retryAllowed?1:(Object.prototype.hasOwnProperty.call(opts,'retries')?Math.max(0,Number(opts.retries)||0)+1:3);
+  const retryTimeouts=_retryAllowed&&opts.retryTimeouts===true;
+  const retryStatuses=_retryAllowed&&Array.isArray(opts.retryStatuses)?opts.retryStatuses.map(Number).filter(Number.isFinite):[];
   const retryDelayMs=Object.prototype.hasOwnProperty.call(opts,'retryDelayMs')?Math.max(0,Number(opts.retryDelayMs)||0):350;
   // Retry up to 2 times on network errors (e.g. stale keep-alive after long idle).
   // Callers may opt into retrying timeouts / transient server statuses for idempotent GETs.
@@ -27,6 +33,7 @@ async function api(path,opts={}){
       delete fetchOpts.retryTimeouts;
       delete fetchOpts.retryStatuses;
       delete fetchOpts.retryDelayMs;
+      delete fetchOpts.retryUnsafe;
 
       const useTimeout=Number.isFinite(Number(timeoutMs))&&Number(timeoutMs)>0;
       if(useTimeout&&typeof AbortController!=='undefined'){

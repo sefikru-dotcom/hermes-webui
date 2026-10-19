@@ -855,7 +855,7 @@ async function toggleSavedPromptsPopup(){
     if(mobileBtn)mobileBtn.setAttribute('aria-expanded','false');
     return;
   }
-  popup.innerHTML='<div class="saved-prompts-loading">Loading…</div>';
+  popup.innerHTML=typeof panelListSkeleton==='function' ? panelListSkeleton(3) : '<div class="saved-prompts-loading">'+esc(t('loading'))+'</div>';
   popup.style.display='flex';
   popup.classList.add('saved-prompts-open');
   if(btn)btn.setAttribute('aria-expanded','true');
@@ -9557,7 +9557,7 @@ function attachBtwStream(parentSid, streamId, question){
     try{
       const d=JSON.parse(e.data);
       showToast(t('btw_failed')+(d.message||''));
-    }catch(_){showToast(t('btw_failed'));}
+    }catch(_){showToast(t('btw_failed'),null,'error');}
     if(btwRow&&btwRow.isConnected) btwRow.remove();
   });
   src.addEventListener('stream_end',()=>{_streamDone=true;src.close();});

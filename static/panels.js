@@ -406,6 +406,7 @@ function _syncMobileSidebarPanelFromMainView(){
   document.querySelectorAll('[data-panel]').forEach(t=>t.classList.toggle('active',t.dataset.panel===panel));
   document.querySelectorAll('.panel-view').forEach(p=>p.classList.remove('active'));
   panelEl.classList.add('active');
+  if(typeof _syncSidebarAria==='function') _syncSidebarAria();
   return panel;
 }
 
@@ -477,12 +478,13 @@ async function switchPanel(name, opts = {}) {
   }
   // Update nav tabs (rail + mobile sidebar-nav share data-panel)
   document.querySelectorAll('[data-panel]').forEach(t => t.classList.toggle('active', t.dataset.panel === nextPanel));
-  // Refresh aria-expanded on the newly-active rail button to mirror sidebar state.
-  if (typeof _syncSidebarAria === 'function') _syncSidebarAria();
   // Update panel views
   document.querySelectorAll('.panel-view').forEach(p => p.classList.remove('active'));
   const panelEl = $('panel' + nextPanel.charAt(0).toUpperCase() + nextPanel.slice(1));
   if (panelEl) panelEl.classList.add('active');
+  // Refresh aria-expanded/aria-selected and the visible-panel aria-hidden state
+  // only after the DOM reflects the new active panel.
+  if (typeof _syncSidebarAria === 'function') _syncSidebarAria();
   // Update main content view. Each entry in MAIN_VIEW_PANELS gets a matching
   // showing-<name> class on <main>; no class means chat (the default).
   const mainEl = document.querySelector('main.main');
@@ -1671,7 +1673,7 @@ async function copyCurrentCronDiagnostics(){
   try {
     await _copyText(_cronDiagnostics(_currentCronDetail));
     showToast(t('cron_diagnostics_copied'));
-  } catch(e) { showToast(t('copy_failed'), 4000); }
+  } catch(e) { showToast(t('copy_failed'), 4000, 'error'); }
 }
 function editCurrentCron(){
   if (!_currentCronDetail) return;
@@ -1726,7 +1728,7 @@ async function deleteCurrentCron(){
     showToast(t('cron_job_deleted'));
     _clearCronDetail();
     await loadCrons();
-  } catch(e) { showToast(t('delete_failed') + e.message, 4000); }
+  } catch(e) { showToast(t('delete_failed') + e.message, 4000, 'error'); }
 }
 
 let _cronSelectedSkills=[];
@@ -2263,7 +2265,7 @@ async function cronRun(id) {
     await api('/api/crons/run', {method:'POST', body: JSON.stringify({job_id: id})});
     showToast(t('cron_job_triggered'));
     _startCronWatch(id, _currentCronDetailKey);
-  } catch(e) { showToast(t('failed_colon') + e.message, 4000); }
+  } catch(e) { showToast(t('failed_colon') + e.message, 4000, 'error'); }
 }
 
 async function cronPause(id) {
@@ -2271,7 +2273,7 @@ async function cronPause(id) {
     await api('/api/crons/pause', {method:'POST', body: JSON.stringify({job_id: id})});
     showToast(t('cron_job_paused'));
     await loadCrons();
-  } catch(e) { showToast(t('failed_colon') + e.message, 4000); }
+  } catch(e) { showToast(t('failed_colon') + e.message, 4000, 'error'); }
 }
 
 async function cronResume(id) {
@@ -2279,7 +2281,7 @@ async function cronResume(id) {
     await api('/api/crons/resume', {method:'POST', body: JSON.stringify({job_id: id})});
     showToast(t('cron_job_resumed'));
     await loadCrons();
-  } catch(e) { showToast(t('failed_colon') + e.message, 4000); }
+  } catch(e) { showToast(t('failed_colon') + e.message, 4000, 'error'); }
 }
 
 let _editingCronId = null;
@@ -4575,7 +4577,7 @@ async function copyLogsAll() {
     await _copyText(text);
     showToast(t('logs_copied'));
   } catch(e) {
-    showToast(t('copy_failed'), 'error');
+    showToast(t('copy_failed'), null, 'error');
   }
 }
 
@@ -4763,7 +4765,7 @@ async function _openWikiBrowser() {
   }
 
   window._wikiBrowserOpenPage = async function(path) {
-    contentEl.innerHTML = '<div style="padding:12px;color:var(--muted);font-size:13px;">Loading...</div>';
+    contentEl.innerHTML = typeof panelListSkeleton==='function' ? panelListSkeleton(4) : '<div style="padding:12px;color:var(--muted);font-size:13px;">'+esc(t('loading'))+'</div>';
     contentEl.style.display = 'block';
     listEl.style.display = 'none';
     try {
@@ -5075,7 +5077,14 @@ function renderSkills(skills) {
   }
   const box = $('skillsList');
   box.innerHTML = '';
-  if (!filtered.length) { box.innerHTML = `<div style="padding:12px;color:var(--muted);font-size:12px">${esc(t('skills_no_match'))}</div>`; return; }
+  if (!filtered.length) {
+    // Distinguish "nothing installed" from "search matched nothing": the former
+    // needs an action, the latter only a hint.
+    box.innerHTML = skills.length
+      ? `<div class="main-view-empty" style="padding:14px 10px"><div class="main-view-empty-title" style="font-size:13px">${esc(t('skills_no_match'))}</div></div>`
+      : `<div class="main-view-empty" style="padding:14px 10px"><div class="main-view-empty-title" style="font-size:13px">${esc(t('skills_none_title'))}</div><div class="main-view-empty-sub">${esc(t('skills_none_sub'))}</div><button class="btn primary" style="margin-top:10px" onclick="openSkillCreate()">${esc(t('new_skill'))}</button></div>`;
+    return;
+  }
   for (const [cat, items] of Object.entries(cats).sort()) {
     const collapsed = _collapsedCats.has(cat);
     const sec = document.createElement('div');
@@ -6161,14 +6170,32 @@ window.addEventListener('resize',()=>{
 async function loadWorkspacesPanel(){
   const panel=$('workspacesPanel');
   if(!panel)return;
-  const data=await loadWorkspaceList();
-  renderWorkspacesPanel(data.workspaces);
+  if(typeof panelListSkeleton==='function') panel.innerHTML=panelListSkeleton(3);
+  try{
+    const data=await loadWorkspaceList();
+    renderWorkspacesPanel(data.workspaces||[]);
+  }catch(e){
+    // Without this the panel keeps its skeleton forever and the failure has no
+    // trace anywhere: the toast is transient, the console line is reportable.
+    console.warn('[workspaces] panel load failed:', e);
+    panel.innerHTML=`<div class="main-view-empty" style="padding:14px 10px"><div class="main-view-empty-title" style="font-size:13px">${esc(t('failed_colon'))}</div><div class="main-view-empty-sub">${esc(e&&e.message||String(e))}</div></div>`;
+  }
 }
 
 function renderWorkspacesPanel(workspaces){
   const panel=$('workspacesPanel');
   panel.innerHTML='';
   const activePath = S.session ? S.session.workspace : '';
+  if(!workspaces.length){
+    // Same shape as the kanban empty state: name the panel's purpose and offer
+    // the one action that fills it instead of leaving a blank column.
+    panel.innerHTML=`<div class="main-view-empty" style="padding:18px 12px">
+      <div class="main-view-empty-title">${esc(t('workspaces_none_title'))}</div>
+      <div class="main-view-empty-sub">${esc(t('workspaces_none_sub'))}</div>
+      <button class="btn primary" style="margin-top:12px" onclick="openWorkspaceCreate()">${esc(t('workspace_add'))}</button>
+    </div>`;
+    return;
+  }
   for(let i=0;i<workspaces.length;i++){
     const w=workspaces[i];
     const row=document.createElement('div');
@@ -6235,7 +6262,7 @@ function renderWorkspacesPanel(workspaces){
           loadWorkspaceList().then(() => {});
         }
       } catch(err){
-        showToast(t('workspace_reorder_failed'), 'error');
+        showToast(t('workspace_reorder_failed'), null, 'error');
       }
     });
 
@@ -6458,10 +6485,13 @@ async function saveWorkspaceForm(){
       _workspaceList = refreshed.workspaces || _workspaceList;
     }
     renderWorkspacesPanel(_workspaceList);
-    showToast(t('workspace_added'));
+    showToast(t('workspace_added'),null,'success');
     const added = _workspaceList.find(w => w.path === path) || _workspaceList[_workspaceList.length - 1];
     if (added) openWorkspaceDetail(added.path);
   } catch (e) {
+    // The inline error keeps the form open; the console line is what survives
+    // in a field report after the toast/inline text is gone.
+    console.warn('[workspaces] save failed:', e);
     errEl.textContent = t('error_prefix') + e.message;
     errEl.style.display = '';
   }
@@ -6746,7 +6776,7 @@ if(typeof window!=='undefined'){
 function _renderProfileDropdownLoading(){
   const dd=$('profileDropdown');
   if(!dd)return;
-  dd.innerHTML=`<div class="profile-opt profile-opt-loading"><div class="profile-opt-name">${esc(t('loading')||'Loading...')}</div></div>`;
+  dd.innerHTML=typeof panelListSkeleton==='function' ? panelListSkeleton(3) : `<div class="profile-opt profile-opt-loading"><div class="profile-opt-name">${esc(t('loading'))}</div></div>`;
 }
 
 function _openProfileDropdownShell(){
@@ -6816,6 +6846,7 @@ function _refreshProfileSwitchBackground(gen){
 async function loadProfilesPanel() {
   const panel = $('profilesPanel');
   if (!panel) return;
+  if (typeof panelListSkeleton === 'function' && !_profilesCache) panel.innerHTML = panelListSkeleton(3);
   try {
     const data = await api('/api/profiles');
     _profilesCache = data;
@@ -7618,6 +7649,7 @@ async function deleteProfile(name) {
 // ── Memory panel ──
 async function loadMemory(force) {
   const panel = $('memoryPanel');
+  if (panel && !_memoryData && typeof panelListSkeleton === 'function') panel.innerHTML = panelListSkeleton(4);
   try {
     const memoryUrl = S.session && S.session.session_id
       ? `/api/memory?session_id=${encodeURIComponent(S.session.session_id)}`
@@ -11137,7 +11169,7 @@ async function handlePluginEnableToggle(pluginKey, checked){
     await _enqueueSettingsPost({method:'POST',body:JSON.stringify(body)});
     loadPluginsPanel();
   }catch(e){
-    showToast(t('settings_save_failed')+e.message);
+    showToast(t('settings_save_failed')+e.message,'error');
   }
 }
 
@@ -12444,14 +12476,14 @@ async function registerPasskey(){
     showToast('Passkey registered');
     loadPasskeys();
     try{_syncPasswordlessButton(await api('/api/auth/status'));}catch(_e){}
-  }catch(e){showToast('Passkey registration failed: '+e.message);}
+  }catch(e){showToast('Passkey registration failed: '+e.message,null,'error');}
 }
 
 async function deletePasskey(id){
   const ok=await showConfirmDialog({title:'Remove passkey?',message:'This browser/device will no longer be able to sign in with that passkey.',confirmLabel:'Remove',danger:true,focusCancel:true});
   if(!ok) return;
   try{await api('/api/auth/passkey/delete',{method:'POST',body:JSON.stringify({id})});showToast('Passkey removed');loadPasskeys();try{_syncPasswordlessButton(await api('/api/auth/status'));}catch(_e){}}
-  catch(e){showToast('Failed to remove passkey: '+e.message);}
+  catch(e){showToast('Failed to remove passkey: '+e.message,null,'error');}
 }
 
 function _applySavedSettingsUi(saved, body, opts){
@@ -12930,7 +12962,7 @@ function _auxProvidersFromModelGroups(groups){
 async function _loadAuxiliaryModels(){
  const container=$('auxModelsContainer');
  if(!container) return;
- container.innerHTML='<div style="color:var(--muted);font-size:12px">'+(t('settings_aux_loading')||'Loading…')+'</div>';
+ container.innerHTML=typeof panelListSkeleton==='function' ? panelListSkeleton(3) : '<div style="color:var(--muted);font-size:12px">'+esc(t('settings_aux_loading'))+'</div>';
 
  try{
   // Fetch auxiliary config AND the WebUI's own /api/models for provider/model lists
@@ -13191,7 +13223,7 @@ async function saveSettings(andClose){
       if(!andClose) _pendingSettingsTargetPanel = null;
       if(andClose) _hideSettingsPanel();
       return;
-    }catch(e){showToast(t('settings_save_failed')+e.message);return;}
+    }catch(e){showToast(t('settings_save_failed')+e.message,'error');return;}
   }
   try{
     const saved=await _enqueueSettingsPost({method:'POST',body:JSON.stringify(body)});
@@ -13217,7 +13249,7 @@ async function saveSettings(andClose){
     if(!andClose) _pendingSettingsTargetPanel = null;
     if(andClose) _hideSettingsPanel();
   }catch(e){
-    showToast(t('settings_save_failed')+e.message);
+    showToast(t('settings_save_failed')+e.message,'error');
   }
 }
 
@@ -13250,7 +13282,7 @@ async function goPasswordless(){
       _renderSettingsAuthStatus(authStatus);
       _updateAuthWarningBadge(authStatus);
     }catch(e){}
-  }catch(e){showToast('Failed to go passwordless: '+e.message);}
+  }catch(e){showToast('Failed to go passwordless: '+e.message,null,'error');}
 }
 
 async function disableAuth(){
@@ -13447,9 +13479,9 @@ function toggleMcpServer(name, enabled){
       _refreshMcpToolsetsCatalog();
       showToast(t(enabled?'mcp_enabled_toast':'mcp_disabled_toast',name));
     }
-    else showToast(t('mcp_toggle_failed'),'error');
+    else showToast(t('mcp_toggle_failed'),null,'error');
     loadMcpServers();
-  }).catch(()=>{showToast(t('mcp_toggle_failed'),'error');loadMcpServers();});
+  }).catch(()=>{showToast(t('mcp_toggle_failed'),null,'error');loadMcpServers();});
 }
 function _refreshMcpToolsetsCatalog(payload){
   if(typeof window.invalidateToolsetsCatalog==='function') window.invalidateToolsetsCatalog(payload);

@@ -786,7 +786,7 @@ async function cmdWorkspace(args){
     if(!ws){showToast(t('no_workspace_match')+`"${args}"`);return;}
     if(typeof switchToWorkspace==='function') await switchToWorkspace(ws.path, ws.name||ws.path);
     else showToast(t('switched_workspace')+(ws.name||ws.path));
-  }catch(e){showToast(t('workspace_switch_failed')+e.message);}
+  }catch(e){showToast(t('workspace_switch_failed')+e.message,'error');}
 }
 
 async function cmdTerminal(){
@@ -1198,7 +1198,7 @@ async function cmdPersonality(args){
       const list=data.personalities.map(p=>`  **${p.name}**${p.description?' — '+p.description:''}`).join('\n');
       S.messages.push({role:'assistant',content:t('available_personalities')+'\n\n'+list+t('personality_switch_hint')});
       renderMessages();
-    }catch(e){showToast(t('personalities_load_failed'));}
+    }catch(e){showToast(t('personalities_load_failed'),null,'error');}
     return;
   }
   const name=args.trim();
@@ -1206,7 +1206,7 @@ async function cmdPersonality(args){
     try{
       await api('/api/personality/set',{method:'POST',body:JSON.stringify({session_id:S.session.session_id,name:''})});
       showToast(t('personality_cleared'));
-    }catch(e){showToast(t('failed_colon')+e.message);}
+    }catch(e){showToast(t('failed_colon')+e.message,'error');}
     return;
   }
   try{
@@ -1214,7 +1214,7 @@ async function cmdPersonality(args){
     S.messages.push({role:'assistant',content:t('personality_set')+`**${name}**`});
     renderMessages();
     showToast(t('personality_set')+name);
-  }catch(e){showToast(t('failed_colon')+e.message);}
+  }catch(e){showToast(t('failed_colon')+e.message,'error');}
 }
 
 async function cmdStop(){
@@ -1728,7 +1728,7 @@ async function cmdTitle(args){
     showToast(`${t('title_set')} "${S.session.title}"`);
     S.messages.push({role:'assistant',content:`${t('title_set')} **${S.session.title}**`});
     renderMessages();
-  }catch(e){showToast(t('failed_colon')+e.message);}
+  }catch(e){showToast(t('failed_colon')+e.message,'error');}
 }
 async function cmdRetry(){
   if(!S.session){showToast(t('no_active_session'));return;}
@@ -1760,7 +1760,7 @@ async function cmdRetry(){
     // _reArmRecoveryPick. Scoped to activeSid so it can't leak to another session.
     _reArmRecoveryPick(activeSid, _recoveryPick);
     await send();
-  }catch(e){showToast(t('retry_failed')+e.message);}
+  }catch(e){showToast(t('retry_failed')+e.message,'error');}
 }
 async function cmdUndo(){
   if(!S.session){showToast(t('no_active_session'));return;}
@@ -1773,7 +1773,7 @@ async function cmdUndo(){
     const data=await api('/api/session?session_id='+encodeURIComponent(activeSid));
     if(data&&data.session){S.messages=data.session.messages||[];S.toolCalls=[];if(typeof clearLiveToolCards==='function')clearLiveToolCards();if(typeof _messagesTruncated!=='undefined')_messagesTruncated=false;renderMessages();}
     showToast(`↩ ${t('undid_n_messages')} ${r.removed_count} ${t('undid_messages_suffix')}`);
-  }catch(e){showToast(t('undo_failed')+e.message);}
+  }catch(e){showToast(t('undo_failed')+e.message,'error');}
 }
 async function undoLastExchange(){await cmdUndo();}
 async function cmdBtw(args){
@@ -1789,7 +1789,7 @@ async function cmdBtw(args){
     const streamId=r.stream_id;
     const parentSid=r.parent_session_id;
     if(typeof attachBtwStream==='function') attachBtwStream(parentSid,streamId,question);
-  }catch(e){showToast(t('btw_failed')+e.message);}
+  }catch(e){showToast(t('btw_failed')+e.message,'error');}
 }
 async function cmdBackground(args){
   if(!S.session){showToast(t('no_active_session'));return;}
@@ -1803,7 +1803,7 @@ async function cmdBackground(args){
     // Show background badge and start polling
     if(typeof showBackgroundBadge==='function') showBackgroundBadge(r.task_id);
     if(typeof startBackgroundPolling==='function') startBackgroundPolling(activeSid,r.task_id,prompt);
-  }catch(e){showToast(t('bg_failed')+e.message);}
+  }catch(e){showToast(t('bg_failed')+e.message,'error');}
 }
 function _formatStatusTimestamp(value){
   if(value===undefined||value===null||value==='') return t('status_unknown');
@@ -1884,7 +1884,7 @@ function cmdReasoning(args){
     // Status — read from the same config.yaml keys the CLI uses.
     const q=(typeof _reasoningEffortQuery==='function')?_reasoningEffortQuery():'';
     api('/api/reasoning'+q).then(function(st){showToast(_fmtStatus(st));})
-      .catch(function(){showToast(BRAIN+' /reasoning — status unavailable');});
+      .catch(function(){showToast(BRAIN+' /reasoning — status unavailable',null,'error');});
     return true;
   }
   if(arg==='show'||arg==='on'||arg==='hide'||arg==='off'){
@@ -2014,7 +2014,7 @@ async function cmdBranch(args){
       if(typeof renderSessionList==='function') await renderSessionList();
       showToast(t('branch_forked'));
     }
-  }catch(e){showToast(t('branch_failed')+e.message);}
+  }catch(e){showToast(t('branch_failed')+e.message,'error');}
 }
 
 // ── Fork from a specific message point ──
@@ -2073,7 +2073,7 @@ async function forkFromMessage(msgIdx){
       if(typeof renderSessionList==='function') await renderSessionList();
       showToast(t('branch_forked'));
     }
-  }catch(e){showToast(t('branch_failed')+e.message);}
+  }catch(e){showToast(t('branch_failed')+e.message,'error');}
 }
 
 let _skillCommandCache=[];

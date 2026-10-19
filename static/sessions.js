@@ -4353,7 +4353,7 @@ function _renderBatchActionBar(){
       }));
       const retainedCount=_worktreeResponseCount(results);
       showToast(retainedCount?t('session_archived_worktree'):t('session_archived'));exitSessionSelectMode();await renderSessionList();
-    }catch(e){showToast('Archive failed: '+(e.message||e));}
+    }catch(e){showToast('Archive failed: '+(e.message||e),null,'error');}
   };bar.appendChild(archiveBtn);
   // Move
   const moveBtn=document.createElement('button');moveBtn.className='batch-action-btn';
@@ -4390,7 +4390,7 @@ function _renderBatchActionBar(){
       if(cleanupFailedCount) showToast(t('delete_failed')+' ('+cleanupFailedCount+'/'+ids.length+')',0,'error');
       else showToast((retainedCount?t('session_deleted_worktree'):t('session_delete'))+' ('+ids.length+')');
       exitSessionSelectMode();await renderSessionList();
-    }catch(e){showToast('Delete failed: '+(e.message||e));}
+    }catch(e){showToast('Delete failed: '+(e.message||e),null,'error');}
   };bar.appendChild(deleteBtn);
 }
 function _showBatchProjectPicker(){
@@ -4402,7 +4402,7 @@ function _showBatchProjectPicker(){
   none.onclick=async()=>{picker.remove();
     try{await Promise.all(ids.map(sid=>api('/api/session/move',{method:'POST',body:JSON.stringify({session_id:sid,project_id:null})})));
       showToast('Removed from project');exitSessionSelectMode();await renderSessionList();
-    }catch(e){showToast('Move failed: '+(e.message||e));}
+    }catch(e){showToast('Move failed: '+(e.message||e),null,'error');}
   };picker.appendChild(none);
   for(const p of(_allProjects||[])){
     const item=document.createElement('div');item.className='project-picker-item';
@@ -4412,7 +4412,7 @@ function _showBatchProjectPicker(){
     item.onclick=async()=>{picker.remove();
       try{await Promise.all(ids.map(sid=>api('/api/session/move',{method:'POST',body:JSON.stringify({session_id:sid,project_id:p.project_id})})));
         showToast('Moved to '+p.name);exitSessionSelectMode();await renderSessionList();
-      }catch(e){showToast('Move failed: '+(e.message||e));}
+      }catch(e){showToast('Move failed: '+(e.message||e),null,'error');}
     };picker.appendChild(item);
   }
   bar.appendChild(picker);
@@ -4832,7 +4832,7 @@ function _appendSessionDuplicateAction(menu, session){
           await renderSessionList();
           showToast(t('session_duplicated'));
         }
-      }catch(err){showToast(t('session_duplicate_failed')+err.message);}
+      }catch(err){showToast(t('session_duplicate_failed')+err.message,'error');}
     }
   ));
 }
@@ -4894,7 +4894,7 @@ async function _archiveSession(session, archived=true, beforeListRender=null){
     renderSessionListFromCache();
     void renderSessionList();
     return true;
-  }catch(err){if(renderHold) await renderHold.catch(()=>{});_pendingSessionReflowPositions=null;showToast(t('session_archive_failed')+err.message);return false;}
+  }catch(err){if(renderHold) await renderHold.catch(()=>{});_pendingSessionReflowPositions=null;showToast(t('session_archive_failed')+err.message,'error');return false;}
 }
 
 function _openSessionActionMenu(session, anchorEl){
@@ -5000,7 +5000,7 @@ function _openSessionActionMenu(session, anchorEl){
           if(S.session&&S.session.session_id===session.session_id) S.session.archived=true;
           void renderSessionList();
           showToast(t('session_hidden'));
-        }catch(err){showToast(t('session_archive_failed')+err.message);}
+        }catch(err){showToast(t('session_archive_failed')+err.message,'error');}
       }
     ));
   }
@@ -9323,7 +9323,7 @@ function _showProjectPicker(session, anchorEl){
         if(idx>=0) _allSessions[idx].project_id=p.project_id;
         renderSessionListFromCache();
         showToast('Moved to '+p.name);
-      }catch(e){showToast('Move failed: '+(e.message||e));}
+      }catch(e){showToast('Move failed: '+(e.message||e),null,'error');}
     };
     picker.appendChild(item);
   }
@@ -9551,7 +9551,7 @@ async function _confirmDeleteProject(proj){
     await renderSessionList();
     showToast('Project deleted');
   } catch(e) {
-    showToast('Delete failed: '+(e.message||e));
+    showToast('Delete failed: '+(e.message||e),null,'error');
   }
 }
 
