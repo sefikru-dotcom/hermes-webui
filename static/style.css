@@ -36,6 +36,15 @@ main.main.showing-plugin > #mainPlugin {
     --accent-hover:#996F08;--accent-bg:rgba(184,134,11,0.08);--accent-bg-strong:rgba(184,134,11,0.15);--accent-text:#8B6508;
     --error:#C62828;--success:#3D8B40;--warning:#E68A00;--info:#0288A8;
     --radius-sm:4px;--radius-md:8px;--radius-card:8px;--radius-lg:12px;--radius-pill:999px;
+    /* Elevation tokens: used by pills/cards/kanban. Without a value the whole
+       box-shadow declaration is dropped silently, so the element renders flat. */
+    --shadow-sm:0 1px 2px rgba(26,22,16,.10);
+    --shadow-md:0 2px 8px rgba(26,22,16,.14);
+    --shadow-lg:0 8px 24px rgba(26,22,16,.20);
+    /* Aliases some components reference without a fallback (backgrounds,
+       links, muted text). Undefined means the declaration is dropped. */
+    --bg2:var(--surface);--hover:var(--hover-bg);--panel:var(--surface);--sidebar-bg:var(--sidebar);
+    --surface-2:var(--surface-subtle);--danger:var(--error);--link:var(--blue);--text-secondary:var(--muted);--panel-soft:var(--surface-subtle);--accent-bg-soft:var(--accent-bg);
     --space-1:4px;--space-2:8px;--space-3:12px;--space-4:16px;
     --font-size-xs:11px;--font-size-sm:12px;--font-size-md:14px;
     --message-body-font-size:14px;--message-body-line-height:1.75;--message-code-font-size:12.5px;--message-pre-code-font-size:13px;--message-table-font-size:12px;
@@ -146,6 +155,9 @@ main.main.showing-plugin > #mainPlugin {
     --surface-subtle:rgba(255,255,255,0.025);--surface-subtle-hover:rgba(255,255,255,0.05);
     --border-subtle:rgba(255,255,255,0.06);--border-muted:rgba(255,255,255,0.10);
     --user-bubble-bg:#151a25;--user-bubble-border:#293345;--user-bubble-text:#f8fafc;--user-bubble-placeholder:#848d9c;
+    --shadow-sm:0 1px 2px rgba(0,0,0,.45);
+    --shadow-md:0 2px 8px rgba(0,0,0,.55);
+    --shadow-lg:0 8px 24px rgba(0,0,0,.65);
   }
   /* ── Skin: Default (gold — matches base) ── */
   /* No overrides needed — :root and .dark already use gold accent */
