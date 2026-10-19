@@ -82,8 +82,11 @@
     var spec = FRAMES[kind];
     var host = _byId(spec.host);
     var iframe = _frame(kind);
-    // `null` means "leave as is" (there is no explicit ready state to paint).
-    if(!host || mode === null) return;
+    if(!host) return;
+    // `null` means "leave the host classes alone"; without an explicit ready
+    // state to paint we still must not leave a stale spinner on screen.
+    if(mode === null && iframe && iframe.getAttribute('src')) mode = 'ready';
+    if(mode === null) return;
     host.classList.toggle('is-loading', mode === 'loading');
     host.classList.toggle('is-unavailable', mode === 'unavailable');
     var stateEl = _byId(spec.state);
