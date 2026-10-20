@@ -8,15 +8,28 @@
 //
 // The same module re-evaluates the `.rail-divider` separators after every
 // visibility/order change (localStorage restore, settings chips, a section
-// confirmed missing). Dividers are never moved: reordering inserts tab buttons
-// before the `.rail-spacer` anchor, and a separator that ends up with no
-// visible tab on a side is hidden rather than relocated.
+// confirmed missing). Tab reordering (`_applyTabOrder`, the inline restore
+// script) inserts every tab before the `.rail-spacer` anchor, so the dividers
+// would otherwise be left behind at the top of the rail and the groups would
+// vanish. The separators are therefore re-anchored to their group on every
+// pass: the divider that opens a group is placed before that group's first
+// visible tab, and a divider whose group (or the group above it) is empty is
+// hidden rather than left dangling.
 (function(){
   'use strict';
 
   var RAIL = '.rail';
   var TAB = '.nav-tab[data-panel]';
   var HIDDEN_CLASS = 'rail-divider-hidden';
+
+  // Group contract, mirrored from the markup comment in index.html. Order is
+  // the visual order; `settings` is not a group (it sits below `.rail-spacer`).
+  var GROUPS = [
+    ['chat', 'tasks', 'kanban', 'todos'],
+    ['projects', 'workspaces', 'memory', 'skills', 'profiles'],
+    ['music'],
+    ['insights', 'logs']
+  ];
 
   // Resolve lazily: `switchPanel`/`$` come from panels.js/ui.js, which parse
   // after this file. Nothing here depends on load order.
@@ -42,54 +55,67 @@
     return _tabs(rail).filter(_isUsable);
   }
 
-  // A divider separates two groups, so it is only useful while the group on
-  // each side has a visible tab. Hidden tabs stay in the DOM, so an emptied
-  // group is a real state; a divider left with an empty side is hidden rather
-  // than relocated.
-  //
-  // The group above a divider is the one the previous divider (or the rail top)
-  // opens; the group below is checked against the next divider. `settings` is
-  // not a group: it sits in the bottom slot past `.rail-spacer`, so the last
-  // divider only needs a group above it.
-  function _groupTabAbove(kids, index){
-    for(var j = index - 1; j >= 0; j--){
-      var k = kids[j];
-      if(k.matches && k.matches(TAB) && _isUsable(k)){
-        return k.dataset.panel === 'settings' ? null : k;
-      }
+  function _groupOf(panel){
+    for(var g = 0; g < GROUPS.length; g++){
+      if(GROUPS[g].indexOf(panel) !== -1) return g;
     }
-    return null;
+    return -1;
   }
 
-  // A divider is visible only while the group it borders below has a tab. The
-  // group above it is implied by the previous divider (or the top of the rail),
-  // so one direction is enough and the pass stays idempotent.
+  function _hasVisibleGroup(kids){
+    for(var i = 0; i < kids.length; i++){
+      var k = kids[i];
+      if(k.matches && k.matches(TAB) && _isUsable(k) && _groupOf(k.dataset.panel) !== -1) return true;
+    }
+    return false;
+  }
+
+  // Tab reordering (`_applyTabOrder` and the inline restore script) inserts
+  // every tab before `.rail-spacer`, which leaves the dividers behind at the
+  // top of the rail. Re-anchor each divider to the group transition it
+  // separates instead of trusting its previous position: walk the visible tabs
+  // in DOM order and drop a separator wherever the group index rises. That
+  // keeps a user's custom order intact while the separators stay between
+  // groups, and it degrades to just hiding when a group is empty.
   function syncRailDividers(){
     var rail = _rail();
     if(!rail) return;
     var kids = Array.prototype.slice.call(rail.children);
-    var dividers = [];
-    for(var d = 0; d < kids.length; d++){
-      if(kids[d].classList && kids[d].classList.contains('rail-divider')) dividers.push(d);
+    var dividers = kids.filter(function(k){
+      return k.classList && k.classList.contains('rail-divider');
+    });
+    if(!dividers.length) return;
+
+    var spacer = null;
+    for(var s = 0; s < kids.length; s++){
+      if(kids[s].classList && kids[s].classList.contains('rail-spacer')){ spacer = kids[s]; break; }
     }
+
+    // Insertion points, in DOM order: one before the first tab of each new
+    // group, then one before the bottom slot that closes the last group.
+    var anchors = [];
+    var previousGroup = -1;
+    for(var t = 0; t < kids.length; t++){
+      var tab = kids[t];
+      if(!tab.matches || !tab.matches(TAB) || !_isUsable(tab)) continue;
+      var group = _groupOf(tab.dataset.panel);
+      if(group === -1) continue;
+      if(previousGroup !== -1 && group > previousGroup) anchors.push(tab);
+      previousGroup = group;
+    }
+    if(spacer && _hasVisibleGroup(kids)) anchors.push(spacer);
+
     for(var n = 0; n < dividers.length; n++){
-      var i = dividers[n];
-      var isLast = n === dividers.length - 1;
-      // Group above: any usable non-settings tab before this divider.
-      var hasAbove = _groupTabAbove(kids, i) !== null;
-      // Group below: any usable non-settings tab before the next divider (or
-      // the spacer for the last one).
-      var limit = isLast ? kids.length : dividers[n + 1];
-      var hasBelow = false;
-      if(!isLast){
-        for(var j = i + 1; j < limit; j++){
-          var k = kids[j];
-          if(k.matches && k.matches(TAB) && _isUsable(k) && k.dataset.panel !== 'settings'){ hasBelow = true; break; }
-        }
-      } else {
-        hasBelow = true;
+      var divider = dividers[n];
+      var anchor = anchors[n] || null;
+      divider.classList.toggle(HIDDEN_CLASS, !anchor);
+      // insertBefore on a node that already sits right before the anchor still
+      // detaches and re-attaches it, which emits another childList record and
+      // would drive the observer in circles. Compare positions first so a
+      // settled rail produces no mutations at all.
+      if(anchor && anchor.parentNode === rail && divider.nextElementSibling !== anchor){
+        rail.insertBefore(divider, anchor);
       }
-      kids[i].classList.toggle(HIDDEN_CLASS, !(hasAbove && hasBelow));
     }
   }
 

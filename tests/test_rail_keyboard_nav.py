@@ -104,10 +104,10 @@ def test_divider_collapse_hook_survives():
     assert "MutationObserver" in src, (
         "dividers must re-evaluate when tab visibility changes at runtime"
     )
-    # A divider collapses when the group below it has no visible tab.
-    assert "hasBelow" in src and "hasAbove" in src
+    # A divider collapses when the group it would open has no visible tab.
+    assert "_groupOf" in src and "HIDDEN_CLASS" in src
     # The bottom `settings` slot is not a group: it lives past .rail-spacer.
-    assert "=== 'settings'" in src
+    assert "rail-spacer" in src
     # Hidden dividers must not be treated as tabs when measuring neighbours.
     assert "contains('rail-divider')" in src
 

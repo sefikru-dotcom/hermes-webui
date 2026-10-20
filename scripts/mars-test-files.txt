@@ -42,3 +42,4 @@ tests/test_issue1100_prism_sri.py
 tests/test_command_palette.py
 tests/test_rail_grouping.py
 tests/test_rail_keyboard_nav.py
+tests/test_rail_divider_reanchor.py
