@@ -39,3 +39,4 @@ tests/test_theme_shadow_tokens.py
 tests/test_vendored_cdn_assets.py
 tests/test_api_retry_policy.py
 tests/test_issue1100_prism_sri.py
+tests/test_command_palette.py
