@@ -176,10 +176,51 @@ def test_valid_credential_not_honoured_outside_exact_allowlist(native_server):
         # the device-token path.
         "/api/transcribe/",
         "/api/transcribe/capability",
+        # /api/settings is a read-only admission: the write verb stays off the
+        # device-token path (it rewrites the server-global settings.json).
+        "/api/settings",
     ):
         status, _payload = _request(port, "POST", path, headers)
         assert status == 401, (path, status)
     assert dispatched == []
+
+
+def test_settings_read_admitted_write_denied(native_server):
+    """GET /api/settings rides the read-only fast-path, POST /api/settings does not.
+
+    The native client syncs the display mode with a read, so only the read is
+    admitted (NATIVE_BEARER_READONLY_EXACT_PATHS, GET/HEAD only).  The POST
+    twin rewrites the server-global settings.json — bot name, password hash,
+    max_tokens, auth on/off — for every client, so a device token must never
+    reach it: 401, no dispatch, no CSRF bypass.
+    """
+    auth, pairings, port, dispatched = native_server
+    token = _mint_native_token(pairings)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # Membership, not 404-sniffing: an unknown /api path also answers 401.
+    assert "/api/settings" in auth.NATIVE_BEARER_READONLY_EXACT_PATHS
+    assert "/api/settings" not in auth.NATIVE_BEARER_EXACT_PATHS
+
+    for method in ("GET", "HEAD"):
+        dispatched.clear()
+        status, _payload = _request(port, method, "/api/settings", headers)
+        assert status == 200, (method, status)
+        assert dispatched == [(method, "/api/settings")]
+
+    for method in ("POST", "PUT", "PATCH", "DELETE"):
+        dispatched.clear()
+        status, payload = _request(port, method, "/api/settings", headers)
+        assert status == 401, (method, status)
+        assert payload == {"error": "Authentication required"}
+        assert dispatched == []
+
+    # No token at all: the read route is still gated.
+    for method in ("GET", "POST"):
+        dispatched.clear()
+        status, _payload = _request(port, method, "/api/settings")
+        assert status == 401, (method, status)
+        assert dispatched == []
 
 
 def test_post_transcribe_with_native_bearer_reaches_real_handler(monkeypatch):
