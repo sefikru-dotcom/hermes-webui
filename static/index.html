@@ -72,9 +72,9 @@
     };
   }
 })()</script>
-<link rel="stylesheet" href="static/style.css?v=__WEBUI_VERSION__-mars-chat-final-browser-v2">
-  <link rel="stylesheet" href="static/command_palette.css?v=__WEBUI_VERSION__-mars-chat-final-browser-v2">
-  <link rel="stylesheet" href="static/vendor/xterm/5.3.0/xterm.css?v=__WEBUI_VERSION__-mars-chat-final-browser-v2" integrity="sha384-LJcOxlx9IMbNXDqJ2axpfEQKkAYbFjJfhXexLfiRJhjDU81mzgkiQq8rkV0j6dVh">
+<link rel="stylesheet" href="static/style.css?v=__WEBUI_VERSION__-mars-run-state-liveness-v1">
+  <link rel="stylesheet" href="static/command_palette.css?v=__WEBUI_VERSION__-mars-run-state-liveness-v1">
+  <link rel="stylesheet" href="static/vendor/xterm/5.3.0/xterm.css?v=__WEBUI_VERSION__-mars-run-state-liveness-v1" integrity="sha384-LJcOxlx9IMbNXDqJ2axpfEQKkAYbFjJfhXexLfiRJhjDU81mzgkiQq8rkV0j6dVh">
   <!-- KaTeX math rendering CSS (loaded eagerly from vendored assets to prevent font CSP noise) -->
   <link rel="stylesheet" href="static/vendor/katex/0.16.22/katex.min.css">
   <!-- streaming-markdown: incremental DOM-building markdown parser for live streams -->
@@ -92,17 +92,17 @@
   <!-- Self-hosted from npm:prismjs@1.29.0 — no CDN dependency, so syntax highlighting
        survives offline / air-gapped installs. SRI is computed over the exact bytes
        in static/vendor/prismjs/1.29.0/ (see tests/test_vendored_cdn_assets.py). -->
-  <link id="prism-theme" rel="stylesheet" href="static/vendor/prismjs/1.29.0/themes/prism-tomorrow.min.css?v=__WEBUI_VERSION__-mars-chat-final-browser-v2" integrity="sha384-wFjoQjtV1y5jVHbt0p35Ui8aV8GVpEZkyF99OXWqP/eNJDU93D3Ugxkoyh6Y2I4A">
-  <script src="static/vendor/prismjs/1.29.0/prism-core.min.js?v=__WEBUI_VERSION__-mars-chat-final-browser-v2" integrity="sha384-MXybTpajaBV0AkcBaCPT4KIvo0FzoCiWXgcihYsw4FUkEz0Pv3JGV6tk2G8vJtDc" defer></script>
-  <script src="static/vendor/prismjs/1.29.0/plugins/autoloader/prism-autoloader.min.js?v=__WEBUI_VERSION__-mars-chat-final-browser-v2" integrity="sha384-Uq05+JLko69eOiPr39ta9bh7kld5PKZoU+fF7g0EXTAriEollhZ+DrN8Q/Oi8J2Q" defer></script>
-  <script src="static/vendor/xterm/5.3.0/xterm.js?v=__WEBUI_VERSION__-mars-chat-final-browser-v2" integrity="sha384-/nfmYPUzWMS6v2atn8hbljz7NE0EI1iGx34lJaNzyVjWGDzMv+ciUZUeJpKA3Glc" defer></script>
-  <script src="static/vendor/xterm-addon-fit/0.8.0/xterm-addon-fit.js?v=__WEBUI_VERSION__-mars-chat-final-browser-v2" integrity="sha384-AQLWHRKAgdTxkolJcLOELg4E9rE89CPE2xMy3tIRFn08NcGKPTsELdvKomqji+DL" defer></script>
-  <script src="static/vendor/xterm-addon-web-links/0.9.0/xterm-addon-web-links.js?v=__WEBUI_VERSION__-mars-chat-final-browser-v2" integrity="sha384-U4fBROT3kCM582gaYiNaOSQiJbXPzd9SfR1598Y7yeGSYVBzikXrNg0XyuU+mOnl" defer></script>
+  <link id="prism-theme" rel="stylesheet" href="static/vendor/prismjs/1.29.0/themes/prism-tomorrow.min.css?v=__WEBUI_VERSION__-mars-run-state-liveness-v1" integrity="sha384-wFjoQjtV1y5jVHbt0p35Ui8aV8GVpEZkyF99OXWqP/eNJDU93D3Ugxkoyh6Y2I4A">
+  <script src="static/vendor/prismjs/1.29.0/prism-core.min.js?v=__WEBUI_VERSION__-mars-run-state-liveness-v1" integrity="sha384-MXybTpajaBV0AkcBaCPT4KIvo0FzoCiWXgcihYsw4FUkEz0Pv3JGV6tk2G8vJtDc" defer></script>
+  <script src="static/vendor/prismjs/1.29.0/plugins/autoloader/prism-autoloader.min.js?v=__WEBUI_VERSION__-mars-run-state-liveness-v1" integrity="sha384-Uq05+JLko69eOiPr39ta9bh7kld5PKZoU+fF7g0EXTAriEollhZ+DrN8Q/Oi8J2Q" defer></script>
+  <script src="static/vendor/xterm/5.3.0/xterm.js?v=__WEBUI_VERSION__-mars-run-state-liveness-v1" integrity="sha384-/nfmYPUzWMS6v2atn8hbljz7NE0EI1iGx34lJaNzyVjWGDzMv+ciUZUeJpKA3Glc" defer></script>
+  <script src="static/vendor/xterm-addon-fit/0.8.0/xterm-addon-fit.js?v=__WEBUI_VERSION__-mars-run-state-liveness-v1" integrity="sha384-AQLWHRKAgdTxkolJcLOELg4E9rE89CPE2xMy3tIRFn08NcGKPTsELdvKomqji+DL" defer></script>
+  <script src="static/vendor/xterm-addon-web-links/0.9.0/xterm-addon-web-links.js?v=__WEBUI_VERSION__-mars-run-state-liveness-v1" integrity="sha384-U4fBROT3kCM582gaYiNaOSQiJbXPzd9SfR1598Y7yeGSYVBzikXrNg0XyuU+mOnl" defer></script>
   <!-- PWA service worker registration -->
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function() {
-        navigator.serviceWorker.register('sw.js?v=__WEBUI_VERSION__-mars-chat-final-browser-v2').catch(function(err) {
+        navigator.serviceWorker.register('sw.js?v=__WEBUI_VERSION__-mars-run-state-liveness-v1').catch(function(err) {
           console.warn('[pwa] Service worker registration failed:', err);
         });
       });
@@ -2019,22 +2019,23 @@ window._marsFallbackActivityCycle=function(btn){
 <script src="static/i18n.js?v=__WEBUI_VERSION__-mars-rail-label" defer></script>
 <script src="static/chat_activity.js?v=__WEBUI_VERSION__-mars-kanban-v2" defer></script>
 <script src="static/approval_i18n.js?v=__WEBUI_VERSION__-am3" defer></script>
-<script src="static/skeleton.js?v=__WEBUI_VERSION__-mars-chat-final-browser-v2" defer></script>
+<script src="static/skeleton.js?v=__WEBUI_VERSION__-mars-run-state-liveness-v1" defer></script>
 <script src="static/icons.js?v=__WEBUI_VERSION__-am2" defer></script>
 <script src="static/assistant_turn_anchors.js?v=__WEBUI_VERSION__-am2" defer></script>
 <script src="static/ui.js?v=__WEBUI_VERSION__-mars-kanban-v2" defer></script>
+<script src="static/run_state.js?v=__WEBUI_VERSION__-mars-conflict-liveness-v1" defer></script>
 <script src="static/workspace.js?v=__WEBUI_VERSION__-am2" defer></script>
 <script src="static/terminal.js?v=__WEBUI_VERSION__-am2" defer></script>
 <script src="static/sessions.js?v=__WEBUI_VERSION__-mars-chatnav-v14-workers" defer></script>
 <script src="static/commands.js?v=__WEBUI_VERSION__-am2" defer></script>
-<script src="static/messages.js?v=__WEBUI_VERSION__-mars-kanban-v2" defer></script>
+<script src="static/messages.js?v=__WEBUI_VERSION__-mars-run-state-liveness-v1" defer></script>
 <script src="static/extension_settings.js?v=__WEBUI_VERSION__-am2" defer></script>
 <script src="static/panels.js?v=__WEBUI_VERSION__-mars-kanban-v2" defer></script>
-<script src="static/embedded_frames.js?v=__WEBUI_VERSION__-mars-chat-final-browser-v2" defer></script>
+<script src="static/embedded_frames.js?v=__WEBUI_VERSION__-mars-run-state-liveness-v1" defer></script>
 <script src="static/onboarding.js?v=__WEBUI_VERSION__-am2" defer></script>
 <script src="static/boot.js?v=__WEBUI_VERSION__-mars-chatnav-v13" defer></script>
 <script src="static/outline.js?v=__WEBUI_VERSION__-am2" defer></script>
-<script src="static/command_palette.js?v=__WEBUI_VERSION__-mars-chat-final-browser-v2" defer></script>
+<script src="static/command_palette.js?v=__WEBUI_VERSION__-mars-run-state-liveness-v1" defer></script>
 
 <!-- Kanban: create/rename board modal — used for both flows. -->
 <div class="kanban-modal-overlay" id="kanbanBoardModal" hidden onclick="if(event.target===this)closeKanbanBoardModal()">

@@ -7,9 +7,10 @@
 
 // Cache version is injected by the server at request time (routes.py /sw.js handler).
 // Bumps automatically whenever the git commit changes — no manual edits needed.
-// MANUAL BUMP: rail_nav.js added to SHELL_ASSETS (rail tablist keyboard nav and
-// divider upkeep). The `__WEBUI_VERSION__` token below keeps busting by commit.
-const CACHE_NAME = 'hermes-shell-__WEBUI_VERSION__-mars-chat-final-browser-v2';
+// MANUAL BUMP: run_state.js added to SHELL_ASSETS (409 conflict liveness probe:
+// a dead stream id from /api/chat/start must not be adopted as a busy run).
+// The `__WEBUI_VERSION__` token below keeps busting by commit.
+const CACHE_NAME = 'hermes-shell-__WEBUI_VERSION__-mars-run-state-liveness-v1';
 
 // Static assets that form the app shell.
 //
@@ -22,13 +23,14 @@ const CACHE_NAME = 'hermes-shell-__WEBUI_VERSION__-mars-chat-final-browser-v2';
 // either the authenticated app shell or login code, and stale cached responses
 // can make valid password submits fail until the user clears browser cache.
 // Navigations populate './' only after a successful non-redirect network load.
-const VQ = '?v=__WEBUI_VERSION__-mars-chat-final-browser-v2';
+const VQ = '?v=__WEBUI_VERSION__-mars-run-state-liveness-v1';
 const SHELL_ASSETS = [
   './static/style.css' + VQ,
   './static/pwa-startup.js' + VQ,
   './static/boot.js' + VQ,
   './static/assistant_turn_anchors.js' + VQ,
   './static/ui.js' + VQ,
+  './static/run_state.js' + VQ,
   './static/messages.js' + VQ,
   './static/chat_activity.js' + VQ,
   './static/sessions.js' + VQ,

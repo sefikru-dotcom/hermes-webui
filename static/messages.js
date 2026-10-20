@@ -1857,6 +1857,14 @@ async function send(){
       // stream locally instead of merely reloading the transcript: otherwise
       // S.busy/S.activeStreamId stay cleared and every subsequent send repeats
       // the same 409 forever (#active-stream-reconnect).
+      //
+      // "Owns the session" is not "is alive": a cancelled run can linger in the
+      // backend's active-run registry after its SSE channel is gone, so this id
+      // may point at a stream that will never emit a terminal event. Adopting it
+      // unconditionally left a phantom busy composer — Stop stayed up, sends were
+      // steered/queued into a dead run and nothing cleared the flag, so the user
+      // could not send again after pressing Stop. HermesRunState probes
+      // /api/chat/stream/status first and only the live outcome may set busy.
       let _activeStreamId='';
       try{
         const _body=e&&e.body?JSON.parse(e.body):null;
@@ -1867,18 +1875,58 @@ async function send(){
       stopApprovalPolling();
       stopClarifyPolling();
       // Keep the user's attempted turn by queueing it for after the current run.
+      // Queued BEFORE the liveness probe so a dead stream never loses the message.
       const _retryModelState=_chatPayloadModelState();
       queueSessionMessage(activeSid,{text:msgText,files:[],model:_retryModelState.model,model_provider:_retryModelState.model_provider,profile:S.activeProfile||'default'});
       updateQueueBadge(activeSid);
       try{
         await loadSession(activeSid);
-        if(_activeStreamId){
+        const _runState=(typeof window!=='undefined'&&window.HermesRunState)||null;
+        if(_runState&&typeof _runState.applyConflictOwner==='function'){
+          // Also covers a 409 whose body carries no stream id: the module then
+          // releases local state instead of leaving the optimistic busy flag up.
+          await _runState.applyConflictOwner({
+            streamId:_activeStreamId,
+            hooks:{
+              adoptLive:(ownerStreamId)=>{
+                S.activeStreamId=ownerStreamId;
+                if(S.session&&S.session.session_id===activeSid) S.session.active_stream_id=ownerStreamId;
+                setBusy(true);
+                if(typeof attachLiveStream==='function') attachLiveStream(activeSid,ownerStreamId,[],{reconnecting:true});
+              },
+              adoptReplay:(ownerStreamId)=>{
+                // Journal replay only: the run is over, so the composer must stay
+                // idle (sendable) while the settled transcript is restored.
+                S.activeStreamId=null;
+                if(S.session&&S.session.session_id===activeSid) S.session.active_stream_id=null;
+                setBusy(false);
+                if(typeof attachLiveStream==='function') attachLiveStream(activeSid,ownerStreamId,[],{reconnecting:true});
+              },
+              release:()=>{
+                S.activeStreamId=null;
+                if(S.session&&S.session.session_id===activeSid) S.session.active_stream_id=null;
+                // Clear busy WITHOUT setBusy(false): that helper drains the queue
+                // after 120ms, and draining here would immediately re-send the
+                // just-queued message into the same dead run (409 loop). The chip
+                // stays and drains on the next send or the next stream settle.
+                S.busy=false;
+                if(typeof updateSendBtn==='function') updateSendBtn();
+                setComposerStatus('');
+                if(typeof setStatus==='function') setStatus('');
+                if(typeof clearOptimisticSessionStreaming==='function') clearOptimisticSessionStreaming(activeSid);
+              },
+              notify:(message)=>{ if(typeof showToast==='function') showToast(message,2500); },
+            },
+          });
+        }else if(_activeStreamId){
+          // Legacy fallback (module not loaded): keep the previous behavior.
           S.activeStreamId=_activeStreamId;
           if(S.session&&S.session.session_id===activeSid) S.session.active_stream_id=_activeStreamId;
           setBusy(true);
           if(typeof attachLiveStream==='function') attachLiveStream(activeSid,_activeStreamId,[],{reconnecting:true});
         }
         setComposerStatus('');
+        if(typeof renderSessionList==='function') void renderSessionList();
         // A recovered stream is an expected reconnect, not an error toast.
         return;
       }catch(_){
