@@ -38,6 +38,12 @@ _SUMMARY_CACHE: OrderedDict[str, tuple[tuple[int, int, int, int, int], dict]] = 
 _SUMMARY_CACHE_LOCK = threading.Lock()
 # Events that mark a run terminal in the journal / summary sense.
 TERMINAL_SSE_EVENTS = frozenset({"done", "cancel", "apperror", "error", "stream_end"})
+# Terminal kinds that may appear at most ONCE per run. Only `cancel` qualifies:
+# a user Stop is a single settled outcome, and the explicit-Stop path may write
+# it before the worker's own cancel frame exists. `apperror` / `done` /
+# `stream_end` deliberately stay appendable because a later terminal row is
+# legitimate superseding evidence (see session-sidecar repair).
+TERMINAL_ONCE_EVENTS = frozenset({"cancel"})
 # Events that should close an SSE relay drain loop. `done` is intentionally
 # excluded: background title generation and `stream_end` are emitted after
 # `done`, and breaking early would drop them. `apperror` is included because
@@ -385,6 +391,24 @@ def _iter_bounded_raw_jsonl_lines(path: Path, *, max_bytes: int, retained_bytes:
         return
 
 
+def _run_has_terminal_of_kind_locked(path: Path, event_name: str) -> bool:
+    """Return True when the journal already carries a terminal row of this kind.
+
+    Caller MUST hold ``_lock_for(path)``. Reads the file directly instead of the
+    summary cache so a row appended by another thread in this process is always
+    seen, which is what makes ``terminal_once`` safe against the worker's own
+    terminal frame racing the cancel path.
+    """
+    name = str(event_name or "").strip()
+    events, _malformed = _read_jsonl(path)
+    return any(
+        isinstance(event, dict)
+        and event.get("terminal") is True
+        and str(event.get("event") or event.get("type") or "") == name
+        for event in events
+    )
+
+
 def append_run_event(
     session_id: str,
     run_id: str,
@@ -394,14 +418,27 @@ def append_run_event(
     session_dir: Path | None = None,
     seq: int | None = None,
     created_at: float | None = None,
-) -> dict:
-    """Append one durable run event and fsync it according to the journal policy."""
+    terminal_once: bool = False,
+) -> dict | None:
+    """Append one durable run event and fsync it according to the journal policy.
+
+    ``terminal_once`` makes the append idempotent per run *for that event kind*:
+    when the journal already holds a terminal row of the same name nothing is
+    written and ``None`` is returned. Explicit Stop uses it to record the
+    terminal ``cancel`` for a run whose worker is wedged, without duplicating the
+    worker's own cancel frame when it eventually unwinds. Only ``cancel`` is
+    deduped (``TERMINAL_ONCE_EVENTS``); ``done`` / ``stream_end`` / ``apperror``
+    stay appendable because a later terminal row is legitimate superseding
+    evidence for the recovery paths.
+    """
     path = _run_path(session_id, run_id, session_dir=session_dir)
     payload = payload if payload is not None else {}
     event_name = str(event_name or "").strip()
     if not event_name:
         raise ValueError("event_name is required")
     with _lock_for(path):
+        if terminal_once and _run_has_terminal_of_kind_locked(path, event_name):
+            return None
         if seq is not None:
             assigned_seq = int(seq)
             _note_assigned_seq(path, assigned_seq)
@@ -446,19 +483,17 @@ class RunJournalWriter:
         self._path = _run_path(self.session_id, self.run_id, session_dir=self.session_dir)
         self._lock = _lock_for(self._path)
 
-    def append_sse_event(self, event_name: str, payload=None) -> dict:
-        # Draw from the shared module-level seq cache under the per-path lock so
-        # this writer and any direct append_run_event() call on the same path
-        # agree on one monotonic, gapless sequence.
-        with self._lock:
-            seq = _reserve_next_seq(self._path)
+    def append_sse_event(self, event_name: str, payload=None) -> dict | None:
+        # Cancel frames are deduped per run inside append_run_event (seq
+        # reservation and the dedupe check happen under one per-path lock, so a
+        # skipped append cannot leave a gap in the journal's seq cursor).
         return append_run_event(
             self.session_id,
             self.run_id,
             event_name,
             payload or {},
             session_dir=self.session_dir,
-            seq=seq,
+            terminal_once=str(event_name or "").strip() in TERMINAL_ONCE_EVENTS,
         )
 
 

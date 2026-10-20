@@ -13399,6 +13399,67 @@ def _handle_chat_steer(handler, body: dict) -> bool:
                        "stream_id": active_stream_id})
 
 
+def _request_explicit_agent_stop(agent, message: str = "Cancelled by user") -> bool:
+    """Request a user-initiated Stop through the agent's *hard* interrupt ABI.
+
+    ``agent.interrupt()`` is the cooperative (soft) signal: it only flips the
+    run-loop flag, so a turn parked inside protected compression keeps its
+    provider call running until the compressor returns on its own. New chat
+    starts then answer 409 while ACTIVE_RUNS keeps ``phase="cancelling"``.
+
+    ``hard_interrupt()`` sets ``_hard_interrupt_requested`` — the gate
+    ``conversation_compression`` checks via ``aux_interrupt_protection`` and the
+    compression commit fence — so an explicit Stop actually aborts compression.
+    Routed through ``agent.interrupt_compat.request_hard_interrupt`` so agents
+    (and test doubles) that only expose ``interrupt(message)`` keep working.
+    """
+    try:
+        from agent.interrupt_compat import request_hard_interrupt
+    except Exception:  # agent package unavailable (tests / partial installs)
+        request_hard_interrupt = None
+    if request_hard_interrupt is not None:
+        try:
+            return bool(request_hard_interrupt(agent, message))
+        except Exception:
+            # The ABI exists but the signal failed. Do NOT re-signal through
+            # agent.interrupt(): the compat helper already called it (or
+            # hard_interrupt) once, and a second call would double-deliver Stop.
+            logger.debug("Failed to deliver explicit stop to agent", exc_info=True)
+            return False
+    interrupt = getattr(agent, "interrupt", None)
+    if not callable(interrupt):
+        return False
+    interrupt(message)
+    return True
+
+
+def _journal_terminal_cancel(session_id, stream_id, payload) -> str | None:
+    """Record the terminal ``cancel`` row for a stopped run; returns its event id.
+
+    The worker normally journals its own cancel frame, but a Stop that lands
+    while the agent is wedged (protected compression, stalled provider) tears the
+    SSE channel down first: the journal then holds no terminal row and
+    replay-after-reload never settles. The row is written with
+    ``terminal_once=True`` so the worker's later cancel frame (or a second Stop
+    click) cannot duplicate it, and so a run that genuinely completed keeps its
+    own terminal row.
+    """
+    sid = str(session_id or "").strip()
+    rid = str(stream_id or "").strip()
+    if not sid or not rid:
+        return None
+    try:
+        from api.run_journal import append_run_event
+
+        event = append_run_event(sid, rid, "cancel", payload, terminal_once=True)
+    except Exception:
+        logger.debug(
+            "Failed to append terminal cancel journal event for %s/%s", sid, rid, exc_info=True
+        )
+        return None
+    return str((event or {}).get("event_id") or "") or None
+
+
 def cancel_stream(stream_id: str) -> bool:
     """Signal an in-flight stream to cancel. Returns True if work was found.
 
@@ -13529,7 +13590,8 @@ def cancel_stream(stream_id: str) -> bool:
             pass
     if agent:
         try:
-            agent.interrupt("Cancelled by user")
+            # Explicit user Stop → hard interrupt (aborts protected compression).
+            _request_explicit_agent_stop(agent, "Cancelled by user")
         except Exception as e:
             # Log but don't block the cancel flow
             import logging
@@ -13770,17 +13832,26 @@ def cancel_stream(stream_id: str) -> bool:
             except Exception:
                 logger.debug("Failed to clear session state on cancel for %s", _cancel_session_id)
 
-    if _emit_cancel_event and q:
-        _cancel_event_id = STREAM_LAST_EVENT_ID.get(stream_id)
-        if _cancel_event_id and hasattr(q, "note_last_event_id"):
+    if _emit_cancel_event:
+        # Journal first: the run journal is the replay authority, and a Stop that
+        # tears the SSE channel down while the worker is still wedged would
+        # otherwise leave no terminal row for replay-after-reload to settle on.
+        _payload = _cancel_event_payload('Cancelled by user', session=_cancel_session_payload)
+        _journal_cancel_event_id = _journal_terminal_cancel(
+            _cancel_session_id, stream_id, _payload
+        )
+        if _journal_cancel_event_id:
+            STREAM_LAST_EVENT_ID[stream_id] = _journal_cancel_event_id
+        if q:
+            _cancel_event_id = _journal_cancel_event_id or STREAM_LAST_EVENT_ID.get(stream_id)
+            if _cancel_event_id and hasattr(q, "note_last_event_id"):
+                try:
+                    q.note_last_event_id(_cancel_event_id)
+                except Exception:
+                    logger.debug("Failed to note cancel event_id %s for stream %s", _cancel_event_id, stream_id, exc_info=True)
             try:
-                q.note_last_event_id(_cancel_event_id)
+                q.put_nowait(('cancel', _payload))
             except Exception:
-                logger.debug("Failed to note cancel event_id %s for stream %s", _cancel_event_id, stream_id, exc_info=True)
-        try:
-            _payload = _cancel_event_payload('Cancelled by user', session=_cancel_session_payload)
-            q.put_nowait(('cancel', _payload))
-        except Exception:
-            logger.debug("Failed to put cancel event to queue")
+                logger.debug("Failed to put cancel event to queue")
 
     return True
