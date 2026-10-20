@@ -7325,6 +7325,9 @@ const LOCALES = {
     wiki_search_placeholder: 'Искать страницы…',
     wiki_no_pages: 'Страницы wiki не найдены',
     wiki_not_configured: 'Wiki не настроена',
+    session_project_all: 'Все',
+    session_project_unassigned: 'Без проекта',
+    session_project_unassigned_hint: 'Показать беседы, ещё не отнесённые к проекту',
   },
 
   es: {
