@@ -3,8 +3,8 @@
 Covers the read-only fast-path in api/auth.py for the new native screens:
 GET/HEAD on the single ``/api/kanban/`` prefix plus the exact paths
 ``/api/crons/delivery-options``, ``/api/crons/history``, ``/api/insights``,
-``/api/logs``, ``/api/provider/quota``, ``/api/push/fcm/status`` and
-``/api/skills/usage``.
+``/api/logs``, ``/api/provider/quota``, ``/api/push/fcm/status``,
+``/api/settings`` and ``/api/skills/usage``.
 
   * before admission (read-only sets monkeypatched empty) a valid device
     Bearer gets 401 on these routes — after admission the same request
@@ -39,6 +39,7 @@ EXPECTED_READONLY_EXACT_PATHS = {
     '/api/logs',
     '/api/provider/quota',
     '/api/push/fcm/status',
+    '/api/settings',
     '/api/skills/usage',
 }
 EXPECTED_READONLY_PREFIXES = ('/api/kanban/',)
@@ -79,6 +80,14 @@ MUTATING_TARGETS = (
     # The cron history / delivery-options reads are GET/HEAD-only too.
     ('POST', '/api/crons/history'),
     ('POST', '/api/crons/delivery-options'),
+    # /api/settings is admitted for the read only: the POST twin rewrites the
+    # server-global settings.json (bot name, password hash, max_tokens, auth
+    # on/off) for every client and must keep the cookie + current-password
+    # path.  Any unsafe verb on it stays 401 for the device token.
+    ('POST', '/api/settings'),
+    ('PUT', '/api/settings'),
+    ('PATCH', '/api/settings'),
+    ('DELETE', '/api/settings'),
 )
 
 # The exact-path allowlist, pinned so it can never silently widen beyond the
@@ -97,6 +106,7 @@ PINNED_EXACT_PATHS = {
     '/api/crons/resume',
     '/api/crons/run',
     '/api/crons/update',
+    '/api/goal',
     '/api/memory',
     '/api/memory/write',
     '/api/projects',
