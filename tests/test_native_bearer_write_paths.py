@@ -1,8 +1,8 @@
 """Native Bearer admission for the owner-approved mutating paths.
 
 The cron CRUD, memory-write, skills-save/delete/toggle, speech-to-text
-(POST /api/transcribe), tts-synthesis and
-share-create/revoke routes are deliberately granted to the device token so
+(POST /api/transcribe), tts-synthesis, share-create/revoke and goal-control
+(POST /api/goal) routes are deliberately granted to the device token so
 the native Android client can manage them without a browser session (owner
 decision).  This module pins that contract:
 
@@ -42,6 +42,9 @@ WRITE_PATHS = (
     '/api/tts',
     '/api/share/create',
     '/api/share/revoke',
+    # Native goal control (POST /api/goal -> _handle_goal_command): per-session
+    # goal state only, no server-global config.
+    '/api/goal',
 )
 
 

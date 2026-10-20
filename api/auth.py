@@ -73,15 +73,19 @@ PUBLIC_PATHS = frozenset({
 # save/delete/toggle, workspace list, reasoning get/set, approval/clarify
 # pending+respond, projects list, FCM register/unregister, TTS synthesis,
 # speech-to-text transcription (POST /api/transcribe -> handle_transcribe in
-# api/upload.py) and share create/revoke).  Exact matches only — no prefixes,
+# api/upload.py), share create/revoke and the goal controls (POST /api/goal
+# -> _handle_goal_command in api/routes.py, which reads/writes per-session
+# goal state only).  Exact matches only — no prefixes,
 # no PUBLIC_PATHS entry (authentication is still required on every route
 # here).  By explicit owner decision the memory/skills write routes, the cron
-# CRUD routes, the tts/share mutations and the transcribe upload are
-# deliberately granted to the device token so the native client can manage
-# them; the remaining mutating siblings (/api/projects/*,
-# /api/workspaces/{add,remove,rename,reorder}, /api/workspaces/suggest) and
-# the SSE ``stream`` / loopback-only ``inject_test`` routes stay on the
-# browser-cookie path.
+# CRUD routes, the tts/share mutations, the transcribe upload and the goal
+# controls are deliberately granted to the device token so the native client
+# can manage them; the remaining mutating siblings (/api/projects/*,
+# /api/workspaces/{add,remove,rename,reorder}, /api/workspaces/suggest),
+# POST /api/settings (rewrites the server-global settings.json — bot name,
+# password hash, max_tokens, auth on/off — for every client, so it stays on
+# the cookie + current-password path) and the SSE ``stream`` /
+# loopback-only ``inject_test`` routes stay on the browser-cookie path.
 # NB: the read-only capability probe /api/transcribe/capability is
 # deliberately NOT admitted to either allowlist — it is a passive probe the
 # browser UI fires without an Authorization header (static/boot.js
@@ -99,6 +103,7 @@ NATIVE_BEARER_EXACT_PATHS = frozenset({
     '/api/crons/resume',
     '/api/crons/run',
     '/api/crons/update',
+    '/api/goal',
     '/api/memory',
     '/api/memory/write',
     '/api/projects',
@@ -118,10 +123,12 @@ NATIVE_BEARER_EXACT_PATHS = frozenset({
 })
 
 # ── Native Bearer fast-path: read-only routes for the new Android screens ──
-# Kanban board, insights, server logs, skills usage and provider-quota screens
-# consume existing GET contracts only (api/kanban_bridge.py under /api/kanban/*,
-# /api/insights and /api/skills/usage in api/routes.py, /api/logs and
-# /api/provider/quota in api/route_readonly.py).  The cron history listing
+# Kanban board, insights, server logs, skills usage, provider-quota and the
+# display-mode settings read screens consume existing GET contracts only
+# (api/kanban_bridge.py under /api/kanban/*, /api/insights and
+# /api/skills/usage in api/routes.py, /api/logs and /api/provider/quota in
+# api/route_readonly.py, GET /api/settings in api/routes.py which strips
+# password_hash before answering).  The cron history listing
 # and delivery-options picker are also GET-only reads (see
 # _handle_cron_history / _handle_cron_delivery_options in api/routes.py) and
 # are added here so the native client can render them without a browser
@@ -129,9 +136,13 @@ NATIVE_BEARER_EXACT_PATHS = frozenset({
 # (NATIVE_BEARER_READONLY_METHODS), so kanban mutations (POST
 # /api/kanban/tasks, /api/kanban/boards, /api/kanban/dispatch, PATCH/DELETE
 # /api/kanban/*) never accept a device Bearer: they stay on the browser
-# cookie-session + CSRF path exactly as before.  Exact paths only for the
-# singleton routes; the single kanban prefix requires the trailing slash,
-# so /api/kanban and prefix neighbours never match.
+# cookie-session + CSRF path exactly as before.  The same method guard is why
+# /api/settings is listed HERE and not in NATIVE_BEARER_EXACT_PATHS: only the
+# read is admitted, POST /api/settings rewrites the server-global
+# settings.json (bot_name, password hash, max_tokens, auth on/off) for every
+# client and therefore stays on the cookie + current-password path.  Exact
+# paths only for the singleton routes; the single kanban prefix requires the
+# trailing slash, so /api/kanban and prefix neighbours never match.
 NATIVE_BEARER_READONLY_EXACT_PATHS = frozenset({
     '/api/crons/delivery-options',
     '/api/crons/history',
@@ -139,6 +150,7 @@ NATIVE_BEARER_READONLY_EXACT_PATHS = frozenset({
     '/api/logs',
     '/api/provider/quota',
     '/api/push/fcm/status',
+    '/api/settings',
     '/api/skills/usage',
 })
 NATIVE_BEARER_READONLY_PREFIXES = ('/api/kanban/',)

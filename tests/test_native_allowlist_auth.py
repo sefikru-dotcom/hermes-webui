@@ -28,6 +28,7 @@ EXPECTED_EXACT_PATHS = {
     '/api/crons/resume',
     '/api/crons/run',
     '/api/crons/update',
+    '/api/goal',
     '/api/memory',
     '/api/memory/write',
     '/api/projects',
@@ -58,6 +59,17 @@ NON_ALLOWLISTED_SIBLINGS = (
     '/api/reasoning/extra',  # suffix is not an exact match
     '/api/transcribe/',  # trailing slash is not an exact match
     '/api/transcribe/capability',  # browser-only probe, never device-token
+)
+
+# Mutating routes that must stay on the browser-cookie path even though their
+# GET (or a same-name read route) may be device-token readable.  Checked with
+# the verb that matters, so a read-only admission can never be mistaken for a
+# write admission.
+NON_ALLOWLISTED_MUTATIONS = (
+    ('POST', '/api/settings'),  # rewrites server-global settings.json
+    ('POST', '/api/projects/create'),
+    ('POST', '/api/workspaces/add'),
+    ('POST', '/api/kanban/tasks'),
 )
 
 
@@ -178,6 +190,121 @@ def test_native_bearer_not_accepted_outside_allowlist(monkeypatch):
                 assert status == 401, f"native bearer leaked onto {path}"
         finally:
             conn.close()
+            httpd.shutdown()
+            httpd.server_close()
+            thread.join(timeout=5)
+
+
+def test_goal_write_and_settings_read_admission(monkeypatch):
+    """POST /api/goal is device-token writable; /api/settings is read-only.
+
+    Both routes are pinned here on their own because the generic loops above
+    only exercise GET: the native client needs POST /api/goal (goal control)
+    and GET /api/settings (display-mode sync), while POST /api/settings keeps
+    rewriting the server-global settings.json and must stay cookie-only.
+    Dispatch is stubbed with a sentinel so no real goal/settings handler runs
+    (POST /api/settings would otherwise write the live settings file).
+    """
+    import api.auth as auth
+    import api.device_pairings as pairings
+    import server
+
+    dispatched = []
+
+    def sentinel(handler, parsed):
+        dispatched.append((handler.command, parsed.path))
+        payload = b'{"dispatched": true}'
+        handler.send_response(200)
+        handler.send_header("Content-Type", "application/json")
+        handler.send_header("Content-Length", str(len(payload)))
+        handler.end_headers()
+        handler.wfile.write(payload)
+        return True
+
+    with tempfile.TemporaryDirectory() as state:
+        state_path = Path(state)
+        monkeypatch.setattr(pairings, "STATE_DIR", state_path)
+        monkeypatch.setattr(pairings, "_DB_PATH", state_path / "native_auth.db")
+        monkeypatch.setattr(auth, "is_auth_enabled", lambda: True)
+        monkeypatch.setattr(auth, "verify_session", lambda value: False)
+        monkeypatch.setattr(auth, "is_trusted_auth_enabled", lambda: False)
+        monkeypatch.setattr(server, "check_auth", auth.check_auth)
+        monkeypatch.setattr(server, "handle_get", sentinel)
+        monkeypatch.setattr(server, "handle_post", sentinel)
+        httpd = server.QuietHTTPServer(("127.0.0.1", 0), server.Handler)
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        port = httpd.server_address[1]
+
+        def request(method, path, headers=None):
+            # One connection per request: the stubbed dispatch never reads the
+            # request body, so a kept-alive socket would leak it into the next
+            # request line.
+            body = b"{}" if method in ("POST", "PUT", "PATCH") else None
+            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=15)
+            try:
+                conn.request(method, path, body=body, headers=headers or {})
+                response = conn.getresponse()
+                response.read()
+                return response.status
+            finally:
+                conn.close()
+
+        try:
+            created = pairings.create_pairing()
+            assert pairings.approve_pairing(created["code"], session_cookie="verified")
+            exchanged = pairings.exchange_pairing(
+                created["pair_id"], created["poll_secret"]
+            )
+            assert exchanged and exchanged["token_type"] == "Bearer"
+            valid = {"Authorization": f"Bearer {exchanged['access_token']}"}
+
+            # The write route really is in the exact set, and the read route
+            # in the read-only set — asserted by membership, never by 404.
+            assert "/api/goal" in auth.NATIVE_BEARER_EXACT_PATHS
+            assert "/api/settings" in auth.NATIVE_BEARER_READONLY_EXACT_PATHS
+            assert "/api/settings" not in auth.NATIVE_BEARER_EXACT_PATHS
+
+            # POST /api/goal: 401 without a token, admitted with a device token.
+            dispatched.clear()
+            assert request("POST", "/api/goal") == 401
+            assert dispatched == []
+            dispatched.clear()
+            status = request("POST", "/api/goal", valid)
+            assert status == 200, status
+            assert dispatched == [("POST", "/api/goal")]
+
+            # GET /api/settings: 401 without a token, admitted with a device token.
+            dispatched.clear()
+            assert request("GET", "/api/settings") == 401
+            assert dispatched == []
+            dispatched.clear()
+            status = request("GET", "/api/settings", valid)
+            assert status == 200, status
+            assert dispatched == [("GET", "/api/settings")]
+
+            # POST /api/settings stays cookie-only: the device token grants
+            # nothing, and dispatch is never reached.
+            dispatched.clear()
+            assert request("POST", "/api/settings", valid) == 401
+            assert request("POST", "/api/settings") == 401
+            assert request(
+                "POST", "/api/settings", {"Authorization": "Bearer hdev_invalidcredential"}
+            ) == 401
+            assert dispatched == []
+
+            # POST-only admission: other verbs on /api/settings are not covered.
+            for method in ("PUT", "PATCH", "DELETE"):
+                assert request(method, "/api/settings", valid) == 401, method
+            assert dispatched == []
+
+            # The mutating siblings stay cookie-only even with a valid device
+            # token — no dispatch, so no CSRF bypass.
+            for method, path in NON_ALLOWLISTED_MUTATIONS:
+                dispatched.clear()
+                assert request(method, path, valid) == 401, (method, path)
+                assert dispatched == [], (method, path)
+        finally:
             httpd.shutdown()
             httpd.server_close()
             thread.join(timeout=5)

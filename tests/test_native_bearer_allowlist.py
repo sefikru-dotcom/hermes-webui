@@ -17,6 +17,7 @@ EXPECTED_EXACT_PATHS = frozenset({
     '/api/crons/resume',
     '/api/crons/run',
     '/api/crons/update',
+    '/api/goal',
     '/api/memory',
     '/api/memory/write',
     '/api/projects',
@@ -66,8 +67,8 @@ def test_native_bearer_allowlist_gate(monkeypatch):
         thread.start()
         conn = http.client.HTTPConnection("127.0.0.1", httpd.server_address[1], timeout=10)
 
-        def request(method, path, headers=None):
-            conn.request(method, path, headers=headers or {})
+        def request(method, path, headers=None, body=None):
+            conn.request(method, path, body=body, headers=headers or {})
             response = conn.getresponse()
             response.read()
             return response.status
@@ -84,6 +85,20 @@ def test_native_bearer_allowlist_gate(monkeypatch):
             # (dispatch may still fail in the unit-test env; auth must not 401).
             status = request("GET", "/api/crons", bearer)
             assert status != 401
+
+            # POST /api/goal (native goal control) is admitted; the handler
+            # rejects the empty body with 400, but auth must not 401.
+            status = request("POST", "/api/goal", bearer, body=b"{}")
+            assert status != 401
+            assert request("POST", "/api/goal", body=b"{}") == 401
+
+            # GET /api/settings (display-mode sync read) is admitted for the
+            # device token; the POST twin that rewrites server-global
+            # settings.json is NOT and stays on the cookie path.
+            status = request("GET", "/api/settings", bearer)
+            assert status != 401
+            assert request("GET", "/api/settings") == 401
+            assert request("POST", "/api/settings", bearer, body=b"{}") == 401
 
             # An invalid Bearer fails closed on an allow-listed route: no
             # cookie fallback masks the bad native token.
