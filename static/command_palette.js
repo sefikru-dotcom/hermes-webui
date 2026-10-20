@@ -261,7 +261,6 @@
   var _active = 0;       // index into _results
   var _open = false;
   var _previousFocus = null;
-  var _beforeOpen = null; // optional (fromCtrlK: true) — see open()
 
   function _el(tag, attrs, text){
     var node = document.createElement(tag);
@@ -473,10 +472,9 @@
   }
 
   // ── Open / close ───────────────────────────────────────────────────────────
-  function open(options){
+  function open(){
     if(_open) return;
     if(!_root) _build();
-    _beforeOpen = options || {};
     _previousFocus = document.activeElement;
     _open = true;
     window._paletteOwnsKeyboard = true;
@@ -491,15 +489,11 @@
     if(!_open) return;
     _open = false;
     window._paletteOwnsKeyboard = false;
-    var beforeOpen = _beforeOpen;
-    _beforeOpen = null;
     if(_root) _root.hidden = true;
     document.documentElement.classList.remove('command-palette-open');
-    // "Close" means give the user back what they were doing. The Ctrl/Cmd+K
-    // route instead lands them in the composer, which is what that shortcut
-    // has always done.
-    var restoreFocus = !(beforeOpen && beforeOpen.fromCtrlK)
-      && _previousFocus && _previousFocus.focus && document.contains(_previousFocus);
+    // "Close" means give the user back what they were doing; the composer is only
+    // the fallback when the element they opened the palette from is gone.
+    var restoreFocus = _previousFocus && _previousFocus.focus && document.contains(_previousFocus);
     if(restoreFocus) _previousFocus.focus();
     else _focusComposer();
     _previousFocus = null;
@@ -529,32 +523,9 @@
     toggle();
   }, true);
 
-  // Ctrl/Cmd+K still means "new chat" (boot.js): instead of firing it directly
-  // it now opens the palette with the new-chat entry preselected, which is the
-  // Quick-Open gesture this app was missing. Like boot.js, the chord is left
-  // alone inside text fields (Ctrl+K there is the browser's delete-to-end).
-  document.addEventListener('keydown', function(event){
-    if(!_isMod(event) || event.altKey || event.shiftKey) return;
-    var key = event.key;
-    if(key !== 'k' && key !== 'K' && event.code !== 'KeyK') return;
-    event.preventDefault();
-    event.stopPropagation();
-    var composer = document.getElementById('msg');
-    var isText = composer && (event.target === composer || event.target === _input);
-    if(_open){
-      close();
-      return;
-    }
-    if(isText){
-      // The composer keeps typing "k" on a modified keystroke out of muscle
-      // memory (Ctrl+K in a message deletes to end of line); boot.js already
-      // ignores Ctrl+K inside text fields and the palette must not diverge.
-      return;
-    }
-    open({fromCtrlK: true});
-    _input.value = _t('palette_new_chat').toLowerCase();
-    _render(_input.value);
-  }, true);
+  // Ctrl/Cmd+K is left to boot.js, which has always made it "new chat". Taking the
+  // chord here would change a documented shortcut into a different gesture, and a
+  // palette is additive: it gets its own chord rather than repurposing an existing one.
 
   // Exposed for the integration tests and for any future ribbon button.
   window.openCommandPalette = open;

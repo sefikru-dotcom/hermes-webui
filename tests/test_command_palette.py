@@ -158,23 +158,23 @@ class TestKeyboard(unittest.TestCase):
         self.assertRegex(self.js, r"event\.target\s*===\s*_root", "backdrop handler missing")
 
     def test_does_not_steal_ctrl_k_new_chat(self):
-        """Ctrl+K is new chat today (static/boot.js). The palette's Ctrl+K
-        entry point only reacts to a modified K *without* shift, and it must
-        bail out of text fields and let the composer keep the keystroke."""
-        start = self.js.rfind("event.shiftKey) return")
-        ctrl_k = self.js[start:self.js.find("\n  }, true)", start)]
-        self.assertIn("KeyK", ctrl_k, "Ctrl+K block not found")
-        self.assertIn("open({fromCtrlK: true})", ctrl_k,
-                      "Ctrl+K must be the palette's new-chat entry")
-        self.assertIn("isText", ctrl_k,
-                      "Ctrl+K handler should bail out of text fields")
+        """Ctrl+K is new chat (static/boot.js) and stays that way. A palette is
+        additive: repurposing a documented shortcut would change what users
+        already rely on, so the module must register no K chord at all."""
+        handlers = re.findall(r"document\.addEventListener\('keydown'.*?\}, true\);",
+                              self.js, re.S)
+        for handler in handlers:
+            self.assertNotIn("KeyK", handler,
+                             "the palette must not register a Ctrl+K handler")
+            self.assertNotIn("'k'", handler)
+            self.assertNotIn("'K'", handler)
 
     def test_does_not_steal_ctrl_slash_or_comma(self):
         """Ctrl+/ (focus composer) and Ctrl+, (settings) are owned by boot.js;
         the palette must not add handlers for them."""
         handlers = re.findall(r"document\.addEventListener\('keydown'.*?\}, true\);",
                               self.js, re.S)
-        self.assertGreaterEqual(len(handlers), 2, "expected the two chord handlers")
+        self.assertGreaterEqual(len(handlers), 1, "expected the chord handler")
         for handler in handlers:
             self.assertNotIn("','", handler)
             self.assertNotIn("'/'", handler)
