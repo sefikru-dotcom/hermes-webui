@@ -1,12 +1,210 @@
 """Speech synthesis endpoint with route-owned network and limiter seams."""
 
+import io
 import json
 import os
 import re
+import subprocess
+import sys
+import tempfile
+import threading
+import wave
+from pathlib import Path
+
+# ── Local Piper engine ──────────────────────────────────────────────────
+#
+# Piper synthesises on CPU from a local ONNX voice, so /api/tts keeps working
+# when the Microsoft Edge endpoint rejects our token (the failure mode that
+# used to kill voice output silently). The loaded voice is cached per process:
+# loading takes ~1.3 s, a short sentence then synthesises in ~0.25 s. Every
+# synthesis is serialised behind a lock — an onnxruntime InferenceSession is
+# not documented as safe for concurrent Run() calls, and the 2 s per-client
+# rate limiter keeps the queue short.
+_PIPER_VOICE_CACHE: dict = {}
+_PIPER_VOICE_CACHE_LOCK = threading.Lock()
+_PIPER_SYNTH_LOCK = threading.Lock()
+
+# Interpreter that owns the `piper` package, used only when the running
+# WebUI interpreter cannot import piper (bootstrap re-execs into the Hermes
+# venv, but a bare .venv launch would not have it). Probed once, lazily.
+_PIPER_PYTHON: list = [None]
+_PIPER_PYTHON_PROBED = threading.Event()
+
+# Voice ids are file stems inside voices_dir. The id from the request is only
+# ever matched against this pattern and then looked up in the directory
+# listing — a request path can never reach the filesystem.
+_PIPER_VOICE_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}")
+_PIPER_DEFAULT_VOICES_DIR = Path.home() / ".hermes" / "cache" / "piper-voices"
+
+
+def _tts_piper_config() -> dict:
+    """Resolve tts.piper.{voice,voices_dir} from config.yaml, then env, then home."""
+    voice = os.getenv("HERMES_TTS_PIPER_VOICE", "").strip()
+    voices_dir = os.getenv("HERMES_TTS_PIPER_VOICES_DIR", "").strip()
+    try:
+        from api.config import get_config
+        tts_cfg = (get_config() or {}).get("tts", {})
+        if isinstance(tts_cfg, dict):
+            piper_cfg = tts_cfg.get("piper", {})
+            if isinstance(piper_cfg, dict):
+                voice = str(piper_cfg.get("voice") or voice or "").strip()
+                voices_dir = str(piper_cfg.get("voices_dir") or voices_dir or "").strip()
+    except Exception:
+        pass  # config is optional: env/home fallbacks below still work
+    if not voices_dir:
+        try:
+            from api.profiles import get_active_hermes_home
+            voices_dir = str(get_active_hermes_home() / "cache" / "piper-voices")
+        except Exception:
+            voices_dir = str(_PIPER_DEFAULT_VOICES_DIR)
+    return {"voice": voice, "voices_dir": voices_dir}
+
+
+def _piper_voice_catalog(voices_dir: str) -> dict:
+    """Map voice id -> model path for every *.onnx voice in voices_dir."""
+    catalog: dict[str, Path] = {}
+    try:
+        entries = sorted(Path(voices_dir).glob("*.onnx"))
+    except OSError:
+        return catalog
+    for entry in entries:
+        try:
+            if entry.is_file() and _PIPER_VOICE_ID_RE.fullmatch(entry.stem):
+                catalog[entry.stem] = entry
+        except OSError:
+            continue
+    return catalog
+
+
+def _piper_import():
+    """Return (PiperVoice, SynthesisConfig) when piper is importable, else None."""
+    try:
+        from piper import PiperVoice, SynthesisConfig
+    except Exception:
+        return None
+    return PiperVoice, SynthesisConfig
+
+
+def _piper_load_voice(model_path):
+    """Load (and cache) a PiperVoice for model_path; None when piper is absent."""
+    key = str(model_path)
+    with _PIPER_VOICE_CACHE_LOCK:
+        cached = _PIPER_VOICE_CACHE.get(key)
+    if cached is not None:
+        return cached
+    loaded = _piper_import()
+    if loaded is None:
+        return None
+    PiperVoice, _SynthesisConfig = loaded
+    voice = PiperVoice.load(key)
+    with _PIPER_VOICE_CACHE_LOCK:
+        _PIPER_VOICE_CACHE[key] = voice
+    return voice
+
+
+def _piper_python_candidates():
+    """Interpreters that might have the piper package, best first."""
+    env_python = os.getenv("HERMES_TTS_PIPER_PYTHON", "").strip()
+    if env_python:
+        yield env_python
+    yield "/usr/local/lib/hermes-agent/venv/bin/python"
+    yield sys.executable
+
+
+def _piper_subprocess_python():
+    """First interpreter that can `import piper`, probed once and cached."""
+    if _PIPER_PYTHON_PROBED.is_set():
+        return _PIPER_PYTHON[0]
+    resolved = None
+    for candidate in _piper_python_candidates():
+        if not candidate or not os.access(candidate, os.X_OK):
+            continue
+        try:
+            probe = subprocess.run(
+                [candidate, "-c", "import piper"],
+                capture_output=True, timeout=30, check=False,
+            )
+        except Exception:
+            continue
+        if probe.returncode == 0:
+            resolved = candidate
+            break
+    _PIPER_PYTHON[0] = resolved
+    _PIPER_PYTHON_PROBED.set()
+    return resolved
+
+
+def _piper_synthesize_wav_subprocess(text: str, model_path, *, length_scale=None, timeout=60):
+    """Synthesise through `python -m piper` when piper is not importable here."""
+    python_bin = _piper_subprocess_python()
+    if not python_bin:
+        return None
+    with tempfile.TemporaryDirectory(prefix="hermes-piper-") as tmpdir:
+        out_path = Path(tmpdir) / "speech.wav"
+        cmd = [python_bin, "-m", "piper", "-m", str(model_path), "-f", str(out_path)]
+        if length_scale:
+            cmd += ["--length-scale", f"{float(length_scale):.3f}"]
+        try:
+            proc = subprocess.run(
+                cmd, input=text, capture_output=True, text=True,
+                timeout=timeout, check=False,
+            )
+        except Exception:
+            return None
+        if proc.returncode != 0 or not out_path.is_file():
+            return None
+        data = out_path.read_bytes()
+    return data or None
+
+
+def _piper_synthesize_wav(text: str, model_path, *, length_scale=None):
+    """Synthesise text to WAV bytes with a local voice; None if piper is unavailable."""
+    loaded = _piper_import()
+    if loaded is None:
+        return _piper_synthesize_wav_subprocess(text, model_path, length_scale=length_scale)
+    _PiperVoice, SynthesisConfig = loaded
+    voice = _piper_load_voice(model_path)
+    if voice is None:
+        return _piper_synthesize_wav_subprocess(text, model_path, length_scale=length_scale)
+    syn_config = None
+    if length_scale:
+        try:
+            syn_config = SynthesisConfig(length_scale=float(length_scale))
+        except Exception:
+            syn_config = None
+    buf = io.BytesIO()
+    with _PIPER_SYNTH_LOCK:
+        with wave.open(buf, "wb") as wav_file:
+            voice.synthesize_wav(text, wav_file, syn_config=syn_config)
+    return buf.getvalue() or None
+
+
+def _tts_rate_to_length_scale(rate_str: str):
+    """Map an edge-style rate ("+20%") onto piper's length_scale (inverse speed).
+
+    piper has no rate/pitch parameters: rate is inverted into length_scale and
+    clamped to 0.5..2.0 so a hostile value cannot produce minute-long audio.
+    pitch is ignored (no equivalent in the piper model).
+    """
+    if not rate_str:
+        return None
+    try:
+        pct = float(str(rate_str).strip().rstrip("%"))
+    except (TypeError, ValueError):
+        return None
+    if pct == 0:
+        return None
+    return min(2.0, max(0.5, 1.0 / (1.0 + pct / 100.0)))
 
 
 def handle_tts(handler, parsed, *, limiter_owner, deps):
     """Generate TTS audio via supported server TTS engines. POST JSON body only.
+
+    Engine routing: an explicit `engine` wins ("piper", "edge", "elevenlabs",
+    "openai"). Without one, an edge voice id from the allowlist keeps the
+    Microsoft path and anything else (no voice, or a local piper voice id from
+    tts.piper.voices_dir) goes to the local piper engine. Piper failures fall
+    back to edge-tts so a missing local model never means silence.
 
     Design note addressing deep review blocker #4 (synchronous I/O):
     The server uses ThreadingHTTPServer (see server.py:173), so each request
@@ -36,9 +234,10 @@ def handle_tts(handler, parsed, *, limiter_owner, deps):
 
     text = ""
     voice = "ru-RU-SvetlanaNeural"
+    requested_voice = ""
     rate_str = ""
     pitch_str = ""
-    engine = "edge"  # "edge" | "elevenlabs" | "openai" | "browser" (browser is client-side only)
+    engine = ""  # "" (auto) | "edge" | "piper" | "elevenlabs" | "openai"
 
     if handler.command != "POST":
         from api.helpers import bad as _bad
@@ -47,10 +246,11 @@ def handle_tts(handler, parsed, *, limiter_owner, deps):
     try:
         data = read_body(handler)
         text = (data.get("text") or "").strip()
-        voice = data.get("voice") or voice
+        requested_voice = str(data.get("voice") or "").strip()
+        voice = requested_voice or voice
         rate_str = _normalize_tts_prosody(data.get("rate"), unit="%")
         pitch_str = _normalize_tts_prosody(data.get("pitch"), unit="Hz")
-        engine = (data.get("engine") or "edge").strip().lower()
+        engine = str(data.get("engine") or "").strip().lower()
     except Exception:
         from api.helpers import bad as _bad
         return _bad(handler, "invalid request body", 400)
@@ -289,7 +489,11 @@ def handle_tts(handler, parsed, *, limiter_owner, deps):
             pass
         return True
 
-    # ── Edge TTS ────────────────────────────────────────────────────────
+    # ── Engine selection ────────────────────────────────────────────────
+    # An explicit edge voice keeps the old Microsoft path (browser WebUI
+    # compatibility); a missing voice or a local piper voice id goes to piper.
+    # Unknown ids are still rejected instead of silently synthesising with a
+    # different voice.
     allowed = {
         "ru-RU-SvetlanaNeural", "ru-RU-DmitryNeural",
         "zh-CN-XiaoxiaoNeural", "zh-CN-XiaoyiNeural", "zh-CN-YunxiNeural",
@@ -300,6 +504,55 @@ def handle_tts(handler, parsed, *, limiter_owner, deps):
         "fr-FR-DeniseNeural", "fr-FR-EloiseNeural", "fr-FR-HenriNeural",
         "id-ID-GadisNeural",
     }
+
+    piper_cfg = _tts_piper_config()
+    piper_catalog = _piper_voice_catalog(piper_cfg["voices_dir"])
+    piper_voice = ""
+    use_piper = False
+
+    if engine == "piper":
+        use_piper = True
+        piper_voice = requested_voice if requested_voice in piper_catalog else piper_cfg["voice"]
+    elif engine in ("", "auto") and requested_voice not in allowed:
+        if requested_voice and requested_voice not in piper_catalog:
+            from api.helpers import bad as _bad
+            return _bad(handler, "invalid voice", 400)
+        use_piper = True
+        piper_voice = requested_voice or piper_cfg["voice"]
+
+    if use_piper:
+        model_path = piper_catalog.get(piper_voice) if piper_voice else None
+        audio_data = None
+        if model_path is None:
+            logger.warning(
+                "Piper voice %r not found in %s; falling back to edge-tts",
+                piper_voice, piper_cfg["voices_dir"],
+            )
+        else:
+            try:
+                audio_data = _piper_synthesize_wav(
+                    text, model_path, length_scale=_tts_rate_to_length_scale(rate_str),
+                )
+            except Exception:
+                logger.exception("Piper synthesis failed; falling back to edge-tts")
+                audio_data = None
+        if audio_data:
+            handler.send_response(200)
+            handler.send_header("Content-Type", "audio/wav")
+            handler.send_header("Cache-Control", "no-store")
+            handler.send_header("Content-Length", str(len(audio_data)))
+            handler.end_headers()
+            try:
+                handler.wfile.write(audio_data)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            return True
+        # Local synthesis unavailable: keep the request alive on edge-tts, with
+        # the historical default voice when the request carried a piper id.
+        voice = requested_voice if requested_voice in allowed else "ru-RU-SvetlanaNeural"
+        logger.warning("Local TTS unavailable; serving edge-tts voice %s", voice)
+
+    # ── Edge TTS ────────────────────────────────────────────────────────
     if voice not in allowed:
         from api.helpers import bad as _bad
         return _bad(handler, "invalid voice", 400)
