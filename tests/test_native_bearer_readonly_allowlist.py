@@ -41,6 +41,8 @@ EXPECTED_READONLY_EXACT_PATHS = {
     '/api/push/fcm/status',
     '/api/settings',
     '/api/skills/usage',
+    # Voice gateway downstream SSE read (api/voice_session.py).
+    '/api/voice/stream',
 }
 EXPECTED_READONLY_PREFIXES = ('/api/kanban/',)
 SAFE_METHODS = ('GET', 'HEAD')
@@ -122,6 +124,10 @@ PINNED_EXACT_PATHS = {
     '/api/skills/toggle',
     '/api/transcribe',
     '/api/tts',
+    # Voice gateway upstream channel (api/voice_session.py).
+    '/api/voice/close',
+    '/api/voice/interrupt',
+    '/api/voice/session',
     '/api/workspaces',
 }
 

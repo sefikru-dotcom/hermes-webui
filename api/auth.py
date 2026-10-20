@@ -119,6 +119,9 @@ NATIVE_BEARER_EXACT_PATHS = frozenset({
     '/api/skills/toggle',
     '/api/transcribe',
     '/api/tts',
+    '/api/voice/close',
+    '/api/voice/interrupt',
+    '/api/voice/session',
     '/api/workspaces',
 })
 
@@ -152,6 +155,11 @@ NATIVE_BEARER_READONLY_EXACT_PATHS = frozenset({
     '/api/push/fcm/status',
     '/api/settings',
     '/api/skills/usage',
+    # Voice gateway downstream channel: a long-lived SSE read for the live
+    # voice dialog (api/voice_session.py). Safe methods only, so the mutating
+    # siblings (/api/voice/session, /interrupt, /close) stay in the exact-POST
+    # set above and can never be reached through this read-only branch.
+    '/api/voice/stream',
 })
 NATIVE_BEARER_READONLY_PREFIXES = ('/api/kanban/',)
 NATIVE_BEARER_READONLY_METHODS = frozenset({'GET', 'HEAD'})
