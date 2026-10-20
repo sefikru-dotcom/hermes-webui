@@ -40,3 +40,5 @@ tests/test_vendored_cdn_assets.py
 tests/test_api_retry_policy.py
 tests/test_issue1100_prism_sri.py
 tests/test_command_palette.py
+tests/test_rail_grouping.py
+tests/test_rail_keyboard_nav.py

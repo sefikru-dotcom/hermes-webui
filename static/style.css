@@ -9156,13 +9156,21 @@ html.mars-transparent-stream #marsTurnFoldBtn:not([hidden]){display:flex;}
   }
 }
 
-/* Десктопный рельс: разделители групп */
-.rail-divider {
+/* Десктопный рельс: разделители групп.
+   `flex-shrink:0` не даёт сжать линию в переполненном рельсе, `align-self`
+   центрирует её в flex-колонке. `.rail-divider-hidden` ставит rail_nav.js,
+   когда у группы не осталось ни одного видимого таба. */
+.rail .rail-divider {
   width: 20px;
   height: 1px;
+  flex-shrink: 0;
+  align-self: center;
   background: var(--border2);
   margin: 4px 0;
   opacity: 0.7;
+}
+.rail .rail-divider.rail-divider-hidden {
+  display: none;
 }
 
 /* Sergey profile: completely hide model & reasoning selection across the entire UI */

@@ -7,7 +7,8 @@
 
 // Cache version is injected by the server at request time (routes.py /sw.js handler).
 // Bumps automatically whenever the git commit changes — no manual edits needed.
-// MANUAL BUMP: mars-chat-final-browser-v2 — self-hosted xterm/Prism in SHELL_ASSETS.
+// MANUAL BUMP: rail_nav.js added to SHELL_ASSETS (rail tablist keyboard nav and
+// divider upkeep). The `__WEBUI_VERSION__` token below keeps busting by commit.
 const CACHE_NAME = 'hermes-shell-__WEBUI_VERSION__-mars-chat-final-browser-v2';
 
 // Static assets that form the app shell.
@@ -42,6 +43,7 @@ const SHELL_ASSETS = [
   './static/embedded_frames.js' + VQ,
   './static/command_palette.css' + VQ,
   './static/command_palette.js' + VQ,
+  './static/rail_nav.js' + VQ,
   './static/vendor/smd.min.js' + VQ,
   './static/vendor/katex/0.16.22/katex.min.css' + VQ,
   './static/vendor/katex/0.16.22/katex.min.js' + VQ,
