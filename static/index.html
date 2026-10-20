@@ -246,7 +246,7 @@ window._marsFallbackActivityCycle=function(btn){
        projects, workspaces, memory, skills, profiles; media = music;
        observation = insights, logs. Separators are kept between groups and
        collapsed by rail_nav.js when a group has no visible tabs left. -->
-  <nav class="rail" role="tablist" aria-orientation="vertical" aria-label="Primary navigation">
+  <nav class="rail" role="tablist" aria-orientation="vertical" aria-label="Primary navigation" data-i18n-aria-label="rail_aria_label">
     <button role="tab" aria-selected="true" aria-controls="panelChat" class="rail-btn nav-tab active has-tooltip" data-panel="chat" onclick="switchPanel('chat',{fromRailClick:true})" data-tooltip="Chat" data-i18n-title="tab_chat" aria-label="Chat" data-i18n-aria-label="tab_chat"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></button>
     <button role="tab" aria-selected="false" aria-controls="panelTasks" class="rail-btn nav-tab has-tooltip" data-panel="tasks" onclick="switchPanel('tasks',{fromRailClick:true})" data-tooltip="Tasks" data-i18n-title="tab_tasks" aria-label="Tasks" data-i18n-aria-label="tab_tasks"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></button>
     <button role="tab" aria-selected="false" aria-controls="panelKanban" class="rail-btn nav-tab has-tooltip" data-panel="kanban" onclick="switchPanel('kanban',{fromRailClick:true})" data-tooltip="Kanban" data-i18n-title="tab_kanban" aria-label="Kanban" data-i18n-aria-label="tab_kanban"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 4v16"/><path d="M16 4v16"/><path d="M3 10h18"/></svg></button>
@@ -2016,7 +2016,7 @@ window._marsFallbackActivityCycle=function(btn){
 </div>
 <div class="toast" id="toast"></div>
 <script src="static/rail_nav.js?v=__WEBUI_VERSION__-mars-rail-dividers" defer></script>
-<script src="static/i18n.js?v=__WEBUI_VERSION__-mars-kanban-v2" defer></script>
+<script src="static/i18n.js?v=__WEBUI_VERSION__-mars-rail-label" defer></script>
 <script src="static/chat_activity.js?v=__WEBUI_VERSION__-mars-kanban-v2" defer></script>
 <script src="static/approval_i18n.js?v=__WEBUI_VERSION__-am3" defer></script>
 <script src="static/skeleton.js?v=__WEBUI_VERSION__-mars-chat-final-browser-v2" defer></script>

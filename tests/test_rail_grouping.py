@@ -87,6 +87,28 @@ def test_rail_is_a_vertical_tablist(html):
     assert 'aria-orientation="vertical"' in block
 
 
+def test_rail_container_label_is_localized(html):
+    """The tablist's own accessible name must translate, not stay English.
+
+    Every tab already carried data-i18n-aria-label, so the rail read as Russian
+    to a screen reader tab by tab and as "Primary navigation" as a whole.
+    """
+    nav = re.search(r'<nav class="rail"[^>]*>', html)
+    assert nav, "the rail nav element is missing"
+    assert 'data-i18n-aria-label="rail_aria_label"' in nav.group(0)
+    # aria-label stays as the no-JS fallback.
+    assert re.search(r'\baria-label="[^"]+"', nav.group(0))
+
+
+def test_rail_aria_label_exists_in_every_locale():
+    source = open(
+        os.path.join(BASE_DIR, "static", "i18n.js"), encoding="utf-8"
+    ).read()
+    labels = re.findall(r"rail_aria_label: '([^']+)'", source)
+    assert len(labels) == 14, f"rail_aria_label must exist in all 14 locales, found {len(labels)}"
+    assert all(label.strip() for label in labels)
+
+
 def test_rail_has_four_group_dividers(html):
     dividers = [i for i, (kind, _) in enumerate(_rail_items(html)) if kind == "divider"]
     # Three between the four groups plus one before the bottom settings slot.

@@ -1926,6 +1926,7 @@ const LOCALES = {
     palette_empty: 'No results',
     palette_placeholder: 'Type a command…',
     palette_aria_label: 'Command palette',
+    rail_aria_label: 'Primary navigation',
   },
 
   it: {
@@ -3716,6 +3717,7 @@ const LOCALES = {
     palette_empty: 'Nessun risultato',
     palette_placeholder: 'Digita un comando…',
     palette_aria_label: 'Palette dei comandi',
+    rail_aria_label: 'Navigazione principale',
   },
 
   ja: {
@@ -5511,6 +5513,7 @@ const LOCALES = {
     palette_empty: '該当するコマンドがありません',
     palette_placeholder: 'コマンドを入力…',
     palette_aria_label: 'コマンドパレット',
+    rail_aria_label: 'メインナビゲーション',
   },
 
   ru: {
@@ -7396,6 +7399,7 @@ const LOCALES = {
     palette_empty: 'Ничего не найдено',
     palette_placeholder: 'Введите команду…',
     palette_aria_label: 'Палитра команд',
+    rail_aria_label: 'Основная навигация',
   },
 
   es: {
@@ -9132,6 +9136,7 @@ const LOCALES = {
     palette_empty: 'No se encontraron resultados',
     palette_placeholder: 'Escribe un comando…',
     palette_aria_label: 'Paleta de comandos',
+    rail_aria_label: 'Navegación principal',
   },
 
   de: {
@@ -10862,6 +10867,7 @@ const LOCALES = {
     palette_empty: 'Keine Treffer',
     palette_placeholder: 'Befehl eingeben…',
     palette_aria_label: 'Befehlspalette',
+    rail_aria_label: 'Hauptnavigation',
   },
 
   zh: {
@@ -12585,6 +12591,7 @@ const LOCALES = {
     palette_empty: '未找到匹配项',
     palette_placeholder: '输入命令…',
     palette_aria_label: '命令面板',
+    rail_aria_label: '主导航',
   },
 
   // Traditional Chinese (zh-Hant)
@@ -15977,6 +15984,7 @@ const LOCALES = {
     palette_empty: 'Nenhum resultado',
     palette_placeholder: 'Digite um comando…',
     palette_aria_label: 'Paleta de comandos',
+    rail_aria_label: 'Navegação principal',
   },
   ko: {
     offline_title: '연결이 끊겼습니다',
@@ -17756,6 +17764,7 @@ const LOCALES = {
     palette_empty: '일치하는 항목이 없습니다',
     palette_placeholder: '명령어 입력…',
     palette_aria_label: '명령 팔레트',
+    rail_aria_label: '기본 탐색',
   },
 
   fr: {
@@ -19519,6 +19528,7 @@ const LOCALES = {
     palette_empty: 'Aucun résultat',
     palette_placeholder: 'Saisissez une commande…',
     palette_aria_label: 'Palette de commandes',
+    rail_aria_label: 'Navigation principale',
   },
 
   cs: {
@@ -21269,6 +21279,7 @@ const LOCALES = {
     palette_empty: 'Nic nenalezeno',
     palette_placeholder: 'Zadejte příkaz…',
     palette_aria_label: 'Paleta příkazů',
+    rail_aria_label: 'Hlavní navigace',
   },
   tr: {
 
@@ -23054,6 +23065,7 @@ const LOCALES = {
     palette_empty: 'Sonuç bulunamadı',
     palette_placeholder: 'Bir komut yazın…',
     palette_aria_label: 'Komut paleti',
+    rail_aria_label: 'Ana gezinme',
   },
   pl: {
     offline_title: 'Połączenie utracone',
@@ -24839,6 +24851,7 @@ const LOCALES = {
     palette_empty: 'Brak wyników',
     palette_placeholder: 'Wpisz polecenie…',
     palette_aria_label: 'Paleta poleceń',
+    rail_aria_label: 'Nawigacja główna',
   },
   vi: {
     offline_title: 'Mất kết nối',
@@ -26625,6 +26638,7 @@ const LOCALES = {
     palette_empty: 'Không tìm thấy kết quả',
     palette_placeholder: 'Nhập lệnh…',
     palette_aria_label: 'Bảng lệnh',
+    rail_aria_label: 'Điều hướng chính',
 },
 
 };
