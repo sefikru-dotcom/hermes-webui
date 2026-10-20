@@ -33,3 +33,9 @@ tests/test_native_bearer_exact_paths.py
 tests/test_native_bearer_write_paths.py
 tests/test_push_fcm.py
 tests/test_turn_start_model_attribution.py
+tests/test_embedded_frames_lazy.py
+tests/test_embedded_frames_runtime.py
+tests/test_theme_shadow_tokens.py
+tests/test_vendored_cdn_assets.py
+tests/test_api_retry_policy.py
+tests/test_issue1100_prism_sri.py
