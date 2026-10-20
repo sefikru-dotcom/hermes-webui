@@ -11098,6 +11098,15 @@ def handle_get(handler, parsed) -> bool:
     if proxy_result is not False:
         return proxy_result
 
+    # Voice gateway downstream channel (api/voice_session.py): SSE frames for a
+    # live voice dialog, projected from the session's durable run journal. It is
+    # a transport adapter only — the turn itself still runs through
+    # /api/chat/start and every approval/memory rule is unchanged.
+    if parsed.path == "/api/voice/stream":
+        from api.voice_session import handle_voice_stream
+
+        return handle_voice_stream(handler, parsed)
+
     if parsed.path.startswith("/session/static/"):
         # Strip the leading "/session" so _serve_static() sees a path that
         # starts with "/static/" (its required prefix). _serve_static enforces
@@ -12477,6 +12486,27 @@ def handle_post(handler, parsed) -> bool:
     if not _csrf_exempt_path(parsed.path) and not _check_csrf(handler):
         try:
             return j(handler, {"error": _csrf_rejection_error(handler)}, status=403)
+        finally:
+            if diag:
+                diag.finish()
+    # Voice gateway upstream calls (api/voice_session.py). Create/bind a voice
+    # channel for an existing session, barge-in (speech.stop) and close. The
+    # agent turn itself is still started by the client through /api/chat/start,
+    # so this adds no second path into the runtime.
+    if parsed.path in ("/api/voice/session", "/api/voice/interrupt", "/api/voice/close"):
+        from api.voice_session import (
+            handle_voice_close,
+            handle_voice_interrupt,
+            handle_voice_session_create,
+        )
+
+        _voice_handlers = {
+            "/api/voice/session": handle_voice_session_create,
+            "/api/voice/interrupt": handle_voice_interrupt,
+            "/api/voice/close": handle_voice_close,
+        }
+        try:
+            return _voice_handlers[parsed.path](handler)
         finally:
             if diag:
                 diag.finish()

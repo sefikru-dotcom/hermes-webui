@@ -32,6 +32,10 @@ EXPECTED_EXACT_PATHS = frozenset({
     '/api/skills/toggle',
     '/api/transcribe',
     '/api/tts',
+    # Voice gateway upstream channel (api/voice_session.py).
+    '/api/voice/close',
+    '/api/voice/interrupt',
+    '/api/voice/session',
     '/api/workspaces',
 })
 

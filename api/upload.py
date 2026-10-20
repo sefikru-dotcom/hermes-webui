@@ -424,6 +424,25 @@ def handle_upload_extract(handler):
         return j(handler, {'error': 'Archive extraction failed'}, status=500)
 
 
+def _publish_voice_transcript(session_id, transcript) -> None:
+    """Mirror a finished transcript onto the session's voice channel, if any.
+
+    Optional: only clients that send a ``session_id`` form field with the audio
+    get the ``transcript.final`` frame (api/voice_session.py). Never raises and
+    never changes the /api/transcribe response.
+    """
+    sid = str(session_id or '').strip()
+    text = str(transcript or '').strip()
+    if not sid or not text:
+        return
+    try:
+        from api.voice_session import publish_transcript
+
+        publish_transcript(sid, text, final=True)
+    except Exception:
+        pass
+
+
 def handle_transcribe(handler):
     import traceback as _tb
     temp_path = None
@@ -453,6 +472,7 @@ def handle_transcribe(handler):
             status = 503 if 'unavailable' in msg.lower() or 'not configured' in msg.lower() else 400
             return j(handler, {'error': msg}, status=status)
         transcript = str(result.get('transcript') or '').strip()
+        _publish_voice_transcript(fields.get('session_id', ''), transcript)
         return j(handler, {'ok': True, 'transcript': transcript})
     except ValueError as e:
         return j(handler, {'error': str(e)}, status=400)
