@@ -40,6 +40,8 @@ const SHELL_ASSETS = [
   './static/onboarding.js' + VQ,
   './static/skeleton.js' + VQ,
   './static/embedded_frames.js' + VQ,
+  './static/command_palette.css' + VQ,
+  './static/command_palette.js' + VQ,
   './static/vendor/smd.min.js' + VQ,
   './static/vendor/katex/0.16.22/katex.min.css' + VQ,
   './static/vendor/katex/0.16.22/katex.min.js' + VQ,
