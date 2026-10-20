@@ -8,3 +8,9 @@
 # or directory`.
 *.sh text eol=lf
 *.bash text eol=lf
+
+# The Mars gate reads this manifest line by line in bash. With the global
+# `text=auto` rule and core.autocrlf=true on Windows it checks out as CRLF, so
+# every entry ends in `\r` and the gate rejects the whole manifest with
+# "Invalid Mars test path: tests/test_route_git.py".
+scripts/mars-test-files.txt text eol=lf
