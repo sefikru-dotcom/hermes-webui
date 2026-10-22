@@ -251,12 +251,25 @@ def validate_provider_id(value: object, *, field: str = "model_provider") -> str
 
 
 def _default_custom_endpoint_slug(rest: str) -> bool:
-    """True when ``custom:<rest>`` is an endpoint-style ``host:port`` slug."""
+    """True when ``custom:<rest>`` is an endpoint-style slug, not a name.
+
+    ``rest`` is what follows ``custom:`` in a route hint. Endpoint-style slugs
+    are ``host:port`` authorities (``10.8.71.41:8080``, ``localhost:1234``,
+    ``proxy.internal:8443``); everything else (``plusvibe-api``) is a NAMED
+    provider whose colons, if any, belong to the name.
+
+    This is the single implementation: ``api.config._custom_slug_rest_looks_like_host_port``
+    delegates here. It previously accepted only IP literals, so a hint like
+    ``@custom:localhost:8080:Qwen3`` was peeled on the wrong colon and the model
+    id became ``8080:Qwen3`` — corrupting the identity the pin/guard compare.
+    """
     rest = str(rest or "").strip()
     if ":" not in rest:
         return False
     host, port_s = rest.rsplit(":", 1)
-    if not host or ":" in host or not port_s.isdigit():
+    if not host or ":" in host:
+        return False
+    if not port_s.isdigit():
         return False
     try:
         port_n = int(port_s)
@@ -266,9 +279,13 @@ def _default_custom_endpoint_slug(rest: str) -> bool:
         return False
     try:
         ipaddress.ip_address(host)
+        return True
     except ValueError:
-        return False
-    return True
+        pass
+    if host.lower() == "localhost":
+        return True
+    # Typical DNS hostname used as a proxy slug (contains at least one label dot).
+    return "." in host
 
 
 def parse_route_hint(
@@ -348,7 +365,14 @@ def split_model_identity(
         prefix = prefix.strip()
         rest = rest.strip()
         if prefix and rest:
-            return ModelIdentity(rest, normalize_provider_id(prefix) or explicit)
+            prefix_provider = normalize_provider_id(prefix)
+            # An explicit provider is authoritative: ``google/gemini-3`` stored
+            # on the ``custom:plusvibe-api`` lane is a model id the endpoint
+            # receives verbatim, not a provider hint. Only infer the prefix when
+            # the caller sent no provider or when the prefix agrees with it
+            # (``deepseek/deepseek-v4`` + ``deepseek``).
+            if not explicit or prefix_provider == explicit:
+                return ModelIdentity(rest, prefix_provider or explicit)
 
     return ModelIdentity(raw, explicit)
 

@@ -53,6 +53,7 @@ from api.config import (
     _main_model_request_overrides,
     _resolve_provider_alias,
     _KNOWN_MODEL_PROVIDER_IDS,
+    _custom_slug_rest_looks_like_host_port,
     PROCESS_SESSION_INDEX, PROCESS_SESSION_INDEX_LOCK,
 )
 from api import model_identity
@@ -726,14 +727,41 @@ def _resolve_turn_reasoning_effort(cfg, session, model, provider) -> dict:
 def _context_identity_provider(value) -> str:
     """Canonical provider id for model-identity comparisons.
 
-    Uses the same alias table as the routes layer so a session stored as
-    ``claude`` compares equal to the resolved ``anthropic`` lane and the
-    context-metadata guard does not fire on a spelling difference.
+    Mirrors ``api.routes._canonical_context_provider``: drops the ``default``
+    sentinel, unwraps an ``@provider:model`` hint through the shared route-hint
+    grammar (so ``custom:<slug>`` survives intact) and applies the same alias
+    table, so a session stored as ``claude`` compares equal to the resolved
+    ``anthropic`` lane and the context-metadata guard does not fire on a
+    spelling difference.
     """
+    text = str(value or "").strip().lower()
+    if not text or text == "default":
+        return ""
+    if text.startswith("@"):
+        parsed = model_identity.parse_route_hint(
+            text,
+            known_providers=_KNOWN_MODEL_PROVIDER_IDS,
+            custom_endpoint_slug=_custom_slug_rest_looks_like_host_port,
+        )
+        text = (parsed[1] if parsed else text[1:]).strip()
     try:
-        return str(_resolve_provider_alias(value) or "").strip().lower()
+        return str(_resolve_provider_alias(text) or "").strip().lower()
     except Exception:
-        return model_identity.normalize_provider_id(value) or ""
+        return model_identity.normalize_provider_id(text) or ""
+
+
+def _turn_provider_identity(requested_provider, resolved_provider) -> str:
+    """Canonical provider identity for THIS turn.
+
+    ``resolved_provider`` is the TRANSPORT provider the agent is constructed
+    with: ``_resolve_custom_provider_runtime_overrides`` rewrites a named
+    ``custom:<slug>`` endpoint to bare ``custom`` for SDK routing. Every
+    identity decision (reasoning-pin lookup, context-metadata guard, error
+    attribution, context-length config lookup) must use the canonical id the
+    session actually stores, otherwise a named-custom session compares unequal
+    to its own turn and loses its pin plus every context-metadata write.
+    """
+    return str(requested_provider or resolved_provider or "").strip()
 
 
 def _context_metadata_identity_guard(
@@ -749,8 +777,18 @@ def _context_metadata_identity_guard(
     now points at a different model/provider lane than the one this turn ran on
     — i.e. the turn was superseded mid-stream. A blank session model means "no
     identity yet", which is the pre-existing shape and must stay writable.
+
+    The comparison is the same one ``api.routes._session_model_identity_matches``
+    uses (provider aliases, vendor slash prefixes, endpoint-style custom slugs),
+    so a reload and a live turn agree about what counts as the same lane.
+    ``turn_provider`` must be the CANONICAL provider
+    (:func:`_turn_provider_identity`), never the SDK-rewritten ``custom``.
     """
-    if not str(session_model or '').strip():
+    session_model_text = str(session_model or '').strip()
+    turn_model_text = str(turn_model or '').strip()
+    if not session_model_text or not turn_model_text:
+        # No identity on either side — nothing to contradict. A turn that never
+        # resolved a model keeps the pre-existing write behaviour.
         return True, ''
     try:
         matches = model_identity.identities_match(
@@ -759,7 +797,9 @@ def _context_metadata_identity_guard(
             turn_model,
             turn_provider,
             known_providers=_KNOWN_MODEL_PROVIDER_IDS,
+            allow_slash_prefix=True,
             provider_normalizer=_context_identity_provider,
+            custom_endpoint_slug=_custom_slug_rest_looks_like_host_port,
         )
     except Exception:
         # A comparison failure must never break turn completion; the
@@ -771,6 +811,175 @@ def _context_metadata_identity_guard(
         f"session now {session_model!r}/{session_provider!r}, "
         f"turn ran {turn_model!r}/{turn_provider!r}"
     )
+
+
+_FALLBACK_NOTICE_RE = re.compile(
+    r"model fallback:\s*(?P<old_model>[^\s,;()]+)\s+via\s+(?P<old_provider>[^\s,;()]+)\s+"
+    r"unavailable\s*\((?P<reason>[^)]*)\)\s*;\s*using\s+"
+    r"(?P<new_model>[^\s,;()]+)\s+via\s+(?P<new_provider>[^\s,;()]+)",
+    re.IGNORECASE,
+)
+_FALLBACK_RETRY_RE = re.compile(
+    r"retry eligible in\s*~?\s*(?P<seconds>\d+(?:\.\d+)?)\s*s",
+    re.IGNORECASE,
+)
+
+
+def parse_fallback_notice(message) -> dict:
+    """Parse the agent's documented fallback notice into structured facts.
+
+    Shape (agent/chat_completion_helpers.py, mirrored by
+    ``static/turn_model_attribution.js``)::
+
+        Model fallback: <old model> via <old provider> unavailable (<reason>);
+        using <new model> via <new provider>. Primary retry eligible in ~N s
+
+    Returns ``{}`` when the text does not match — an unmatched notice records
+    no lanes at all rather than a guess.
+    """
+    text = str(message or "").strip()
+    if not text:
+        return {}
+    match = _FALLBACK_NOTICE_RE.search(text)
+    if not match:
+        return {}
+    out = {
+        "old_model": match.group("old_model").strip().rstrip(".,"),
+        "old_provider": match.group("old_provider").strip().rstrip(".,"),
+        "new_model": match.group("new_model").strip().rstrip(".,"),
+        "new_provider": match.group("new_provider").strip().rstrip(".,"),
+    }
+    reason = match.group("reason").strip()
+    if reason:
+        out["reason"] = reason
+    retry = _FALLBACK_RETRY_RE.search(text)
+    if retry:
+        try:
+            out["retry_seconds"] = float(retry.group("seconds"))
+        except (TypeError, ValueError):
+            pass
+    return out
+
+
+def _same_transport_lane(requested_provider, effective_provider) -> bool:
+    """True when the two provider ids are the SAME lane under SDK rewriting.
+
+    ``_resolve_custom_provider_runtime_overrides`` rewrites a named
+    ``custom:<slug>`` to bare ``custom`` for the SDK, so that pair must not be
+    reported as a provider change.
+    """
+    requested = str(requested_provider or "").strip()
+    effective = str(effective_provider or "").strip()
+    if not requested or not effective:
+        return True
+    if requested == effective:
+        return True
+    return requested.startswith("custom:") and effective == "custom"
+
+
+def build_turn_model_attribution(
+    *,
+    requested_model=None,
+    requested_provider=None,
+    effective_model=None,
+    effective_provider=None,
+    notice=None,
+    reasoning_effort=None,
+    reasoning_source=None,
+) -> dict | None:
+    """Build the persisted ``_turnModelAttribution`` marker from real facts.
+
+    Every field comes from state this process actually observed: the lane the
+    turn requested (pre-run resolution), the lane the agent ended up on
+    (post-run ``agent.model`` / ``agent.provider``), and — when the agent
+    emitted one — its documented fallback notice (reason, retry cooldown).
+
+    Returns ``None`` when there is no fallback evidence at all: no notice and
+    no observed lane change. A marker is never fabricated from the picker's
+    current value or from a missing provider, and an unknown provider stays
+    absent instead of being defaulted.
+    """
+    notice_facts = parse_fallback_notice(notice)
+    req_model = str(requested_model or "").strip()
+    req_provider = str(requested_provider or "").strip()
+    eff_model = str(effective_model or "").strip()
+    eff_provider = str(effective_provider or "").strip()
+
+    model_changed = bool(req_model and eff_model and req_model != eff_model)
+    provider_changed = bool(
+        req_provider
+        and eff_provider
+        and not _same_transport_lane(req_provider, eff_provider)
+    )
+    if not notice_facts and not model_changed and not provider_changed:
+        return None
+
+    # The notice is the agent's own account of the fallback; it fills lanes the
+    # post-run objects cannot prove (the provider it switched to).
+    if not req_model:
+        req_model = notice_facts.get("old_model", "")
+    if not req_provider:
+        req_provider = notice_facts.get("old_provider", "")
+    if not eff_model:
+        eff_model = notice_facts.get("new_model", "")
+    if eff_provider and _same_transport_lane(req_provider, eff_provider):
+        eff_provider = ""
+    if not eff_provider:
+        notice_provider = notice_facts.get("new_provider", "")
+        if notice_provider and not _same_transport_lane(req_provider, notice_provider):
+            eff_provider = notice_provider
+
+    marker = {"v": 1, "kind": "fallback", "source": "server_fallback_state"}
+    if req_model:
+        marker["requested_model"] = req_model
+    if req_provider:
+        marker["requested_provider"] = req_provider
+    if eff_model:
+        marker["effective_model"] = eff_model
+    if eff_provider:
+        marker["effective_provider"] = eff_provider
+    reason = notice_facts.get("reason", "")
+    if reason:
+        marker["reason"] = reason
+    if "retry_seconds" in notice_facts:
+        marker["retry_seconds"] = notice_facts["retry_seconds"]
+    effort = str(reasoning_effort or "").strip()
+    if effort:
+        marker["reasoning_effort"] = effort
+        source = str(reasoning_source or "").strip()
+        if source:
+            marker["source_reasoning"] = source
+
+    # Renderer-compatible shape (static/turn_model_attribution.js reads the
+    # nested lanes). Same values as the flat keys above — one source of truth,
+    # so a hydrated transcript renders without re-deriving anything.
+    marker["at"] = int(time.time())
+    if str(notice or "").strip():
+        marker["message"] = str(notice).strip()[:2000]
+    if req_model:
+        requested = {"model": req_model}
+        if req_provider:
+            requested["provider"] = req_provider
+        requested["source"] = "server_fallback_state"
+        marker["requested"] = requested
+    if eff_model:
+        effective = {"model": eff_model}
+        if eff_provider:
+            effective["provider"] = eff_provider
+        effective["source"] = "server_fallback_state"
+        marker["effective"] = effective
+    if "retry_seconds" in marker:
+        marker["retry"] = f"{marker['retry_seconds']:g}s"
+    if effort:
+        reasoning = {"effort": effort}
+        if str(reasoning_source or "").strip():
+            reasoning["source"] = str(reasoning_source).strip()
+        marker["reasoning"] = reasoning
+    marker["substituted"] = bool(
+        (req_model and eff_model and req_model != eff_model)
+        or (req_provider and eff_provider and not _same_transport_lane(req_provider, eff_provider))
+    )
+    return marker
 
 
 def _is_fallback_lifecycle_message(kind: str, message: str) -> bool:
@@ -1697,6 +1906,40 @@ def _classify_provider_error(
     return {'label': 'Error', 'type': 'error', 'hint': ''}
 
 
+def _diagnostic_identity_pair(
+    requested_model,
+    requested_provider,
+    model,
+    provider,
+):
+    """Split both sides of a request/effective pair through the shared grammar.
+
+    Returns ``(left, right)`` :class:`~api.model_identity.ModelIdentity` values,
+    or ``None`` when the identity layer cannot describe the pair. Comparing
+    these instead of raw strings is what stops a qualified request
+    (``@custom:plusvibe-api:gpt-6.1-sol``) from looking like a substitution of
+    its own resolved lane (``gpt-6.1-sol`` / ``custom:plusvibe-api``).
+    """
+    try:
+        left = model_identity.split_model_identity(
+            requested_model,
+            requested_provider,
+            known_providers=_KNOWN_MODEL_PROVIDER_IDS,
+            allow_slash_prefix=True,
+            custom_endpoint_slug=_custom_slug_rest_looks_like_host_port,
+        )
+        right = model_identity.split_model_identity(
+            model,
+            provider,
+            known_providers=_KNOWN_MODEL_PROVIDER_IDS,
+            allow_slash_prefix=True,
+            custom_endpoint_slug=_custom_slug_rest_looks_like_host_port,
+        )
+    except Exception:
+        return None
+    return left, right
+
+
 def _model_identity_diagnostics(
     *,
     model=None,
@@ -1715,6 +1958,12 @@ def _model_identity_diagnostics(
     reasoning level and where it came from, and whether a fallback lane was in
     play. Values are already-public identity strings (model ids and provider
     slugs), never credentials.
+
+    Substitution flags compare model IDENTITY, not raw strings: the requested
+    value is often a qualified route hint (``@custom:plusvibe-api:gpt-6.1-sol``)
+    while the effective value is the same lane's bare id and canonical provider.
+    A raw compare flagged every named-custom error as both model- and
+    provider-substituted, which buried the real fallback signal.
     """
     diag: dict = {}
 
@@ -1736,18 +1985,38 @@ def _model_identity_diagnostics(
         _put("reasoning_source", reasoning_resolution.get("source"))
         _put("reasoning_pin_key", reasoning_resolution.get("pin_key"))
     _put("fallback", fallback)
-    if (
-        diag.get("requested_model")
-        and diag.get("model")
-        and diag["requested_model"] != diag["model"]
-    ):
-        diag["model_substituted"] = True
-    if (
-        diag.get("requested_provider")
-        and diag.get("provider")
-        and diag["requested_provider"] != diag["provider"]
-    ):
-        diag["provider_substituted"] = True
+
+    pair = None
+    if diag.get("requested_model") and diag.get("model"):
+        pair = _diagnostic_identity_pair(
+            diag.get("requested_model"),
+            diag.get("requested_provider"),
+            diag.get("model"),
+            diag.get("provider"),
+        )
+    if pair is not None:
+        left, right = pair
+        if left.model and right.model and left.model != right.model:
+            diag["model_substituted"] = True
+        left_provider = _context_identity_provider(left.provider)
+        right_provider = _context_identity_provider(right.provider)
+        if left_provider and right_provider and left_provider != right_provider:
+            diag["provider_substituted"] = True
+    else:
+        # Identity layer unavailable for this pair: fall back to the legacy
+        # raw comparison so the flags still say something.
+        if (
+            diag.get("requested_model")
+            and diag.get("model")
+            and diag["requested_model"] != diag["model"]
+        ):
+            diag["model_substituted"] = True
+        if (
+            diag.get("requested_provider")
+            and diag.get("provider")
+            and diag["requested_provider"] != diag["provider"]
+        ):
+            diag["provider_substituted"] = True
     return diag
 
 
@@ -9145,6 +9414,11 @@ def _run_agent_streaming(
     # but referenced by every error payload (including failures that happen
     # before the resolution), so it must exist up front.
     _reasoning_resolution = None
+    # Canonical (session-stored) provider identity for this turn. The model
+    # resolution scope below sets it from the pre-rewrite provider; referenced by
+    # every identity decision (pin, context guard, attribution, diagnostics), so
+    # it must exist even if a future refactor moves that assignment.
+    _turn_provider_canonical = None
     _live_prompt_estimate_tokens = [0]
     _live_prompt_exact_tokens = [0]
     _live_prompt_estimate_tool_delta_tokens = [0]
@@ -9496,6 +9770,10 @@ def _run_agent_streaming(
     # write without nonlocal) so it can seed `_last_err` and let the classifier
     # surface the real, actionable cause (model_not_found / auth_mismatch).
     _captured_terminal_error = [None]
+    # Last fallback notice the agent emitted this turn (documented shape, see
+    # parse_fallback_notice). Kept verbatim so turn-settle can persist the real
+    # reason/cooldown instead of inferring one from the model difference.
+    _captured_fallback_notice = [None]
 
     def _agent_status_callback(kind, message):
         """Bridge Agent lifecycle status into WebUI SSE.
@@ -9530,6 +9808,7 @@ def _run_agent_streaming(
         # show them as warnings via the existing messages.js 'warning' listener.
         _is_fallback_notice = _is_fallback_lifecycle_message(_kind, _message)
         if _is_fallback_notice:
+            _captured_fallback_notice[0] = _message
             put('warning', {'type': 'fallback', 'message': _message})
 
     # xsession wakeup misroute root fix (Option 1): pre-init so the outer
@@ -10504,6 +10783,17 @@ def _run_agent_streaming(
                     resolved_provider, resolved_api_key, resolved_base_url,
                     profile_name=_resolved_profile_name,
                 )
+                # `resolved_provider` is now the TRANSPORT provider (named custom
+                # providers are rewritten to bare "custom" for SDK routing).
+                # Keep the canonical identity for every decision that compares
+                # lanes: reasoning pin, context-metadata guard, attribution.
+                _turn_provider_canonical = _turn_provider_identity(
+                    _session_requested_provider, resolved_provider
+                )
+            if not _turn_provider_canonical:
+                # Defensive: the resolution scope above always sets it. Degrade to
+                # the transport id rather than let an identity decision see None.
+                _turn_provider_canonical = str(resolved_provider or '')
 
             # Read per-profile config at call time (not module-level snapshot).
             # The streaming worker is a detached thread that does NOT inherit the
@@ -10525,7 +10815,7 @@ def _run_agent_streaming(
             _main_request_overrides = _main_model_request_overrides(
                 _cfg,
                 effective_model=resolved_model,
-                effective_provider=resolved_provider,
+                effective_provider=_turn_provider_canonical,
             )
             put('context_status', {
                 'session_id': session_id,
@@ -10546,7 +10836,7 @@ def _run_agent_streaming(
                 # fallback can still mutate agent.model; the post-run truth keeps
                 # arriving via usage.used_model / the message _usedModel stamp.
                 'model': resolved_model or model,
-                'model_provider': _session_requested_provider or resolved_provider or provider_context,
+                'model_provider': _turn_provider_canonical or provider_context,
             })
 
             # Per-profile toolsets — use _resolve_cli_toolsets() so MCP
@@ -10680,14 +10970,14 @@ def _run_agent_streaming(
                 _cfg,
                 session,
                 resolved_model,
-                resolved_provider,
+                _turn_provider_canonical,
             )
             try:
                 _effort_raw = _reasoning_resolution['effort']
                 _effort = coerce_reasoning_effort_for_model(
                     _effort_raw,
                     resolved_model,
-                    provider_id=resolved_provider,
+                    provider_id=_turn_provider_canonical,
                     base_url=resolved_base_url,
                 )
                 _reasoning_config = parse_reasoning_effort(_effort)
@@ -11661,6 +11951,11 @@ def _run_agent_streaming(
                                 resolved_provider, resolved_api_key, resolved_base_url,
                                 profile_name=_resolved_profile_name,
                             )
+                            # Credential refresh does not change the lane: keep
+                            # the canonical identity the guard/pin compare uses.
+                            _turn_provider_canonical = _turn_provider_identity(
+                                _session_requested_provider, resolved_provider
+                            )
                             # Rebuild agent kwargs and create a fresh agent
                             _agent_kwargs['api_key'] = resolved_api_key
                             _agent_kwargs['base_url'] = resolved_base_url
@@ -11818,7 +12113,7 @@ def _run_agent_streaming(
                             _err_hint,
                             identity=_model_identity_diagnostics(
                                 model=resolved_model,
-                                provider=resolved_provider,
+                                provider=_turn_provider_canonical,
                                 requested_model=_turn_route_model,
                                 requested_provider=_turn_route_provider,
                                 reasoning_resolution=_reasoning_resolution,
@@ -12197,7 +12492,7 @@ def _run_agent_streaming(
                     agent,
                     result,
                     requested_model=resolved_model or model,
-                    requested_provider=resolved_provider,
+                    requested_provider=_turn_provider_canonical,
                 )
                 # #6068: the served model must be read AFTER agent.run — the agent
                 # mutates agent.model when a fallback fires, so the pre-run
@@ -12221,7 +12516,10 @@ def _run_agent_streaming(
                     session_model=getattr(s, 'model', None),
                     session_provider=getattr(s, 'model_provider', None),
                     turn_model=resolved_model,
-                    turn_provider=resolved_provider,
+                    # Canonical, NOT the SDK-rewritten transport provider: a
+                    # named custom:slug session must compare equal to the turn
+                    # that runs on it, or every context write is skipped.
+                    turn_provider=_turn_provider_canonical,
                 )
                 if not _context_metadata_write_allowed:
                     logger.info(
@@ -12247,6 +12545,31 @@ def _run_agent_streaming(
                                 _dm['_firstTokenMs'] = _ttft_ms
                             if _used_model:
                                 _dm['_usedModel'] = _used_model
+                            # Durable fallback attribution: without this the
+                            # marker only lives on the client turn object and
+                            # dies on reload. Built strictly from observed state
+                            # (pre-run lane, post-run agent lane, the agent's own
+                            # notice) — build_turn_model_attribution returns None
+                            # when nothing proves a fallback.
+                            _attribution_marker = build_turn_model_attribution(
+                                requested_model=resolved_model or model,
+                                requested_provider=_turn_provider_canonical,
+                                effective_model=_used_model,
+                                effective_provider=getattr(agent, 'provider', None),
+                                notice=_captured_fallback_notice[0],
+                                reasoning_effort=(
+                                    _reasoning_resolution.get('effort')
+                                    if isinstance(_reasoning_resolution, dict)
+                                    else None
+                                ),
+                                reasoning_source=(
+                                    _reasoning_resolution.get('source')
+                                    if isinstance(_reasoning_resolution, dict)
+                                    else None
+                                ),
+                            )
+                            if _attribution_marker:
+                                _dm['_turnModelAttribution'] = _attribution_marker
                             break
                 # Persist context window data on the session so the context-ring
                 # indicator survives a page reload (#1318). Must run BEFORE
@@ -12295,7 +12618,7 @@ def _run_agent_streaming(
                         if _sess_model_cc and _cc_cl > 0:
                             _lk_cc = _cli_cc(
                                 _sess_model_cc,
-                                resolved_provider or '',
+                                _turn_provider_canonical or '',
                                 base_url=getattr(agent, 'base_url', '') or resolved_base_url or '',
                                 api_key=getattr(agent, 'api_key', '') or resolved_api_key or '',
                                 cfg=_cfg if isinstance(_cfg, dict) else {},
@@ -12306,7 +12629,7 @@ def _run_agent_streaming(
                                     _lk_cc.base_url,
                                     api_key=_lk_cc.api_key,
                                     config_context_length=_lk_cc.config_context_length,
-                                    provider=_lk_cc.provider or resolved_provider or '',
+                                    provider=_lk_cc.provider or _turn_provider_canonical or '',
                                     custom_providers=_lk_cc.custom_providers,
                                 ) or 0
                             except TypeError:
@@ -12349,7 +12672,7 @@ def _run_agent_streaming(
                         _cfg_base_url = getattr(agent, 'base_url', '') or resolved_base_url or ''
                         _ctx_lookup = _context_length_lookup_inputs_for_model(
                             getattr(agent, 'model', resolved_model or '') or '',
-                            resolved_provider,
+                            _turn_provider_canonical,
                             base_url=_cfg_base_url,
                             cfg=_cfg if isinstance(_cfg, dict) else {},
                         )
@@ -12357,7 +12680,7 @@ def _run_agent_streaming(
                         _cfg_custom_providers = _ctx_lookup.custom_providers
                         _cfg_api_key = _ctx_lookup.api_key or getattr(agent, 'api_key', '') or resolved_api_key or ''
                         _cfg_base_url = _ctx_lookup.base_url or _cfg_base_url
-                        _cfg_provider = _ctx_lookup.provider or resolved_provider or ''
+                        _cfg_provider = _ctx_lookup.provider or _turn_provider_canonical or ''
                         _resolved_cl = get_model_context_length(
                             getattr(agent, 'model', resolved_model or '') or '',
                             _cfg_base_url,
@@ -12673,7 +12996,7 @@ def _run_agent_streaming(
                     if _sess_model_sse and _cc_cl_sse > 0:
                         _lk_sse = _cli_sse(
                             _sess_model_sse,
-                            resolved_provider or '',
+                            _turn_provider_canonical or '',
                             base_url=getattr(agent, 'base_url', '') or resolved_base_url or '',
                             api_key=getattr(agent, 'api_key', '') or resolved_api_key or '',
                             cfg=_cfg if isinstance(_cfg, dict) else {},
@@ -12684,7 +13007,7 @@ def _run_agent_streaming(
                                 _lk_sse.base_url,
                                 api_key=_lk_sse.api_key,
                                 config_context_length=_lk_sse.config_context_length,
-                                provider=_lk_sse.provider or resolved_provider or '',
+                                provider=_lk_sse.provider or _turn_provider_canonical or '',
                                 custom_providers=_lk_sse.custom_providers,
                             ) or 0
                         except TypeError:
@@ -12714,7 +13037,7 @@ def _run_agent_streaming(
                     from api.routes import _context_length_lookup_inputs_for_model
                     _ctx_lookup = _context_length_lookup_inputs_for_model(
                         getattr(agent, 'model', resolved_model or '') or '',
-                        resolved_provider,
+                        _turn_provider_canonical,
                         base_url=getattr(agent, 'base_url', '') or resolved_base_url or '',
                         cfg=_cfg if isinstance(_cfg, dict) else {},
                     )
@@ -12722,7 +13045,7 @@ def _run_agent_streaming(
                     _cfg_custom_providers = _ctx_lookup.custom_providers
                     _cfg_api_key = _ctx_lookup.api_key or getattr(agent, 'api_key', '') or resolved_api_key or ''
                     _cfg_base_url = _ctx_lookup.base_url
-                    _cfg_provider = _ctx_lookup.provider or resolved_provider or ''
+                    _cfg_provider = _ctx_lookup.provider or _turn_provider_canonical or ''
                     try:
                         _fb_cl = _get_cl(
                             getattr(agent, 'model', resolved_model or '') or '',
@@ -13059,6 +13382,11 @@ def _run_agent_streaming(
                         resolved_provider, resolved_api_key, resolved_base_url,
                         profile_name=_resolved_profile_name,
                     )
+                    # Credential refresh does not change the lane: keep the
+                    # canonical identity the guard/pin compare uses.
+                    _turn_provider_canonical = _turn_provider_identity(
+                        _session_requested_provider, resolved_provider
+                    )
                     # Build a fresh agent with the new credentials
                     _heal_kwargs = dict(_agent_kwargs) if '_agent_kwargs' in dir() else {}
                     _heal_kwargs['api_key'] = resolved_api_key
@@ -13229,7 +13557,7 @@ def _run_agent_streaming(
             _exc_hint,
             identity=_model_identity_diagnostics(
                 model=resolved_model,
-                provider=resolved_provider,
+                provider=_turn_provider_canonical,
                 requested_model=_turn_route_model,
                 requested_provider=_turn_route_provider,
                 reasoning_resolution=_reasoning_resolution,

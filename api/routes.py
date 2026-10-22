@@ -6749,15 +6749,28 @@ def _session_model_state_from_request(
     """Normalize the model/provider a client asked a session to use.
 
     ``None`` means "the request did not mention it" and stays ``None`` so callers
-    can keep the current value. A present-but-unusable value (blank, whitespace,
-    non-string, control characters) raises :class:`ModelIdentityError` instead of
-    being persisted as a model the session can never route to.
+    can keep the current value. A blank string is the legacy "no model yet"
+    shape: ``POST /api/session/update`` from an empty session (workspace switch,
+    profile switch) sends ``model: ""`` and must keep succeeding, and a new
+    session may be created before any model is picked. A present-but-unusable
+    value of another shape (non-string, control characters, an empty
+    ``@provider:`` tail) raises :class:`ModelIdentityError` instead of being
+    persisted as a model the session can never route to.
 
     The id itself is never rewritten: vendor slashes (``vendor/model``) and route
     suffixes (``:free``, ``:kiro``) are part of the identity.
     """
     if model is None:
         return None, (
+            _clean_session_model_provider(requested_provider)
+            if requested_provider is not None
+            else None
+        )
+    if isinstance(model, str) and not model.strip():
+        # Legacy blank: keep the provider the caller sent (or None), exactly as
+        # before identity validation existed. Routing falls back to the profile
+        # default until a real model is picked, so this is not an unroutable id.
+        return "", (
             _clean_session_model_provider(requested_provider)
             if requested_provider is not None
             else None

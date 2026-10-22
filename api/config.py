@@ -2603,35 +2603,13 @@ def _custom_slug_rest_looks_like_host_port(rest: str) -> bool:
     The #1776 peel must not treat that middle colon as part of an eaten model
     segment — otherwise ``@custom:10.8.71.41:8080:Qwen3`` wrongly becomes model
     ``8080:Qwen3``.
-    """
-    rest = str(rest or "").strip()
-    if ":" not in rest:
-        return False
-    host, port_s = rest.rsplit(":", 1)
-    if not host or ":" in host:
-        return False
-    if not port_s.isdigit():
-        return False
-    try:
-        port_n = int(port_s)
-    except ValueError:
-        return False
-    if not (1 <= port_n <= 65535):
-        return False
-    try:
-        import ipaddress
 
-        ipaddress.ip_address(host)
-        return True
-    except ValueError:
-        pass
-    hl = host.lower()
-    if hl == "localhost":
-        return True
-    # Typical DNS hostname used as proxy slug (contains at least one label dot).
-    if "." in host:
-        return True
-    return False
+    The grammar lives in :mod:`api.model_identity` (one implementation), so the
+    default used by ``parse_route_hint``/``validate_model_id`` and the tables
+    supplied by config/routes can never disagree about ``localhost`` or DNS
+    proxy slugs again.
+    """
+    return _model_identity._default_custom_endpoint_slug(rest)
 
 
 # Provider ids whose route hints are split on the FIRST colon (their model ids

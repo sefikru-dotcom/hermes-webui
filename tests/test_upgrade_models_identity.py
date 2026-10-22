@@ -174,9 +174,23 @@ def test_session_state_none_means_untouched():
     assert routes._session_model_state_from_request(None, None) == (None, None)
 
 
-def test_session_state_blank_model_is_refused():
-    with pytest.raises(mi.ModelIdentityError):
-        routes._session_model_state_from_request("", "openai")
+def test_session_state_blank_model_is_the_legacy_no_model_shape():
+    # ``POST /api/session/update`` from an empty session (workspace switch,
+    # profile switch) sends the session's own ``model: ""``. Refusing it 400s a
+    # real UI path, so the blank shape keeps its pre-identity behaviour while
+    # every other unusable shape is still refused (see the tests below).
+    assert routes._session_model_state_from_request("", "openai") == ("", "openai")
+
+
+def test_session_state_normalizes_whitespace_only_to_blank():
+    for blank in ("   ", "\t\n"):
+        assert routes._session_model_state_from_request(blank, "openai") == ("", "openai")
+
+
+def test_session_state_refuses_unusable_non_blank_shapes():
+    for bad in ("@openai:", "gpt-5\x00", 123):
+        with pytest.raises(mi.ModelIdentityError):
+            routes._session_model_state_from_request(bad, "openai")
 
 
 def test_session_state_keeps_vendor_slash():
