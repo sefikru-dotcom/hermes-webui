@@ -51,8 +51,11 @@ from api.config import (
     parse_reasoning_effort,
     coerce_reasoning_effort_for_model,
     _main_model_request_overrides,
+    _resolve_provider_alias,
+    _KNOWN_MODEL_PROVIDER_IDS,
     PROCESS_SESSION_INDEX, PROCESS_SESSION_INDEX_LOCK,
 )
+from api import model_identity
 from api.helpers import (
     redact_session_data,
     scrub_internal_replay_fields,
@@ -683,6 +686,91 @@ def _runtime_preferred_base_url(
     if _same_base_url_endpoint(configured_base_url, runtime_base_url):
         return runtime_base_url
     return configured_base_url
+
+
+def _resolve_turn_reasoning_effort(cfg, session, model, provider) -> dict:
+    """Resolve THIS turn's reasoning level: session > model pin > global.
+
+    Reads the same two config keys the CLI writes (``agent.reasoning_effort`` and
+    ``agent.reasoning_overrides``) and delegates the ordering + provider-aware
+    pin lookup to :func:`api.model_identity.resolve_reasoning_effort`, so the
+    runtime cannot drift from ``GET /api/reasoning`` or from the pin writer.
+    Never raises: a malformed config degrades to "no reasoning config".
+    """
+    try:
+        agent_cfg = cfg.get('agent', {}) if isinstance(cfg, dict) else {}
+        if not isinstance(agent_cfg, dict):
+            agent_cfg = {}
+        return model_identity.resolve_reasoning_effort(
+            session_effort=getattr(session, 'reasoning_effort', None) if session else None,
+            overrides=agent_cfg.get('reasoning_overrides'),
+            global_effort=agent_cfg.get('reasoning_effort'),
+            model_id=model,
+            provider=provider,
+        )
+    except Exception:
+        logger.debug("[webui] reasoning resolution failed", exc_info=True)
+        return {
+            'effort': None,
+            'source': 'default',
+            'pin_key': None,
+            'pin_effort': None,
+            'global_effort': None,
+            'session_effort': None,
+            'candidates': [],
+            'model': model,
+            'provider': provider,
+        }
+
+
+def _context_identity_provider(value) -> str:
+    """Canonical provider id for model-identity comparisons.
+
+    Uses the same alias table as the routes layer so a session stored as
+    ``claude`` compares equal to the resolved ``anthropic`` lane and the
+    context-metadata guard does not fire on a spelling difference.
+    """
+    try:
+        return str(_resolve_provider_alias(value) or "").strip().lower()
+    except Exception:
+        return model_identity.normalize_provider_id(value) or ""
+
+
+def _context_metadata_identity_guard(
+    *,
+    session_model,
+    session_provider,
+    turn_model,
+    turn_provider,
+) -> tuple[bool, str]:
+    """Should this turn write context metadata onto the session?
+
+    Returns ``(allowed, reason)``. ``allowed`` is False only when the session
+    now points at a different model/provider lane than the one this turn ran on
+    — i.e. the turn was superseded mid-stream. A blank session model means "no
+    identity yet", which is the pre-existing shape and must stay writable.
+    """
+    if not str(session_model or '').strip():
+        return True, ''
+    try:
+        matches = model_identity.identities_match(
+            session_model,
+            session_provider,
+            turn_model,
+            turn_provider,
+            known_providers=_KNOWN_MODEL_PROVIDER_IDS,
+            provider_normalizer=_context_identity_provider,
+        )
+    except Exception:
+        # A comparison failure must never break turn completion; the
+        # pre-existing write behaviour is the safe fallback.
+        return True, ''
+    if matches:
+        return True, ''
+    return False, (
+        f"session now {session_model!r}/{session_provider!r}, "
+        f"turn ran {turn_model!r}/{turn_provider!r}"
+    )
 
 
 def _is_fallback_lifecycle_message(kind: str, message: str) -> bool:
@@ -1609,8 +1697,74 @@ def _classify_provider_error(
     return {'label': 'Error', 'type': 'error', 'hint': ''}
 
 
-def _provider_error_payload(message: str, err_type: str, hint: str = '') -> dict:
-    """Build a bounded, redacted apperror payload with provider details."""
+def _model_identity_diagnostics(
+    *,
+    model=None,
+    provider=None,
+    requested_model=None,
+    requested_provider=None,
+    reasoning_resolution=None,
+    fallback=None,
+    turn_model=None,
+    turn_provider=None,
+) -> dict:
+    """Diagnostic model/provider fields for an error payload.
+
+    Only facts the runtime actually knows are included: the effective lane the
+    request went to, the lane the client asked for (when it differs), the
+    reasoning level and where it came from, and whether a fallback lane was in
+    play. Values are already-public identity strings (model ids and provider
+    slugs), never credentials.
+    """
+    diag: dict = {}
+
+    def _put(key, value):
+        if value is None:
+            return
+        text = str(value).strip()
+        if text:
+            diag[key] = text
+
+    _put("model", model)
+    _put("provider", provider)
+    _put("requested_model", requested_model)
+    _put("requested_provider", requested_provider)
+    _put("turn_model", turn_model)
+    _put("turn_provider", turn_provider)
+    if isinstance(reasoning_resolution, dict):
+        _put("reasoning_effort", reasoning_resolution.get("effort"))
+        _put("reasoning_source", reasoning_resolution.get("source"))
+        _put("reasoning_pin_key", reasoning_resolution.get("pin_key"))
+    _put("fallback", fallback)
+    if (
+        diag.get("requested_model")
+        and diag.get("model")
+        and diag["requested_model"] != diag["model"]
+    ):
+        diag["model_substituted"] = True
+    if (
+        diag.get("requested_provider")
+        and diag.get("provider")
+        and diag["requested_provider"] != diag["provider"]
+    ):
+        diag["provider_substituted"] = True
+    return diag
+
+
+def _provider_error_payload(
+    message: str,
+    err_type: str,
+    hint: str = '',
+    *,
+    identity: dict | None = None,
+) -> dict:
+    """Build a bounded, redacted apperror payload with provider details.
+
+    ``identity`` (from :func:`_model_identity_diagnostics`) rides along under
+    ``model_identity`` so a client can tell WHICH model/provider lane failed and
+    whether the answer came from a fallback — without it, a provider error on a
+    substituted lane is indistinguishable from one on the requested lane.
+    """
     _message = str(message or '')
     _safe_message = _redact_text(_message).strip() if _message else ''
     payload: dict = {'message': _safe_message or _message, 'type': err_type}
@@ -1622,6 +1776,15 @@ def _provider_error_payload(message: str, err_type: str, hint: str = '') -> dict
             _details = _details[:1197].rstrip() + '…'
         if _details:
             payload['details'] = _details
+    if identity:
+        payload['model_identity'] = {
+            k: v for k, v in identity.items() if v not in (None, '')
+        }
+        # Flat mirrors: existing clients read top-level fields, and support
+        # greps logs for `provider=`. Additive only.
+        for _flat in ('model', 'provider'):
+            if _flat in payload['model_identity']:
+                payload.setdefault(_flat, payload['model_identity'][_flat])
     return payload
 
 
@@ -8978,6 +9141,10 @@ def _run_agent_streaming(
         STREAM_LIVE_TOOL_CALLS[stream_id] = []  # start accumulating tool calls (#1361 §B)
 
     agent = None
+    # Reasoning resolution for this turn; filled once the agent config is read,
+    # but referenced by every error payload (including failures that happen
+    # before the resolution), so it must exist up front.
+    _reasoning_resolution = None
     _live_prompt_estimate_tokens = [0]
     _live_prompt_exact_tokens = [0]
     _live_prompt_estimate_tool_delta_tokens = [0]
@@ -10503,24 +10670,20 @@ def _run_agent_streaming(
             # CLI-parity reasoning effort: read agent.reasoning_effort from the
             # active profile's config.yaml (the same key the CLI writes via
             # `/reasoning <level>`) and hand the parsed dict to AIAgent.
-            # Mars: priority order is session override > agent.reasoning_overrides (per-model) > global.
+            # Mars: priority order is session override > agent.reasoning_overrides
+            # (per-model pin) > global. The resolution lives in
+            # api.model_identity so the runtime, GET /api/reasoning and the pin
+            # writer agree on both the order AND the key lookup (provider-aware;
+            # a pin stored for another provider's copy of the same model id must
+            # not apply here).
+            _reasoning_resolution = _resolve_turn_reasoning_effort(
+                _cfg,
+                session,
+                resolved_model,
+                resolved_provider,
+            )
             try:
-                _effort_cfg = _cfg.get('agent', {}) if isinstance(_cfg, dict) else {}
-                _effort_raw = _effort_cfg.get('reasoning_effort') if isinstance(_effort_cfg, dict) else None
-                _session_effort = getattr(session, 'reasoning_effort', None) if session else None
-                if _session_effort:
-                    _effort_raw = _session_effort
-                else:
-                    _model_overrides = _effort_cfg.get('reasoning_overrides') if isinstance(_effort_cfg, dict) else {}
-                    if _model_overrides and resolved_model:
-                        from api.config import _match_reasoning_override_key
-
-                        _k = _match_reasoning_override_key(_model_overrides, resolved_model)
-                        if not _k and "/" in resolved_model:
-                            _k = _match_reasoning_override_key(_model_overrides, resolved_model.split("/")[-1])
-                        if _k and _model_overrides.get(_k):
-                            _effort_raw = _model_overrides.get(_k)
-
+                _effort_raw = _reasoning_resolution['effort']
                 _effort = coerce_reasoning_effort_for_model(
                     _effort_raw,
                     resolved_model,
@@ -11653,6 +11816,18 @@ def _run_agent_streaming(
                             _result_public_error,
                             _err_type,
                             _err_hint,
+                            identity=_model_identity_diagnostics(
+                                model=resolved_model,
+                                provider=resolved_provider,
+                                requested_model=_turn_route_model,
+                                requested_provider=_turn_route_provider,
+                                reasoning_resolution=_reasoning_resolution,
+                                fallback=(
+                                    'activated'
+                                    if getattr(agent, '_fallback_activated', False)
+                                    else None
+                                ),
+                            ),
                         )
                         if _turn_pending_source == 'process_wakeup':
                             _recorded_pause = record_process_wakeup_provider_unavailable_pause(
@@ -12029,6 +12204,31 @@ def _run_agent_streaming(
                 # resolved_model would mis-attribute exactly the turns where
                 # attribution matters most.
                 _used_model = getattr(agent, 'model', None) or resolved_model or model
+                # ── Model identity guard for context metadata ──────────────
+                # This turn can be superseded while it streams: /api/session/update
+                # (or another tab) may point the session at a different
+                # model/provider before this OLD turn finishes. The context
+                # window / threshold / prompt-token snapshot below belongs to the
+                # lane THIS turn ran on, so writing it onto the new lane poisons
+                # the context ring and the auto-compress trigger (the exact
+                # symptom the stale-compressor guards fight). Compare the lane
+                # this turn resolved with the session's CURRENT identity and skip
+                # every context-metadata write when they diverge.
+                (
+                    _context_metadata_write_allowed,
+                    _context_metadata_guard_reason,
+                ) = _context_metadata_identity_guard(
+                    session_model=getattr(s, 'model', None),
+                    session_provider=getattr(s, 'model_provider', None),
+                    turn_model=resolved_model,
+                    turn_provider=resolved_provider,
+                )
+                if not _context_metadata_write_allowed:
+                    logger.info(
+                        "[webui] context metadata write skipped for stream %s: %s",
+                        stream_id,
+                        _context_metadata_guard_reason,
+                    )
                 if _gateway_routing:
                     s.gateway_routing = _gateway_routing
                     _history = list(getattr(s, 'gateway_routing_history', None) or [])
@@ -12115,10 +12315,11 @@ def _run_agent_streaming(
                                 _skip_cc_cl = True
                     except Exception:
                         pass
-                    if not _skip_cc_cl:
+                    if not _skip_cc_cl and _context_metadata_write_allowed:
                         s.context_length = _cc_cl
-                    s.threshold_tokens = getattr(_cc_for_save, 'threshold_tokens', 0) or 0
-                    s.last_prompt_tokens = getattr(_cc_for_save, 'last_prompt_tokens', 0) or 0
+                    if _context_metadata_write_allowed:
+                        s.threshold_tokens = getattr(_cc_for_save, 'threshold_tokens', 0) or 0
+                        s.last_prompt_tokens = getattr(_cc_for_save, 'last_prompt_tokens', 0) or 0
                 # Fallback: if the compressor didn't report a context_length
                 # (fresh agent, interrupted stream, or compressor missing the
                 # attribute), resolve it from the model's static metadata so
@@ -12165,7 +12366,7 @@ def _run_agent_streaming(
                             provider=_cfg_provider,
                             custom_providers=_cfg_custom_providers,
                         )
-                        if _resolved_cl:
+                        if _resolved_cl and _context_metadata_write_allowed:
                             s.context_length = _resolved_cl
                     except TypeError:
                         # Older hermes-agent builds whose get_model_context_length
@@ -12199,9 +12400,9 @@ def _run_agent_streaming(
                     _orig_cap = _cc_cl  # the stale global cap the compressor reported
                     _orig_thresh = getattr(s, 'threshold_tokens', 0) or 0
                     _real_cap = getattr(s, 'context_length', 0) or 0
-                    if _real_cap > 0 and _orig_cap > 0 and _orig_thresh > 0:
+                    if _context_metadata_write_allowed and _real_cap > 0 and _orig_cap > 0 and _orig_thresh > 0:
                         s.threshold_tokens = int(_orig_thresh * _real_cap / _orig_cap)
-                    else:
+                    elif _context_metadata_write_allowed:
                         s.threshold_tokens = 0
                 if not ephemeral and s.messages:
                     _latest_assistant_idx = next(
@@ -13022,7 +13223,23 @@ def _run_agent_streaming(
             err_str = (
                 'The conversation changed while context compression was being prepared.'
             )
-        _error_payload = _provider_error_payload(err_str, _exc_type, _exc_hint)
+        _error_payload = _provider_error_payload(
+            err_str,
+            _exc_type,
+            _exc_hint,
+            identity=_model_identity_diagnostics(
+                model=resolved_model,
+                provider=resolved_provider,
+                requested_model=_turn_route_model,
+                requested_provider=_turn_route_provider,
+                reasoning_resolution=_reasoning_resolution,
+                fallback=(
+                    'activated'
+                    if getattr(agent, '_fallback_activated', False)
+                    else None
+                ),
+            ),
+        )
         if s is not None:
             if _checkpoint_stop is not None:
                 _checkpoint_stop.set()
