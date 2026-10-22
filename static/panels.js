@@ -8771,6 +8771,19 @@ function _appearanceStoreValue(key,fallback){
   return fallback;
 }
 
+// Значение ТОЛЬКО если оно отличается от подтверждённого сервером (то есть
+// пользователь успел поменять его и не сохранил). Нужно там, где у контрола
+// своя историческая иерархия источников (например skin: localStorage выше
+// settings.skin, PR #2799) и подмена серверным значением была бы регрессом.
+function _appearanceStorePendingValue(key){
+  const S=_ensureAppearanceStore();
+  if(!S||!S.has(key)) return undefined;
+  const saved=S.savedValue?S.savedValue(key):undefined;
+  const current=S.get(key);
+  if(saved===undefined||saved===null) return current;
+  return JSON.stringify(saved)===JSON.stringify(current)?undefined:current;
+}
+
 // Применение одного ключа к живому UI. Вызывается store'ом сразу при set()
 // (быстрый отклик) и при подтверждении/откате сервером. Только существующие
 // ui/boot API — ui.js не меняется.
@@ -9301,9 +9314,35 @@ async function _autosaveAppearanceSettings(payload){
   try{
     const saved=await _enqueueSettingsPost({method:'POST',body:JSON.stringify(payload)});
     const S=_ensureAppearanceStore();
-    if(S&&typeof S.adoptSaved==='function') S.adoptSaved(saved,S.keysPresent(payload));
     _settingsAppearanceAutosaveRetryPayload=null;
     _rememberAppearanceSaved(payload);
+    // #3595: флаг Worklog реконсилится из ответа сервера и только по явным
+    // значениям — без переприменения дефолта к уже раскрытым карточкам.
+    if(saved&&payload&&Object.prototype.hasOwnProperty.call(payload,'worklog_details_expanded_default')&&(
+      Object.prototype.hasOwnProperty.call(saved,'worklog_details_expanded_default')||
+      Object.prototype.hasOwnProperty.call(saved,'activity_feed_expanded_default')
+    )){
+      window._worklogDetailsExpandedByDefault=!!(
+        Object.prototype.hasOwnProperty.call(saved,'worklog_details_expanded_default')
+          ? saved.worklog_details_expanded_default
+          : saved.activity_feed_expanded_default
+      );
+    }
+    if(S&&typeof S.adoptSaved==='function'){
+      // Store-путь: значения и контролы уже применены через apply(), поэтому
+      // legacy-синхронизация ниже не нужна (иначе двойной рендер).
+      S.adoptSaved(saved,S.keysPresent(payload));
+    }else{
+      // Legacy-путь (store недоступен): прежнее поведение 1:1.
+      const beforeMode=window._chatActivityDisplayMode;
+      const beforeTimestamps=window._transparentEventTimestamps!==false;
+      _syncChatActivityDisplayModeControl(saved.chat_activity_display_mode);
+      _syncTransparentEventTimestampsControl(saved.transparent_stream_event_timestamps, saved.chat_activity_display_mode);
+      if(window._chatActivityDisplayMode!==beforeMode||((window._transparentEventTimestamps!==false)!==beforeTimestamps)){
+        clearMessageRenderCache();
+        renderMessages({preserveScroll:true});
+      }
+    }
     _applyAppearanceSavedToRuntime(saved,payload);
     _setAppearanceAutosaveStatus('saved');
   }catch(e){
@@ -9812,10 +9851,15 @@ async function loadSettingsPanel(){
     const themeVal=_appearanceStoreValue('theme',settings.theme||'dark');
     if(themeSel) themeSel.value=themeVal;
     if(typeof _syncThemePicker==='function') _syncThemePicker(themeVal);
-    const skinVal=_appearanceStoreValue('skin',(localStorage.getItem('hermes-skin')||settings.skin||'default')).toLowerCase();
+    // PR #2799: localStorage побеждает settings.skin, чтобы skin, уже
+    // применённый inline-gate, переживал гидратацию пикера.
+    const skinVal=(localStorage.getItem('hermes-skin')||settings.skin||'default').toLowerCase();
+    // ...но несохранённая правка skin в store новее любого источника.
+    const skinPending=_appearanceStorePendingValue('skin');
+    const skinPick=skinPending!==undefined?String(skinPending).toLowerCase():skinVal;
     const skinSel=$('settingsSkin');
-    if(skinSel) skinSel.value=skinVal;
-    if(typeof _buildSkinPicker==='function') _buildSkinPicker(skinVal);
+    if(skinSel) skinSel.value=skinPick;
+    if(typeof _buildSkinPicker==='function') _buildSkinPicker(skinPick);
     const fontSizeVal=_appearanceStoreValue('font_size',settings.font_size||localStorage.getItem('hermes-font-size')||'default');
     localStorage.setItem('hermes-font-size',fontSizeVal);
     if(typeof _applyFontSize==='function') _applyFontSize(fontSizeVal);
@@ -9884,10 +9928,11 @@ async function loadSettingsPanel(){
       // нарисованную активность в режиме «Тишина».
       const storeMode=_appearanceStoreValue('chat_activity_display_mode',settings.chat_activity_display_mode);
       _syncChatActivityDisplayModeControl(storeMode,{hideLive:false});
-      _syncTransparentEventTimestampsControl(
-        _appearanceStoreValue('transparent_stream_event_timestamps',settings.transparent_stream_event_timestamps),
-        storeMode
-      );
+      // Базовая синхронизация из ответа сервера (контракт #3820).
+      _syncTransparentEventTimestampsControl(settings.transparent_stream_event_timestamps, settings.chat_activity_display_mode);
+      // Затем — несохранённая правка из store, если она есть: она новее ответа.
+      const tsPending=_appearanceStorePendingValue('transparent_stream_event_timestamps');
+      if(tsPending!==undefined) _syncTransparentEventTimestampsControl(tsPending,storeMode);
       chatActivityModeSel.addEventListener('change',()=>{
         _pickChatActivityDisplayMode(chatActivityModeSel.value);
       },{once:false});

@@ -175,8 +175,26 @@ node --check static/panels.js
 node tests/js/appearance_store_behavior.js      # OK: 93 проверки, 15 сценариев
 python -m pytest tests/test_appearance_store_behavior.py \
                  tests/test_1003_appearance_autosave.py \
-                 tests/test_1003_preferences_autosave.py -q
+                 tests/test_1003_preferences_autosave.py -q   # 27 passed
 ```
+
+Регресс-контроль по существующим контрактам (все зелёные):
+`test_issue3820_chat_activity_display_mode` (режим перерисовывает только при
+фактической смене), `test_issue3595_activity_default_expanded` (Worklog-флаг не
+переприменяется), `test_batch_fixes::TestSystemTheme` (skin: localStorage выше
+settings.skin, PR #2799 — сохранено, store перебивает только несохранённую
+правку), `test_issue6612_update_channel_autosave` (все писатели настроек идут
+через `_enqueueSettingsPost`, счётчик обновлён 10 → 11).
+
+## Сохранённые контракты (не ломать при доработке)
+
+- `_autosaveAppearanceSettings` остаётся legacy-путём: при отсутствии store он
+  выполняет прежнюю синхронизацию (`beforeMode`/`beforeTimestamps` → rebuild
+  только при фактической смене). Store-путь эту ветку не исполняет, чтобы не
+  было двойного рендера.
+- skin: `localStorage.getItem('hermes-skin') || settings.skin || 'default'`,
+  затем несохранённая правка store (`_appearanceStorePendingValue`).
+- `_enqueueSettingsPost` — единственная точка записи настроек.
 
 ## Границы
 
