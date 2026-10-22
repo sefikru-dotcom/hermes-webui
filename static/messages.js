@@ -2201,6 +2201,149 @@ function _dispatchExtensionTurnLifecycle(type,sessionId,streamId,details={}){
   }
 }
 
+// ── Durable turn model attribution ────────────────────────────────────────
+// The server's fallback notice (`warning` SSE, `type:'fallback'`) is rendered as
+// a 4-second composer status, so the fact that a turn was answered by a
+// different lane disappears from the user's view once the toast fades. The
+// marker below is stored as display metadata on the CURRENT assistant turn
+// (`_turnModelAttribution`) and re-rendered from there by every render pass, so
+// the disclosure outlives the toast without adding a synthetic assistant answer.
+//
+// Identity policy: nothing is inferred. Only explicit facts are recorded —
+// structured warning fields, gateway routing metadata, the documented agent
+// notice text, the server's `_usedModel` stamp, and the session's own
+// model/provider/reasoning values. An unknown provider stays unknown.
+function _turnAttributionApi(){
+  if(typeof window==='undefined'||!window.TurnModelAttribution) return null;
+  const api=window.TurnModelAttribution;
+  return (typeof api.buildMarker==='function'&&typeof api.isMarker==='function')?api:null;
+}
+function _turnAttributionSessionFacts(){
+  const session=(typeof S!=='undefined'&&S&&S.session)?S.session:null;
+  if(!session) return {};
+  return {
+    sessionModel:session.model||'',
+    sessionProvider:session.model_provider||'',
+    // Session reasoning effort is a server-owned field; absent means "not
+    // explicitly set" and is then omitted from the marker.
+    reasoningEffort:session.reasoning_effort||'',
+    reasoningSource:session.reasoning_effort?'session':'',
+  };
+}
+function _buildTurnAttributionMarker(warning){
+  const api=_turnAttributionApi();
+  if(!api) return null;
+  try{
+    const facts=_turnAttributionSessionFacts();
+    facts.warning=warning||null;
+    facts.now=Date.now()/1000;
+    const marker=api.buildMarker(facts);
+    return api.isMarker(marker)?marker:null;
+  }catch(_){ return null; }
+}
+// Facts learned only AFTER the notice (the settled assistant message carries the
+// served model and, for gateway turns, the routing pair).
+function _turnAttributionTurnFacts(msg){
+  const routing=(msg&&msg._gatewayRouting&&typeof msg._gatewayRouting==='object')?msg._gatewayRouting:null;
+  return {
+    usedModel:(msg&&msg._usedModel)||'',
+    usedProvider:(routing&&routing.used_provider)||'',
+    gatewayRouting:routing,
+  };
+}
+function _finalizeTurnAttribution(messages,lastAsst,pending){
+  const api=_turnAttributionApi();
+  if(!api) return;
+  const list=Array.isArray(messages)?messages:[];
+  try{
+    if(api.isMarker(pending)){
+      const target=lastAsst||[...list].reverse().find(m=>m&&m.role==='assistant')||null;
+      if(target) api.attachToTurn(target,pending);
+    }
+    for(const msg of list){
+      if(!msg||msg.role!=='assistant'||!api.isMarker(msg._turnModelAttribution)) continue;
+      const enriched=api.enrichMarker(msg._turnModelAttribution,_turnAttributionTurnFacts(msg));
+      if(api.isMarker(enriched)) msg._turnModelAttribution=enriched;
+    }
+  }catch(_){ /* attribution must never break turn settlement */ }
+}
+// Error payloads carry structured identity (`model_identity`). Only a proven
+// substitution/activation is turned into a marker — an ordinary provider error
+// is not a fallback and must not be labelled as one.
+function _errorModelAttributionMarker(payload){
+  const api=_turnAttributionApi();
+  if(!api||!payload||typeof payload!=='object') return null;
+  const identity=payload.model_identity;
+  if(!identity||typeof identity!=='object') return null;
+  const substituted=identity.model_substituted===true||identity.provider_substituted===true;
+  if(identity.fallback!=='activated'&&!substituted) return null;
+  try{
+    return api.buildMarker({
+      warning:{
+        type:'fallback',
+        message:'',
+        requested_model:identity.requested_model,
+        requested_provider:identity.requested_provider,
+        model:identity.model,
+        provider:identity.provider,
+        reasoning_effort:identity.reasoning_effort,
+        reasoning_source:identity.reasoning_source,
+      },
+      now:Date.now()/1000,
+    });
+  }catch(_){ return null; }
+}
+// Existing turn render path: re-attach the badge after every transcript render
+// (ui.js owns renderMessages; this only decorates the footers it produced).
+// textContent only — never innerHTML — so server-provided text cannot inject.
+function _decorateTurnModelAttribution(){
+  const api=_turnAttributionApi();
+  if(!api||typeof document==='undefined') return;
+  const inner=(typeof $==='function'&&$('msgInner'))||document.getElementById('msgInner');
+  if(!inner) return;
+  const messages=(typeof S!=='undefined'&&S&&Array.isArray(S.messages))?S.messages:[];
+  if(!messages.length) return;
+  const segments=inner.querySelectorAll('.assistant-segment[data-msg-idx]');
+  for(const segment of segments){
+    const idx=Number(segment.getAttribute('data-msg-idx'));
+    const msg=Number.isFinite(idx)?messages[idx]:null;
+    const marker=msg&&msg._turnModelAttribution;
+    if(!api.isMarker(marker)||!api.hasVisibleFacts(marker)) continue;
+    const turn=segment.closest('.assistant-turn')||segment.closest('.msg-row');
+    if(!turn) continue;
+    const foots=turn.querySelectorAll('.msg-foot');
+    const foot=foots.length?foots[foots.length-1]:null;
+    // ui.js already owns a durable disclosure for gateway-routed turns
+    // (`Model switched: …` / `Failover: …` chips in the footer). Rendering a
+    // second one would double the same fact, so defer to it.
+    if(foot&&(foot.querySelector('.msg-model-warning-inline')||foot.querySelector('.gateway-failover-inline'))) continue;
+    if(turn.querySelector('.msg-model-attribution')) continue;
+    const badge=document.createElement('span');
+    // `gateway-failover-inline` is the existing muted-accent note style, so no
+    // CSS change is needed. The badge is a SIBLING of `.msg-foot`, never a child:
+    // ui.js skips its own footer chips when the footer already holds one of those
+    // classes, which would silently drop the duration/usage row.
+    badge.className='msg-model-attribution gateway-failover-inline';
+    badge.setAttribute('data-turn-attribution','1');
+    badge.textContent=api.badgeText(marker,{t:(typeof t==='function')?t:null});
+    const title=api.titleText(marker);
+    if(title) badge.title=title;
+    if(foot&&foot.parentNode===turn) turn.insertBefore(badge,foot);
+    else turn.appendChild(badge);
+  }
+}
+(function _wireTurnModelAttributionRender(){
+  if(typeof window==='undefined'||typeof window.renderMessages!=='function') return;
+  if(window.renderMessages._turnModelAttributionWired) return;
+  const baseRenderMessages=window.renderMessages;
+  window.renderMessages=function(...args){
+    const result=baseRenderMessages.apply(this,args);
+    try{ _decorateTurnModelAttribution(); }catch(_){ }
+    return result;
+  };
+  window.renderMessages._turnModelAttributionWired=true;
+})();
+
 function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
   if(!activeSid||!streamId) return;
   const reconnecting=!!options.reconnecting;
@@ -2239,6 +2382,10 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
   if(INFLIGHT[activeSid].currentActivityBurstId===undefined) INFLIGHT[activeSid].currentActivityBurstId=0;
   if(INFLIGHT[activeSid].currentLiveSegmentSeq===undefined) INFLIGHT[activeSid].currentLiveSegmentSeq=0;
   let assistantText='';
+  // Fallback marker collected from this stream's `warning` events. Kept on the
+  // INFLIGHT record so a reconnect (which rebuilds this closure) does not lose
+  // the disclosure before the turn settles.
+  let _pendingTurnAttribution=(INFLIGHT[activeSid]&&INFLIGHT[activeSid].turnModelAttribution)||null;
   let reasoningText='';
   if(S.session&&S.session.session_id===activeSid&&S.activeStreamId===streamId&&typeof ensureLiveWorklogShell==='function') ensureLiveWorklogShell();
   const _activityAdapter=typeof ActivityWindow==='function'?new ActivityWindow({sessionId:activeSid,streamId,root:document,mode:typeof chatActivityMode==='function'?chatActivityMode():'stream_window'}):null;
@@ -6453,6 +6600,11 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
           }
           // Find the last assistant message once for both reasoning persistence and timestamp
           lastAsst=[...S.messages].reverse().find(m=>m.role==='assistant');
+          // Attach + enrich the fallback marker now that the settled messages
+          // carry the server's served-model stamp (`_usedModel`) and routing.
+          _finalizeTurnAttribution(S.messages,lastAsst,_pendingTurnAttribution);
+          _pendingTurnAttribution=null;
+          if(INFLIGHT[activeSid]) INFLIGHT[activeSid].turnModelAttribution=null;
           // Persist reasoning trace for Worklog Thinking Cards; normal transcript
           // rendering keeps provider reasoning out of the final answer.
           if(reasoningText&&lastAsst&&!lastAsst.reasoning) lastAsst.reasoning=reasoningText;
@@ -6894,6 +7046,20 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
             _anchorRetryTarget=[...S.messages].reverse().find(m=>m&&m.role==='assistant')||null;
             _anchorRetryIndex=_anchorRetryTarget?S.messages.indexOf(_anchorRetryTarget):-1;
           }
+          // A failed turn can still have run on a substituted lane: the error
+          // payload carries structured `model_identity`. Only a proven
+          // activation/substitution becomes a marker — an ordinary provider
+          // error must never be labelled as a fallback.
+          if(!isRecoveryControlMessage){
+            const _attrApi=_turnAttributionApi();
+            const _structuredAttr=_errorModelAttributionMarker(d);
+            const _errAttr=(_attrApi&&_attrApi.mergeMarkers)
+              ?_attrApi.mergeMarkers(_pendingTurnAttribution,_structuredAttr)
+              :(_structuredAttr||_pendingTurnAttribution);
+            if(_errAttr) _finalizeTurnAttribution(S.messages,_anchorRetryTarget,_errAttr);
+            _pendingTurnAttribution=null;
+            if(INFLIGHT[activeSid]) INFLIGHT[activeSid].turnModelAttribution=null;
+          }
         }catch(_){
           S.messages.push({role:'assistant',content:'**Error:** An error occurred. Check server logs.'});
           _attachProjectedAnchorSceneToLastAssistant(S.messages);
@@ -6947,6 +7113,24 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
         if(d.type==='approval_gateway_offline'){
           if(typeof showToast==='function') showToast(d.message||'Gateway offline',4000,'warning');
           return;
+        }
+        // Durable attribution first: the marker outlives the 4s status below.
+        if(d.type==='fallback'){
+          const _marker=_buildTurnAttributionMarker(d);
+          if(_marker){
+            const api=_turnAttributionApi();
+            _pendingTurnAttribution=(api&&api.mergeMarkers)
+              ?api.mergeMarkers(_pendingTurnAttribution,_marker)
+              :_marker;
+            if(INFLIGHT[activeSid]) INFLIGHT[activeSid].turnModelAttribution=_pendingTurnAttribution;
+            // Attach immediately when the turn's assistant message already
+            // exists (a fallback can fire after the first token arrived), so an
+            // intermediate render — or an error path — still shows it.
+            if(api&&typeof api.attachToTurn==='function'){
+              const _liveAsst=[...S.messages].reverse().find(m=>m&&m.role==='assistant');
+              if(_liveAsst) api.attachToTurn(_liveAsst,_pendingTurnAttribution);
+            }
+          }
         }
         // Show as a small inline notice, not a full error
         setComposerStatus(`${d.message||'Warning'}`,d.type==='fallback'?4000:undefined);
@@ -7193,7 +7377,11 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
     }
     return `${m.role}|${ts}|${body.slice(0,160)}`;
   }
-  const _EPHEMERAL_TURN_FIELDS=['_turnUsage','_turnDuration','_turnTps','_gatewayRouting','_statusCard','_anchor_stream_id','_anchor_activity_scene'];
+  // `_turnModelAttribution` is the durable fallback marker written by the
+  // `warning`/type=fallback handler (static/turn_model_attribution.js). It is
+  // display-only metadata like the rest of this list, so it must survive the
+  // done/refresh wholesale replace exactly like `_usedModel` does.
+  const _EPHEMERAL_TURN_FIELDS=['_turnUsage','_turnDuration','_turnTps','_gatewayRouting','_turnModelAttribution','_statusCard','_anchor_stream_id','_anchor_activity_scene'];
   function _isHistoricalAnchorActivityScene(scene){
     if(!scene||typeof scene!=='object') return false;
     const identity=scene.identity&&typeof scene.identity==='object'?scene.identity:null;
