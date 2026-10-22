@@ -6424,7 +6424,7 @@ let _lastMessageRenderAt=-Infinity;
 function _recentMessageRenderArtifactWindow(ms){
   return performance.now()-_lastMessageRenderAt<(ms||1400);
 }
-function _cancelBottomSettle(){ _cancelMessageJumpScroll(); _bottomSettleToken++; if(_settleRO){ _settleRO.disconnect(); _settleRO=null; } clearTimeout(_settleTimer); clearTimeout(_settleFinalTimer); cancelAnimationFrame(_settleRAF); }
+function _cancelBottomSettle(){ _cancelMessageJumpScroll(); _bottomSettleToken++; const _ctl=(typeof _messageScrollController==="function")?_messageScrollController():null; if(_ctl) _ctl.cancel("user-scroll"); if(_settleRO){ _settleRO.disconnect(); _settleRO=null; } clearTimeout(_settleTimer); clearTimeout(_settleFinalTimer); cancelAnimationFrame(_settleRAF); }
 function _markMessageTouchScrollIntent(active=true){
   _messageTouchScrollActive=!!active;
   _lastMessageTouchScrollIntentMs=performance.now();
@@ -7638,30 +7638,72 @@ document.addEventListener('DOMContentLoaded',function(){
   tooltip.addEventListener('click',function(e){e.stopPropagation();});
 });
 
-let _messageScrollRaf = 0;
+let _messageScrollRaf = 0;           // kept for callers that gate on a pending frame
+let _messageScrollCtlRef = null;
+/* The ONE programmatic scroll writer for #messages.
+ *
+ * Every path that used to write `el.scrollTop` itself (bottom pin, settle pass,
+ * final fallback, render restore, virtualization compensation) goes through this
+ * controller now: one read + one write per frame, one follow guard, one reused
+ * ResizeObserver, and a monotonic settle generation so a superseded settle callback
+ * can never write again. See static/chat_scroll_controller.js for the full contract
+ * and webui-audit-scroll.md for the failure classes this removes.
+ *
+ * Degrades to the old direct writes when the module is absent (standalone harnesses,
+ * stale cached HTML), so nothing here is a hard dependency.
+ */
+function _messageScrollController(){
+  if(_messageScrollCtlRef) return _messageScrollCtlRef;
+  if(typeof ChatScrollController==='undefined'||!ChatScrollController||typeof ChatScrollController.create!=='function') return null;
+  _messageScrollCtlRef=ChatScrollController.create({
+    getScroller:()=>document.getElementById('messages'),
+    getContent:()=>document.getElementById('msgInner')||document.getElementById('messages'),
+    // The single follow decision: identical guards for the sync pin, the resize
+    // settle, the quiet settle and the final fallback. Explicit (user-invoked)
+    // jumps ignore the auto-follow setting, never the unpin state.
+    canFollow:({explicit})=>{
+      if(!explicit&&!window._autoScrollFollow) return false;
+      if(!_scrollPinned) return false;
+      if(_messageUserUnpinned) return false;
+      if(_recentNonMessageScrollIntent()) return false;
+      if(_recentMessageTouchScrollIntent()) return false;
+      return true;
+    },
+    onWrite:()=>{
+      const el=document.getElementById('messages');
+      if(!el) return;
+      _programmaticScroll=true;_programmaticScrollSetAt=performance.now();
+      _lastScrollTop=el.scrollTop;_lastMessageClientHeight=el.clientHeight;
+      _nearBottomCount=2;
+      _deferClearProgrammaticScroll();
+    },
+    raf:(cb)=>requestAnimationFrame(cb),
+    caf:(id)=>cancelAnimationFrame(id),
+    makeObserver:(cb)=>new ResizeObserver(cb)
+  });
+  return _messageScrollCtlRef;
+}
+function _messageScrollStats(){
+  const ctl=(typeof _messageScrollController==="function")?_messageScrollController():null;
+  return ctl?ctl.stats():null;
+}
 function _setMessageScrollToBottom(){
-  const el=$(messages);
+  const el=document.getElementById('messages');
   if(!el) return;
+  _scrollPinned=true;
+  const ctl=(typeof _messageScrollController==="function")?_messageScrollController():null;
+  if(ctl){
+    // force: a pin-to-bottom is unconditional by definition (it is what cleared the
+    // unpin state upstream); the controller still enforces the frame budget.
+    ctl.write('bottom',{immediate:true,force:true});
+    return;
+  }
   _programmaticScroll=true;_programmaticScrollSetAt=performance.now();
   el.scrollTop=el.scrollHeight;
   _lastScrollTop=el.scrollTop;_lastMessageClientHeight=el.clientHeight;
   _nearBottomCount=2;
-  _scrollPinned=true;
-  if(!_messageScrollRaf){
-    _messageScrollRaf=requestAnimationFrame(()=>{
-      _messageScrollRaf=0;
-      if(_messageUserUnpinned || !_scrollPinned || _recentNonMessageScrollIntent()){
-        _deferClearProgrammaticScroll();
-        return;
-      }
-      el.scrollTop=el.scrollHeight;
-      _lastScrollTop=el.scrollTop;_lastMessageClientHeight=el.clientHeight;
-      _nearBottomCount=2;
-      _scrollPinned=true;
-      _deferClearProgrammaticScroll();
-    });
-  }
 }
+
 function _isMessagePaneNearBottom(threshold=250){
   const el=$('messages');
   if(!el) return false;
@@ -7707,6 +7749,20 @@ function _followMessagesAfterDomReplace(){
   return false;
 }
 function _settleMessageScrollToBottom(force, explicit){
+  // Delegated to the shared controller: it owns the ResizeObserver (one instance,
+  // reused), the 300ms quiet pass, the 2s final fallback and — crucially — the
+  // settle generation. `_bottomSettleToken` stays monotonic for any legacy reader,
+  // but the cancellation decision is now made in ONE place, so a stale settle can
+  // only record itself in stats().staleCancelled instead of writing scrollTop.
+  const ctl=(typeof _messageScrollController==="function")?_messageScrollController():null;
+  if(ctl){
+    ++_bottomSettleToken;
+    ctl.settle({force:!!force, explicit:!!explicit, reason:'bottom-settle'});
+    return;
+  }
+  _settleMessageScrollToBottomLegacy(force, explicit);
+}
+function _settleMessageScrollToBottomLegacy(force, explicit){
   // `explicit` = a user-invoked scroll-to-bottom (End button / scrollToBottom()).
   // When explicit, late-layout settling runs even if Auto-follow is OFF — the
   // setting only suppresses AUTOMATIC streaming follow, not a deliberate jump
@@ -12187,6 +12243,13 @@ function chatActivityMode(){
   if(typeof window==='undefined') return 'stream_window';
   const mode=window._chatActivityDisplayMode;
   if(mode==='stream_window'||mode==='stream_full'||mode==='stream_quiet') return mode;
+  // Legacy aliases are translated ONCE, in the shared module, so ui.js and the
+  // activity block cannot disagree about what a stored value means.
+  if(mode&&typeof ChatActivityBlock!=='undefined'&&ChatActivityBlock&&typeof ChatActivityBlock.normalizeMode==='function'){
+    if(['transparent_stream','hide_all_activity','compact_worklog','full','window','quiet'].indexOf(mode)>=0){
+      return ChatActivityBlock.normalizeMode(mode);
+    }
+  }
   if(mode==='transparent_stream') return 'stream_full';
   if(mode==='hide_all_activity') return 'stream_quiet';
   if(mode==='compact_worklog') return 'stream_window';
@@ -12236,7 +12299,107 @@ function _applyThinkingModeClasses(){
     document.documentElement.classList.toggle('mars-mode-window',am==='stream_window');
     document.documentElement.classList.toggle('mars-mode-quiet',am==='stream_quiet');
     document.documentElement.classList.toggle('mars-hide-activity',am==='stream_quiet');
+    document.documentElement.setAttribute('data-activity-mode',am);
   }catch(_){}
+  // A mode switch must take effect on the DOM that is ALREADY on screen: no new
+  // SSE event, no re-render, no data loss. This is the quiet -> full restoration
+  // path as well (quiet only HIDES rows, so they are still there to show again).
+  _reconcileActivityMode();
+}
+/* ── one activity-mode reconciler for live + settled turns ─────────────────────
+ * `stream_full` and `stream_window` differ only in chrome attributes/limits, and
+ * `stream_quiet` is a pure visibility concern. Applying a mode is therefore an
+ * attribute-level operation on whatever is already rendered — it never removes a
+ * row, never re-renders, and never needs a following event. */
+function _activityModeModule(){
+  return (typeof ChatActivityBlock!=='undefined'&&ChatActivityBlock)?ChatActivityBlock:null;
+}
+/* Header label for the shared activity shell. In full mode the body is not a
+ * "window", so fall back to the neutral label instead of the window one; if the
+ * translation key is absent `t()` echoes the key back, which must never reach the
+ * header. */
+function _activityShellLabel(mode){
+  const fallback=(typeof t==='function')?t('activity_mode_short_stream_window'):'';
+  if(mode!=='stream_full'||typeof t!=='function') return fallback;
+  const full=t('activity_mode_short_stream_full');
+  return (full&&full!=='activity_mode_short_stream_full')?full:fallback;
+}
+function _activityContainersIn(host){
+  if(!host||!host.querySelectorAll) return [];
+  const nodes=Array.from(host.querySelectorAll(
+    '.mars-process-window,.agent-activity-group,.tool-worklog-group[data-tool-worklog-group="1"],.live-worklog[data-live-worklog-shell="1"]'
+  ));
+  // Keep only OUTERMOST containers: the window chrome wraps its own stream body,
+  // which also matches `.live-worklog[data-live-worklog-shell]`.
+  return nodes.filter(node=>!nodes.some(other=>other!==node&&other.contains&&other.contains(node)));
+}
+function _applyActivityModeToHost(host, mode, state, turnKey, legacyKeys){
+  if(!host) return 0;
+  const m=mode||(typeof chatActivityMode==='function'?chatActivityMode():'stream_window');
+  const quiet=m==='stream_quiet';
+  const AB=_activityModeModule();
+  const containers=_activityContainersIn(host);
+  for(const container of containers){
+    container.setAttribute('data-activity-mode',m);
+    container.setAttribute('data-activity-state',state||'live');
+    if(AB&&container.classList&&container.classList.contains('mars-process-window')){
+      AB.setMode(container,m);
+      AB.setState(container,{state:state||'live'});
+      if(turnKey) AB.disclosureFor(container,{turnKey,legacyKeys});
+    }else{
+      // Legacy/compact shape (no window chrome): same mode semantics, applied
+      // inline so it does not depend on the `html.mars-mode-*` CSS layer.
+      container.style.display=quiet?'none':'';
+      const body=container.querySelector('.tool-worklog-body,.tool-worklog-list,.tool-call-group-body');
+      if(body&&body.style){
+        body.style.maxHeight=m==='stream_window'?(AB?AB.WINDOW_BODY_MAX_PX+'px':'260px'):'';
+        body.style.overflowY=m==='stream_window'?'auto':'';
+      }
+      if(turnKey&&AB) AB.disclosureFor(container,{turnKey,legacyKeys});
+    }
+    if(state==='settled'&&AB) AB.syncVisibility(container);
+  }
+  // Quiet mode: everything else that only exists to narrate the live process is
+  // hidden, never removed (restore is then a single attribute flip).
+  const narrators=Array.from(host.querySelectorAll(
+    '.transparent-event-row,.agent-activity-thinking,.wl-reason,[data-anchor-scene-owner="1"],[data-anchor-scene-row="1"],#liveRunStatus,.thinking-card-row'
+  ));
+  for(const node of narrators){
+    if(!node.style) continue;
+    if(quiet){
+      node.style.display='none';
+      node.setAttribute('data-activity-hidden','1');
+    }else if(node.getAttribute('data-activity-hidden')==='1'){
+      node.style.display='';
+      node.removeAttribute('data-activity-hidden');
+    }
+  }
+  return containers.length;
+}
+function _reconcileActivityMode(){
+  try{
+    const mode=typeof chatActivityMode==='function'?chatActivityMode():'stream_window';
+    const live=$('liveAssistantTurn');
+    if(live){
+      const blocks=_assistantTurnBlocks(live)||live;
+      _applyActivityModeToHost(blocks,mode,'live',_activityKeyForLiveTurn(),S.activeStreamId?['live:'+S.activeStreamId]:null);
+    }
+    const inner=document.getElementById('msgInner');
+    if(inner&&inner.querySelectorAll){
+      const turns=inner.querySelectorAll('.assistant-turn');
+      for(const turn of turns){
+        if(turn.id==='liveAssistantTurn') continue;
+        const blocks=_assistantTurnBlocks(turn)||turn;
+        const ownerRawIdx=_settledTurnOwnerRawIdx(turn);
+        const key=ownerRawIdx===null?null:_turnActivityKeyForRawIdx(ownerRawIdx);
+        _applyActivityModeToHost(blocks,mode,'settled',key,ownerRawIdx===null?null:[`anchor-scene:${ownerRawIdx}`]);
+      }
+    }
+  }catch(_){}
+}
+if(typeof window!=='undefined'){
+  window._applyActivityModeToHost=_applyActivityModeToHost;
+  window._reconcileActivityMode=_reconcileActivityMode;
 }
 if(typeof window!=='undefined'){
   window.thinkingMode=thinkingMode;
@@ -13346,7 +13509,77 @@ function _copyActivityDisclosureState(fromActivityKey, toActivityKey){
   if(state) _writeActivityDisclosureState(toActivityKey, state==='open');
 }
 function _activityKeyForLiveTurn(){
+  const key=_turnActivityKeyForRawIdx(_liveTurnOwnerRawIdx());
+  if(key) return key;
   return S.activeStreamId?'live:'+S.activeStreamId:null;
+}
+/* ── unified turn identity for activity disclosure ────────────────────────────
+ * The live block and the settled block used to be stored under DIFFERENT keys
+ * (`live:<streamId>` vs `anchor-scene:<rawIdx>`), so the panel snapped shut at the
+ * live -> settled boundary and re-opened/shut on every rebuild. Both sides now
+ * derive the SAME key from the turn ordinal (the index of the user message that
+ * opened the turn): it exists for the live turn and for its settled form, and it
+ * survives virtualisation because it does not depend on the rendered raw index.
+ * Legacy keys are still read (ChatActivityBlock.Disclosure.adopt) so saved
+ * disclosure survives the upgrade. */
+function _turnOrdinalForRawIdx(rawIdx){
+  if(!Array.isArray(S.messages)||!Number.isFinite(Number(rawIdx))) return null;
+  const limit=Math.max(0,Math.min(Number(rawIdx),S.messages.length-1));
+  let ordinal=0;
+  for(let i=0;i<=limit;i++){
+    const m=S.messages[i];
+    if(m&&m.role==='user') ordinal++;
+  }
+  return ordinal>0?ordinal:null;
+}
+function _turnActivityKeyForRawIdx(rawIdx){
+  const ordinal=_turnOrdinalForRawIdx(rawIdx);
+  if(ordinal===null) return null;
+  const sid=(S.session&&S.session.session_id)||'';
+  if(typeof ChatActivityBlock!=='undefined'&&ChatActivityBlock&&typeof ChatActivityBlock.turnKey==='function'){
+    return ChatActivityBlock.turnKey({sessionId:sid,ordinal});
+  }
+  return sid+':t'+ordinal;
+}
+/* Reverse map for the deferred-worklog recovery path: `t<ordinal>` (new) and
+ * `anchor-scene:<rawIdx>` (legacy) both resolve to a raw message index. */
+function _rawIdxFromActivityKey(key){
+  if(!key) return null;
+  const legacy=/^anchor-scene:(\d+)$/.exec(key);
+  if(legacy) return Number(legacy[1]);
+  const turn=/^t(\d+)$/.exec(key);
+  if(!turn) return null;
+  const wanted=Number(turn[1]);
+  if(!Array.isArray(S.messages)) return null;
+  let ordinal=0;
+  for(let i=0;i<S.messages.length;i++){
+    const m=S.messages[i];
+    if(!m||m.role!=='user') continue;
+    ordinal++;
+    if(ordinal===wanted) return i;
+  }
+  return null;
+}
+/* Raw index of the message that opened the turn currently streaming. */
+function _liveTurnOwnerRawIdx(){
+  if(!Array.isArray(S.messages)||!S.messages.length) return null;
+  for(let i=S.messages.length-1;i>=0;i--){
+    const m=S.messages[i];
+    if(m&&m.role==='user') return i;
+  }
+  return null;
+}
+/* Raw index of the user message owning a settled turn element. */
+function _settledTurnOwnerRawIdx(turn){
+  if(!turn) return null;
+  const segments=turn.querySelectorAll('[data-msg-idx]');
+  for(let i=0;i<segments.length;i++){
+    const idx=Number(segments[i].getAttribute('data-msg-idx'));
+    if(!Number.isFinite(idx)) continue;
+    const m=S.messages[idx];
+    if(m&&m.role==='user') return idx;
+  }
+  return null;
 }
 function _onLiveActivityToggle(group){
   if(!group) return;
@@ -13397,9 +13630,9 @@ function _deferredWorklogRowsFromGroup(group){
   // disclosure key `anchor-scene:<rawIdx>`. Used after an HTML-cache restore
   // where the _deferredWorklogRows JS property was dropped. (#5839)
   const key=group&&group.getAttribute&&group.getAttribute('data-activity-disclosure-key');
-  const m=key&&/^anchor-scene:(\d+)$/.exec(key);
-  if(!m) return null;
-  const msg=S.messages&&S.messages[Number(m[1])];
+  const rawIdx=_rawIdxFromActivityKey(key);
+  if(rawIdx===null||rawIdx===undefined) return null;
+  const msg=S.messages&&S.messages[rawIdx];
   const scene=msg&&msg._anchor_activity_scene;
   if(!scene) return null;
   return _anchorSceneRowsForRendering(scene,{settled:true});
@@ -13560,6 +13793,12 @@ function _toggleActivityWindow(header){
   if(!windowEl) return;
   const collapsed=windowEl.classList.toggle('is-collapsed');
   header.setAttribute('aria-expanded',collapsed?'false':'true');
+  windowEl.setAttribute('data-activity-expanded',collapsed?'0':'1');
+  // Persist on the STABLE turn key so the decision survives the live -> settled
+  // boundary and any re-render (the settled block reads the same key).
+  const turnKey=windowEl.getAttribute('data-turn-key')||_activityKeyForLiveTurn()||'';
+  const AB=_activityModeModule();
+  if(turnKey&&AB) AB.Disclosure.set(turnKey,!collapsed);
 }
 
 function ensureLiveWorklogContainer(blocks, opts){
@@ -13571,59 +13810,72 @@ function ensureLiveWorklogContainer(blocks, opts){
     : null;
   if(!worklog) worklog=blocks.querySelector('.live-worklog[data-live-worklog-shell="1"][data-live-activity-current="1"]');
   let shell = null;
-  const isWindow = chatActivityMode() === 'stream_window';
+  // FULL and WINDOW share ONE shell: a disclosure header plus a body that is either
+  // bounded (window) or unbounded (full). Full mode used to build a bare
+  // `.live-worklog` with no header at all, so switching window -> full mid-stream
+  // silently dropped the header and the reader's disclosure choice with it.
+  const activityMode=chatActivityMode();
   if(!worklog){
-    worklog = document.createElement('div');
-    if (isWindow) {
+    const AB=_activityModeModule();
+    if(AB&&typeof AB.ensureChrome==='function'){
+      const chrome=AB.ensureChrome(blocks,{
+        turnKey:activityKey||'',
+        mode:activityMode,
+        state:'live',
+        anchor:opts.anchor||null,
+        label:_activityShellLabel(activityMode)
+      });
+      if(chrome&&chrome.root){ worklog=chrome.root; shell=chrome.body; }
+    }
+    if(!worklog){
+      worklog = document.createElement('div');
       worklog.className = 'mars-process-window';
+      worklog.setAttribute('data-activity-block','1');
+      worklog.setAttribute('data-turn-key',activityKey||'');
+      worklog.setAttribute('data-mode',activityMode);
+      worklog.setAttribute('data-state','live');
       worklog.innerHTML = `
-        <button type="button" class="mars-process-window-header" aria-expanded="true" aria-label="${esc(t('activity_mode_short_stream_window'))}" onclick="_toggleActivityWindow(this)">
+        <button type="button" class="mars-process-window-header" aria-expanded="true" aria-label="${esc(_activityShellLabel(activityMode))}" onclick="_toggleActivityWindow(this)">
           <span class="mars-process-window-title">
             <span class="mars-quiet-status-spinner"></span>
-            <span>${esc(t('activity_mode_short_stream_window'))}</span>
+            <span>${esc(_activityShellLabel(activityMode))}</span>
           </span>
           <span class="mars-process-window-actions"><span class="mars-process-window-btn">⌄</span></span>
         </button>
-        <div class="mars-process-window-stream live-worklog worklog" data-live-worklog-shell="1">
-          <div class="tool-worklog-list"></div>
+        <div class="mars-process-window-stream live-worklog worklog" data-live-worklog-shell="1" data-activity-body="1">
+          <div class="tool-worklog-list" data-activity-list="1"></div>
         </div>
       `;
-      // Redirect worklog reference to the inner stream container for the rest of the logic
-      const shell = worklog.querySelector('.live-worklog');
-      shell.setAttribute('data-live-tool-worklog-group', '1');
-      shell.setAttribute('data-live-tool-call-group', '1');
-      shell.setAttribute('data-live-activity-current', '1');
-      shell.setAttribute('data-tool-worklog-group', '1');
-      shell.setAttribute('data-tool-worklog-key', activityKey || '');
-    } else {
-      worklog.className = 'live-worklog worklog';
-      worklog.setAttribute('data-live-worklog-shell', '1');
-      worklog.setAttribute('data-live-tool-worklog-group', '1');
-      worklog.setAttribute('data-live-tool-call-group', '1');
-      worklog.setAttribute('data-live-activity-current', '1');
-      worklog.setAttribute('data-tool-worklog-group', '1');
-      worklog.setAttribute('data-tool-worklog-key', activityKey || '');
-      worklog.innerHTML = '<div class="tool-worklog-list"></div>';
+      shell = worklog.querySelector('.live-worklog');
     }
-    worklog.setAttribute('data-live-tool-worklog-group','1');
-    worklog.setAttribute('data-live-tool-call-group','1');
-    worklog.setAttribute('data-live-activity-current','1');
-    worklog.setAttribute('data-tool-worklog-group','1');
-    worklog.setAttribute('data-tool-worklog-key',activityKey||'');
-    
-    const anchor=opts.anchor||null;
-    const footer=blocks.querySelector('#liveRunStatus');
-    if(anchor&&anchor.parentElement===blocks) anchor.insertAdjacentElement('afterend',worklog);
-    else if(footer&&footer.parentElement===blocks) blocks.insertBefore(worklog,footer);
-    else blocks.appendChild(worklog);
+    // The legacy hooks the worklog builders/lookups depend on live on the INNER
+    // stream body, in BOTH modes now (previously only in window mode).
+    const body=shell||worklog.querySelector('.live-worklog')||worklog;
+    body.setAttribute('data-live-tool-worklog-group','1');
+    body.setAttribute('data-live-tool-call-group','1');
+    body.setAttribute('data-live-activity-current','1');
+    body.setAttribute('data-tool-worklog-group','1');
+    body.setAttribute('data-tool-worklog-key',activityKey||'');
+    if(!worklog.parentNode){
+      const anchor=opts.anchor||null;
+      const footer=blocks.querySelector('#liveRunStatus');
+      if(anchor&&anchor.parentElement===blocks) anchor.insertAdjacentElement('afterend',worklog);
+      else if(footer&&footer.parentElement===blocks) blocks.insertBefore(worklog,footer);
+      else blocks.appendChild(worklog);
+    }
+    // Fresh shell: stamp the current mode, state and the reader's saved disclosure
+    // (same key the settled block will use).
+    _applyActivityModeToHost(blocks, activityMode, 'live', activityKey||'', S.activeStreamId?['live:'+S.activeStreamId]:null);
   }else if(activityKey&&!worklog.getAttribute('data-tool-worklog-key')){
     worklog.setAttribute('data-tool-worklog-key',activityKey);
   }
   if(opts.anchor) _syncWorklogReasonFromAnchor(worklog, opts.anchor);
   _migrateLegacyLiveActivityGroupsToWorklog(blocks, worklog);
   _syncToolCallGroupSummary(worklog);
-  return isWindow && !worklog.classList.contains('live-worklog')
-    ? worklog.querySelector('.live-worklog') : worklog;
+  // One shape for both modes: hand back the INNER stream body (the rows live there),
+  // never the chrome, so every caller keeps appending to the same node.
+  if(worklog.classList.contains('live-worklog')) return worklog;
+  return worklog.querySelector('.live-worklog')||worklog;
 }
 function _migrateLegacyLiveActivityGroupsToWorklog(blocks, worklog){
   if(!blocks||!worklog) return;
@@ -15178,8 +15430,8 @@ function _collapseJustSettledWorklogInPlace(streamId){
   const savedDisclosure=_readActivityDisclosureState(disclosureKey);
   const rows=_deferredWorklogRowsFromGroup(group);
   if(!rows||!rows.length) return false;
-  const match=/^anchor-scene:(\d+)$/.exec(disclosureKey);
-  const message=match&&S.messages&&S.messages[Number(match[1])];
+  const matchRawIdx=_rawIdxFromActivityKey(disclosureKey);
+  const message=matchRawIdx===null?null:(S.messages&&S.messages[matchRawIdx]);
   const errored=!!(message&&message._anchor_activity_scene&&
     _anchorSceneHasErroredTerminalState(message._anchor_activity_scene));
   const keepOpen=!ownerHasVisibleSegment
@@ -15245,7 +15497,11 @@ function _renderSettledAnchorSceneForMessage(message, segment, rawIdx){
   blocks.querySelectorAll('.tool-worklog-group:not([data-anchor-scene-owner="1"]),.tool-call-group:not([data-anchor-scene-owner="1"]),.agent-activity-thinking:not([data-anchor-scene-row="1"]),.wl-reason').forEach(el=>el.remove());
   const streamId=String(message._anchor_stream_id||scene.stream_id||scene.identity&&scene.identity.stream_id||'');
   const keepSettledWorklogOpen=_shouldKeepSettledWorklogOpenForStreamSettle(streamId);
-  const activityKey=`anchor-scene:${rawIdx}`;
+  // Unified turn key: identical to the key the LIVE block used for this same turn
+  // (see _activityKeyForLiveTurn), so disclosure survives live -> settled instead of
+  // snapping back to the default. `anchor-scene:<rawIdx>` stays as the fallback for
+  // messages whose turn ordinal cannot be derived.
+  const activityKey=_turnActivityKeyForRawIdx(rawIdx)||`anchor-scene:${rawIdx}`;
   if(streamId&&!_readActivityDisclosureState(activityKey)){
     _copyActivityDisclosureState(`live:${streamId}`, activityKey);
   }
@@ -17341,6 +17597,15 @@ function _reanchorPinnedTailAfterRender(wasNearTail){
   if(!el) return;
   const settledMax=Math.max(0, el.scrollHeight-el.clientHeight);
   if(el.scrollTop < settledMax-1){
+    _scrollPinned=true;
+    const ctl=(typeof _messageScrollController==="function")?_messageScrollController():null;
+    if(ctl){
+      // Same single writer: 'reanchor' is a forced pin (the caller already decided
+      // the reader was near the tail), still subject to the per-frame budget so it
+      // cannot add a second layout in a frame the settle pass already used.
+      ctl.write('reanchor',{immediate:true,force:true});
+      return;
+    }
     _programmaticScroll=true;_programmaticScrollSetAt=performance.now();
     el.scrollTop=settledMax;
     _lastScrollTop=el.scrollTop;_lastMessageClientHeight=el.clientHeight;
@@ -17663,7 +17928,27 @@ function renderMessages(options){
   // the live reply stops following / appears to jump backward.
   _programmaticScroll=true;
   _programmaticScrollSetAt=performance.now();
-  inner.innerHTML='';
+  // ── Keyed in-place patch instead of the transcript wipe ────────────────────
+  // This used to be `inner.innerHTML=''`, on every render, including mid-stream.
+  // Emptying the container collapses scrollHeight for the duration of the rebuild,
+  // the browser clamps scrollTop, and that clamp fires a scroll event that cannot be
+  // told apart from a reader gesture — which is the root of the jump/unpin class in
+  // webui-audit-scroll.md. ChatRenderPatch.begin() snapshots the live rows by key;
+  // every row placed below is matched against that snapshot, so an unchanged row
+  // keeps its DOM node (no Prism/KaTeX re-run, no <img> reload, no disclosure reset,
+  // no layout invalidation) and a changed row is swapped in its own slot.
+  // Without the module (standalone harnesses, old cached HTML) behaviour is exactly
+  // the old wipe, so this degrades to the previous code path.
+  const _patchCtx=(typeof ChatRenderPatch!=='undefined'&&ChatRenderPatch&&typeof ChatRenderPatch.begin==='function')
+    ? ChatRenderPatch.begin(inner) : null;
+  const _placeRow=(node,opts)=>_patchCtx?ChatRenderPatch.place(_patchCtx,node,opts):inner.appendChild(node);
+  const _finishPatch=()=>{
+    if(!_patchCtx) return null;
+    const stats=ChatRenderPatch.finish(_patchCtx);
+    window._lastRenderPatchStats=stats;
+    return stats;
+  };
+  if(!_patchCtx) inner.innerHTML='';
   const compressionNode=compressionState?_compressionCardsNode(compressionState):null;
   const {message:referenceMessage, rawIdx:referenceMessageRawIdx}=_latestCompressionReferenceMessage(
     S.messages,
@@ -17701,7 +17986,7 @@ function renderMessages(options){
   const serverOlderCount=hasServerOlder&&Number.isFinite(Number(_oldestIdx))?Math.max(0,Number(_oldestIdx)):0;
   if(typeof _applySessionNavigationPrefs==='function') _applySessionNavigationPrefs();
   if(virtualWindow.virtualized&&virtualWindow.topPad>0){
-    inner.appendChild(_messageVirtualSpacer(virtualWindow.topPad,'before'));
+    _placeRow(_messageVirtualSpacer(virtualWindow.topPad,'before'));
   }
   if(hasServerOlder){
     const indicator=document.createElement('button');
@@ -17713,7 +17998,7 @@ function renderMessages(options){
         ? (t('load_older_messages_count',serverOlderCount)||`Load earlier messages (${serverOlderCount} older)`)
         : `Load earlier messages (${serverOlderCount} older)`)
       : (typeof t==='function'?t('load_older_messages'):'Load earlier messages');
-    inner.appendChild(indicator);
+    _placeRow(indicator);
     _wireMessageWindowLoadEarlierButton();
   }
   let lastUserRawIdx=-1;
@@ -17860,7 +18145,7 @@ function renderMessages(options){
       // turn before rendering the always-visible tail so assistant segments do
       // not merge across the spacer boundary.
       currentAssistantTurn=null;
-      inner.appendChild(_messageVirtualSpacer(virtualWindow.bottomPad,'after'));
+      _placeRow(_messageVirtualSpacer(virtualWindow.bottomPad,'after'));
     }
     const {m,rawIdx}=renderVisWithIdx[vi];
     const _tsSep=m._ts||m.timestamp;
@@ -17871,7 +18156,7 @@ function renderMessages(options){
         const sep=document.createElement('div');
         sep.className='msg-date-sep';
         sep.textContent=_fmtDateSep(_d);
-        inner.appendChild(sep);
+        _placeRow(sep);
       }
       _prevSepKey=_key;
     }
@@ -18068,7 +18353,7 @@ function renderMessages(options){
         row._wakeupRenderedHtml=nextRowHtml;
         row.innerHTML=nextRowHtml;
       }
-      inner.appendChild(row);
+      _placeRow(row);
       userRows.set(rawIdx, row);
       continue;
     }
@@ -18110,7 +18395,7 @@ function renderMessages(options){
       // typeof guard keeps renderMessages runnable in the node test harnesses that
       // extract it without this helper (they stub every collaborator by name).
       if(typeof _applyUserRowIntrinsicHeight==='function') _applyUserRowIntrinsicHeight(row, newRawText);
-      inner.appendChild(row);
+      _placeRow(row);
       userRows.set(rawIdx, row);
       continue;
     }
@@ -18131,7 +18416,9 @@ function renderMessages(options){
       currentAssistantTurn.dataset.role='assistant';
       if(S.session) currentAssistantTurn.dataset.sessionId=S.session.session_id;
       currentAssistantTurn.dataset.recycleKey=rawIdx;
-      inner.appendChild(currentAssistantTurn);
+      // The live turn keeps receiving segments/tool groups AFTER placement, so it must
+      // never be matched against a byte-equal stale shell.
+      _placeRow(currentAssistantTurn,{reuse:false});
     }
     _setLatestAssistantTurnLandmark(currentAssistantTurn, !m._live&&rawIdx===latestRenderedAssistantRawIdx);
     const seg=document.createElement('div');
@@ -18281,13 +18568,13 @@ function renderMessages(options){
         return;
       }
     }
-    inner.appendChild(node);
+    _placeRow(node);
   }
   function _insertCompressionLikeNodeByRawIdx(node, rawIdx){
     if(!node) return;
     if(rawIdx<firstRenderedRawIdx) return;
     if(!renderVisWithIdx.length){
-      inner.appendChild(node);
+      _placeRow(node);
       return;
     }
     let anchorIdx=null;
@@ -18298,7 +18585,7 @@ function renderMessages(options){
       }
     }
     if(anchorIdx===null){
-      inner.appendChild(node);
+      _placeRow(node);
       return;
     }
     const anchorRawIdx=renderVisWithIdx[anchorIdx].rawIdx;
@@ -18321,7 +18608,7 @@ function renderMessages(options){
       userRow.parentElement.insertBefore(node, userRow);
       return;
     }
-    inner.appendChild(node);
+    _placeRow(node);
   }
   const preservedOnlyNode=(!preservedCompressionTaskCardsAttached&&(!referenceNode||compressionState)&&preservedCompressionTaskMessages.length)
     ? (()=>{const row=document.createElement('div');row.innerHTML=`<div class="compression-turn"><div class="compression-turn-blocks">${_preservedCompressionTaskListCardsHtml(preservedCompressionTaskMessages)}</div></div>`;return row.firstElementChild;})()
@@ -19108,6 +19395,10 @@ function renderMessages(options){
   // (tool completion, session switch) must not override the user's scroll position.
   // scrollIfPinned() respects _scrollPinned, so it's a no-op if user scrolled up.
   if(typeof _syncLiveRunStatusAfterRender==='function') _syncLiveRunStatusAfterRender();
+  // Commit the keyed patch BEFORE any scroll work: rows that no longer exist are
+  // removed here, and the rows that survived keep their live nodes (so the settle
+  // pass measures real heights instead of a half-built transcript).
+  _finishPatch();
   _scrollAfterMessageRender(preserveScroll, scrollSnapshot);
   if(_maybeRecoverVirtualizedBlankViewport(options, preserveScroll, virtualWindow)) return;
   // Apply syntax highlighting after DOM is built
@@ -20147,16 +20438,25 @@ function clearLiveToolCards(){
   if(container){container.innerHTML='';container.style.display='none';}
 }
 function _hideLiveActivityForFinalAnswerOnly(){
-  clearLiveToolCards();
-  if(typeof removeThinking==='function') removeThinking();
+  // Quiet mode HIDES the live process rows; it must not DESTROY them. Destroying
+  // them (the old clearLiveToolCards() + .remove() pass) is why switching
+  // quiet -> full mid-stream showed an empty turn until the next SSE event
+  // re-created the rows, and why a collapsed/expanded choice made before the
+  // switch was lost. Hiding also keeps the smd parser target intact, so the
+  // answer keeps streaming into the same node.
+  //
+  // Name kept: panels.js calls window._hideLiveActivityForFinalAnswerOnly() when the
+  // mode becomes stream_quiet.
   const turn=$('liveAssistantTurn');
-  const inner=_assistantTurnBlocks(turn);
-  if(inner){
-    inner.querySelectorAll('.transparent-event-row,.agent-activity-thinking,.wl-reason,#liveRunStatus,.live-worklog[data-live-worklog-shell],.tool-worklog-group[data-live-tool-call-group],.tool-call-group[data-live-tool-call-group],.tool-card-row[data-live-tid],[data-anchor-scene-owner="1"],[data-anchor-scene-row="1"]').forEach(el=>el.remove());
+  const blocks=_assistantTurnBlocks(turn);
+  if(blocks){
+    _applyActivityModeToHost(blocks,'stream_quiet','live',_activityKeyForLiveTurn(),S.activeStreamId?['live:'+S.activeStreamId]:null);
+    turn.setAttribute('data-activity-quiet','1');
   }
+  const container=$('liveToolCards');
+  if(container) container.style.display='none';
   const legacyThinking=$('thinkingRow');
-  if(legacyThinking) legacyThinking.remove();
-  if(turn&&inner&&!inner.children.length) turn.remove();
+  if(legacyThinking) legacyThinking.style.display='none';
 }
 if(typeof window!=='undefined') window._hideLiveActivityForFinalAnswerOnly=_hideLiveActivityForFinalAnswerOnly;
 function _removeEmptyLiveWorklogShells(inner){
