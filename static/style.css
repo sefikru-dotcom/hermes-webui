@@ -1571,6 +1571,10 @@ main.main.showing-plugin > #mainPlugin {
     }
   }
   html{background:var(--sidebar);}
+  /* The app is a single fixed viewport: nothing outside the chat scroller is
+     allowed to scroll the document. Without this, iOS pans the whole layout
+     when the keyboard opens and the composer slides out of view. */
+  html{height:100%;overflow:hidden;overscroll-behavior:none;}
   .sr-only{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0 0 0 0)!important;clip-path:inset(50%)!important;white-space:nowrap!important;border:0!important;}
   body{background:var(--bg);color:var(--text);height:100vh;height:100dvh;overflow:hidden;display:flex;flex-direction:column;}
   .layout{display:flex;width:100%;flex:1 1 auto;min-height:0;}
@@ -3265,6 +3269,7 @@ main.main.showing-plugin > #mainPlugin {
     .msg-body{padding-left:0;max-width:100%;}
     .msg-role{font-size:12px;}
     .composer-wrap{padding:8px 10px calc(12px + var(--keyboard-bottom-inset, 0px))!important;padding-left:max(10px,env(safe-area-inset-left,0))!important;padding-right:max(10px,env(safe-area-inset-right,0))!important;}
+    .composer-wrap{padding-bottom:calc(12px + max(env(safe-area-inset-bottom,0px), var(--keyboard-bottom-inset,0px)))!important;}
     .composer-box{border-radius:12px;}
     .composer-box textarea{min-height:40px;}
     .composer-footer{padding:6px 8px 8px!important;gap:6px;flex-wrap:nowrap;align-items:center;}
@@ -3675,12 +3680,17 @@ body.tts-enabled .msg-tts-btn{display:inline-flex;align-items:center;}
 .msg-role > span{line-height:1;}
 
 /* Composer wrap: slightly less padding on smaller heights */
-.composer-wrap{padding:10px 20px 14px;position:relative;z-index:10;}
+.composer-wrap{padding:10px 20px 14px;position:relative;z-index:10;flex-shrink:0;min-height:0;}
 .composer-wrap::before{content:"";position:absolute;left:0;right:0;bottom:100%;height:32px;background:linear-gradient(to bottom,transparent,var(--bg));pointer-events:none;}
 
 @media (hover:none) and (pointer:coarse){
   .composer-wrap{padding-bottom:calc(14px + var(--keyboard-bottom-inset, 0px));}
 }
+/* Safe area and keyboard are one inset, not two: with the keyboard up the
+   keyboard value wins (it already covers the home indicator), with the
+   keyboard down the notch/home-indicator inset keeps the send row tappable.
+   --keyboard-bottom-inset is written by static/viewport_controller.js. */
+.composer-wrap{padding-bottom:calc(14px + max(env(safe-area-inset-bottom,0px), var(--keyboard-bottom-inset,0px)));}
 
 /* Cron status badges: pill shape refinement */
 .cron-status{border-radius:99px;font-size:10px;letter-spacing:.04em;}
@@ -9558,8 +9568,12 @@ button.send-btn:active:not(:disabled),
  .preview-path .panel-icon-btn{min-height:44px;min-width:44px;}
  #btnCancelFileEdit[hidden]{display:none!important;}
  #previewEditArea{font-size:16px!important;min-height:120px;box-sizing:border-box;}
- .layout.mobile-workspace-split .rightpanel.mobile-open{top:45dvh!important;bottom:var(--keyboard-bottom-inset,0px);padding-top:0;}
- .layout.mobile-workspace-split #mainChat{max-height:45dvh;}
+ /* Split view: chat and panel partition the *visible* viewport (--app-vh is
+    written by static/viewport_controller.js from visualViewport), so the panel
+    can never grow over the composer and the keyboard shrinks both halves. */
+ .layout.mobile-workspace-split{--split-chat-ratio:45;}
+ .layout.mobile-workspace-split .rightpanel.mobile-open{top:calc(var(--app-vh, 1vh) * var(--split-chat-ratio, 45))!important;bottom:0!important;padding-top:0;}
+ .layout.mobile-workspace-split #mainChat{max-height:calc(var(--app-vh, 1vh) * var(--split-chat-ratio, 45));}
 }
 @media(max-width:700px),(pointer:coarse) and (max-width:1024px){
  .kanban-modal-row input,.kanban-modal-row select,.kanban-modal-row textarea{font-size:16px;min-height:44px;}
@@ -9569,8 +9583,18 @@ button.send-btn:active:not(:disabled),
 
 @media(max-width:900px){
  .mobile-workspace-navigation .btn{background:var(--input-bg);color:var(--text);border:1px solid var(--border);border-radius:8px;font:inherit;font-size:13px;}
- .layout.mobile-workspace-split #mainChat{height:calc(45dvh - 56px);max-height:calc(45dvh - 56px);flex:0 0 auto;}
+ .layout.mobile-workspace-split #mainChat{height:calc(var(--app-vh, 1vh) * var(--split-chat-ratio, 45));max-height:calc(var(--app-vh, 1vh) * var(--split-chat-ratio, 45));flex:0 0 auto;min-height:0;overflow:hidden;}
  .layout.mobile-workspace-split #mainChat .messages{min-height:0;}
+ .layout.mobile-workspace-split #mainChat .messages-shell{min-height:0;}
+ .layout.mobile-workspace-split #mainChat .composer-wrap{flex:0 0 auto;}
+ /* The chat column is already measured against the *visible* viewport, so the
+    keyboard inset must not be subtracted a second time here: in split mode the
+    composer only needs the home-indicator gap, otherwise the panel would push
+    it out of the 45/58% column. */
+ .layout.mobile-workspace-split #mainChat .composer-wrap{padding-bottom:calc(12px + env(safe-area-inset-bottom,0px))!important;}
+ /* With the keyboard up the bottom half is mostly covered anyway: give the
+    chat (and therefore the composer) more of the visible viewport. */
+ html[data-keyboard-open="1"] .layout.mobile-workspace-split{--split-chat-ratio:58;}
 }
 
 /* ── Embedded sections (/dashboard/, /music/) ─────────────────────────────────
@@ -9598,3 +9622,43 @@ button.send-btn:active:not(:disabled),
 @media(prefers-reduced-motion:reduce){
   .embedded-frame-spinner{animation:none;border-top-color:var(--text);opacity:.5;}
 }
+
+/* ── Viewport geometry contract (mobile chat) ─────────────────────────────────
+   static/viewport_controller.js writes these on <html>:
+     --app-viewport-height  visible height in px (visualViewport)
+     --app-vh               1% of that visible height
+     --keyboard-bottom-inset on-screen keyboard occlusion in px (0 = closed)
+     --safe-area-bottom     measured env(safe-area-inset-bottom)
+     data-keyboard-open     "1" / "0"
+   Consumers read the variables instead of re-measuring, so the composer, the
+   transcript and the split panel always share one geometry. */
+:root{--app-vh:1vh;--app-viewport-height:100vh;--safe-area-bottom:env(safe-area-inset-bottom,0px);}
+@supports (height:100dvh){:root{--app-vh:1dvh;--app-viewport-height:100dvh;}}
+
+/* The chat column must be able to give height back to the transcript, while the
+   composer keeps its intrinsic height (a squeezed composer is a lost composer). */
+#mainChat{min-height:0;}
+#mainChat .messages-shell{min-height:0;}
+#mainChat .messages{min-height:0;}
+#mainChat > .composer-wrap{flex:0 0 auto;}
+
+@media(max-width:640px){
+  /* No page scroll behind the chat on phones: the transcript is the only
+     scroller, so a visualViewport pan cannot drag the composer off screen. */
+  html,body{overscroll-behavior:none;}
+  .messages{overscroll-behavior:contain;-webkit-overflow-scrolling:touch;}
+}
+
+/* ── Stream modes vs .mars-process-window ────────────────────────────────────
+   stream_full shows the process inline without a cap, stream_window keeps one
+   bounded collapsible window, stream_quiet drops the window and leaves the
+   status line. Additive to the existing html.mars-mode-* block above, which
+   already hides the quiet-mode rows; these rules only set the window geometry
+   so a mode switch never leaves an empty capped shell. */
+html.mars-mode-full .mars-process-window{max-height:none;}
+html.mars-mode-full .mars-process-window .mars-process-window-stream{max-height:none;}
+html.mars-mode-window .mars-process-window:not(.is-collapsed) .mars-process-window-stream{max-height:min(38vh,260px);max-height:min(calc(var(--app-vh) * 38),260px);}
+html.mars-hide-activity .mars-process-window{display:none!important;}
+/* A collapsed window keeps its header tappable even when reasoning is hidden:
+   the disclosure is the only affordance left in stream_window + hidden mode. */
+html.mars-thinking-hidden .mars-process-window.is-collapsed .mars-process-window-header{display:flex!important;}

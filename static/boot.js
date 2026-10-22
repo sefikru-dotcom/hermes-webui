@@ -173,9 +173,28 @@ function _isTouchKeyboardViewport(){
   try{return matchMedia('(hover:none) and (pointer:coarse)').matches&&!_hasFinePointerCoexisting();}catch(_){return false;}
 }
 
+// ── Viewport geometry owner ────────────────────────────────────────────────
+// static/viewport_controller.js is the single owner of visualViewport/resize
+// listeners: it measures once per frame and writes --app-viewport-height,
+// --app-vh, --keyboard-bottom-inset, --safe-area-bottom and
+// <html data-keyboard-open>. boot.js only consumes that state. The legacy
+// inline implementation below is a fallback for bundles that do not load the
+// controller, so exactly one geometry pipeline is ever active.
+function _marsViewportController(){
+  try{
+    const vp=window.MarsViewport;
+    return vp&&typeof vp.flush==='function'?vp:null;
+  }catch(_){return null;}
+}
+
 function _syncKeyboardBottomInset(){
   const root=document.documentElement;
   if(!root) return;
+  const viewport=_marsViewportController();
+  if(viewport){
+    viewport.flush();
+    return;
+  }
   if(!window.visualViewport||!_isTouchKeyboardViewport()){
     root.style.removeProperty('--keyboard-bottom-inset');
     return;
@@ -2743,25 +2762,89 @@ function applyEmptyStatePanelPref(){
 window.addEventListener('resize',()=>{
   _syncWorkspacePanelInlineWidth();
   syncWorkspacePanelState();
-  if(!window.visualViewport) _forceMobileViewportReflow();
+  // Geometry belongs to the viewport controller; this handler only keeps the
+  // workspace panel chrome in sync. Without the controller the legacy reflow
+  // below is still the only way to repaint against a changed geometry.
+  if(!_marsViewportController()&&!window.visualViewport) _forceMobileViewportReflow();
 });
 
 // On PWAs / mobile browsers that expose visualViewport, keyboard show/hide and
 // URL-bar collapse fire visualViewport resize/scroll rather than window resize.
 // Debounce a reflow so the phone layout repaints against the new geometry.
+let _mobileViewportReflowTimer=0;
+function _scheduleMobileViewportReflow(delay){
+  if(_mobileViewportReflowTimer) clearTimeout(_mobileViewportReflowTimer);
+  _mobileViewportReflowTimer=setTimeout(()=>{
+    _mobileViewportReflowTimer=0;
+    _forceMobileViewportReflow();
+  },typeof delay==='number'?delay:60);
+}
+
+// Controller subscription: react to geometry changes (keyboard opening, URL bar
+// collapsing, rotation) without registering a second set of listeners. The
+// controller has already written the CSS variables by the time this runs, so
+// only the chrome that cannot be expressed in CSS (panel width, aria) is synced
+// here. The 60 ms reflow timer stays on the legacy path only: with the
+// controller active every change is a real layout invalidation, and the
+// `viewport-reflow` transform promotion is exactly the kind of compositing churn
+// that drops iOS scroll position.
+function _onViewportGeometryChange(){
+  _syncWorkspacePanelInlineWidth();
+  syncWorkspacePanelState();
+  try{ if(typeof _syncSidebarAria==='function') _syncSidebarAria(); }catch(_){ }
+}
+
+// Legacy fallback listeners (only used when static/viewport_controller.js is not
+// on the page) are tracked so they can be torn down the moment the controller
+// shows up — a page must never end up with two geometry owners.
+let _legacyViewportTeardown=[];
+let _viewportSubscribed=false;
+function _detachLegacyViewportListeners(){
+  _legacyViewportTeardown.forEach(fn=>{try{fn();}catch(_){ }});
+  _legacyViewportTeardown=[];
+}
+function _bindViewportGeometry(){
+  const viewport=_marsViewportController();
+  if(!viewport) return false;
+  _detachLegacyViewportListeners();
+  if(!_viewportSubscribed&&typeof viewport.onChange==='function'){
+    _viewportSubscribed=true;
+    viewport.onChange(_onViewportGeometryChange);
+  }
+  return true;
+}
+
+// The inset has to be right before the first paint (a restored page can come
+// back with the keyboard already open), so prime it synchronously here. Every
+// later update belongs to the controller; the listeners registered below are a
+// fallback that is torn down as soon as the controller is present.
 if(window.visualViewport){
   _syncKeyboardBottomInset();
-  let _mobileViewportReflowTimer=0;
-  const _scheduleMobileViewportReflow=()=>{
-    if(_mobileViewportReflowTimer) clearTimeout(_mobileViewportReflowTimer);
-    _mobileViewportReflowTimer=setTimeout(()=>{
-      _mobileViewportReflowTimer=0;
-      _forceMobileViewportReflow();
-    },60);
-  };
-  window.visualViewport.addEventListener('resize', _scheduleMobileViewportReflow);
-  window.visualViewport.addEventListener('scroll', _scheduleMobileViewportReflow);
+  if(!_bindViewportGeometry()) _attachLegacyViewportListeners();
+}else{
+  _bindViewportGeometry();
 }
+// Deferred script order is the integrator's contract (viewport_controller.js
+// before boot.js), but a late arrival must still win: re-check once the document
+// is fully parsed and again on bfcache restore.
+window.addEventListener('load',()=>{ _syncKeyboardBottomInset(); _bindViewportGeometry(); });
+window.addEventListener('pageshow',()=>{ _syncKeyboardBottomInset(); _bindViewportGeometry(); });
+
+// Declared after the bootstrap block on purpose: when the controller is missing
+// this is the one and only geometry pipeline, and it must never coexist with a
+// controller subscription (see _bindViewportGeometry).
+function _attachLegacyViewportListeners(){
+  const vv=window.visualViewport;
+  if(!vv||_legacyViewportTeardown.length) return;
+  const handler=()=>_scheduleMobileViewportReflow();
+  window.visualViewport.addEventListener('resize',handler);
+  window.visualViewport.addEventListener('scroll',handler);
+  _legacyViewportTeardown.push(()=>{
+    vv.removeEventListener('resize',handler);
+    vv.removeEventListener('scroll',handler);
+  });
+}
+
 
 // Boot: restore last session or start fresh
 // ── Resizable panels ──────────────────────────────────────────────────────
@@ -3418,6 +3501,199 @@ function _mirrorSpeechSettingsFromServer(s){
 }
 window._mirrorSpeechSettingsFromServer=_mirrorSpeechSettingsFromServer;
 
+// ── Chat UX mode classes (activity display + reasoning + tool rows) ────────
+// Boot has to leave <html> in exactly the state Settings would leave it in,
+// even when the user never opens Settings. Historically only four of the ten
+// classes were applied here (and none at all when the settings request
+// failed), so stream_quiet looked identical to stream_window until the first
+// Settings open. These helpers are the single boot-side projection of the
+// settings mirrors; ui.js keeps ownership of the rendering semantics
+// (_applyThinkingModeClasses) and is reused when present so there is no second
+// interpretation of the same values.
+function _marsChatActivityModes(){
+  return ['stream_full','stream_window','stream_quiet'];
+}
+
+function _resolveChatActivityMode(rawMode){
+  const raw=typeof rawMode==='string'?rawMode.trim():rawMode;
+  if(rawMode === 'stream_full' || rawMode === 'stream_window' || rawMode === 'stream_quiet') return rawMode;
+  // Legacy values kept working: the same aliases ui.js chatActivityMode() maps.
+  if(raw==='stream_full'||raw==='stream_window'||raw==='stream_quiet') return raw;
+  if(raw==='transparent_stream') return 'stream_full';
+  if(raw==='hide_all_activity') return 'stream_quiet';
+  if(raw==='compact_worklog') return 'stream_window';
+  if(raw===undefined||raw===null||raw==='') return 'stream_window';
+  return 'stream_window';
+}
+
+function _resolveChatThinkingMode(raw){
+  const value=typeof raw==='string'?raw.trim():raw;
+  if(value==='expanded'||value==='collapsed'||value==='hidden'||value==='auto') return value;
+  return 'auto';
+}
+
+// 'auto' is the historical behaviour: reasoning renders expanded unless
+// show_thinking was turned off. Mirrors ui.js thinkingMode().
+function _effectiveChatThinkingMode(values){
+  const mode=values&&values.thinkingMode;
+  if(mode==='expanded'||mode==='collapsed'||mode==='hidden') return mode;
+  return window._showThinking===false?'hidden':'expanded';
+}
+
+function _chatUxClassState(values){
+  const activityMode=_resolveChatActivityMode(values&&values.activityMode);
+  const thinkingMode=_effectiveChatThinkingMode(values);
+  return {
+    'mars-mode-full':activityMode==='stream_full',
+    'mars-mode-window':activityMode==='stream_window',
+    'mars-mode-quiet':activityMode==='stream_quiet',
+    'mars-transparent-stream':activityMode==='stream_full',
+    'mars-hide-activity':activityMode==='stream_quiet',
+    'mars-thinking-expanded':thinkingMode==='expanded',
+    'mars-thinking-collapsed':thinkingMode==='collapsed',
+    'mars-thinking-hidden':thinkingMode==='hidden',
+    'mars-hide-tools':!!values&&values.showToolCalls===false,
+    'mars-autocollapse-turns':!values||values.autoCollapsePreviousTurns!==false,
+  };
+}
+
+function _chatUxValuesFromMirrors(){
+  return {
+    activityMode:_resolveChatActivityMode(window._chatActivityDisplayMode),
+    thinkingMode:_resolveChatThinkingMode(
+      window._thinkingModeSetting!=null?window._thinkingModeSetting:window._thinkingMode
+    ),
+    showToolCalls:window._showToolCalls!==false,
+    autoCollapsePreviousTurns:window._autoCollapsePreviousTurns!==false,
+  };
+}
+
+function _writeChatUxMirrors(values){
+  if(!values) return;
+  const activityMode=_resolveChatActivityMode(values.activityMode);
+  const thinkingMode=_resolveChatThinkingMode(values.thinkingMode);
+  window._chatActivityDisplayMode=activityMode;
+  window._transparentStream=activityMode==='stream_full';
+  window._thinkingModeSetting=thinkingMode;
+  window._thinkingMode=_effectiveChatThinkingMode(values);
+  window._showThinking=window._thinkingMode!=='hidden';
+  window._showToolCalls=values.showToolCalls!==false;
+  window._autoCollapsePreviousTurns=values.autoCollapsePreviousTurns!==false;
+}
+
+function _applyChatUxClasses(values){
+  const state=_chatUxClassState(values||_chatUxValuesFromMirrors());
+  // ui.js owns the rendering-side semantics; reuse it so boot and Settings can
+  // never disagree. The local table below is the fallback for the (unlikely)
+  // case where ui.js has not defined its applier yet.
+  if(typeof window._applyThinkingModeClasses==='function'){
+    try{
+      window._applyThinkingModeClasses();
+      return state;
+    }catch(_){ /* fall through to the local projection */ }
+  }
+  const root=document.documentElement;
+  if(!root||!root.classList) return state;
+  Object.keys(state).forEach(name=>root.classList.toggle(name,!!state[name]));
+  return state;
+}
+
+// Optional AppearanceStore (static/appearance_store.js, owned by the
+// appearance layer). Boot never requires it: when the module is absent the
+// server settings below stay authoritative. When it is present, its values win
+// over the boot snapshot and later changes re-project the classes.
+function _chatUxStoreKeys(){
+  return {
+    activityMode:'chat_activity_display_mode',
+    thinkingMode:'thinking_mode',
+    showToolCalls:'show_tool_calls',
+    autoCollapsePreviousTurns:'auto_collapse_previous_turns',
+  };
+}
+
+function _chatUxAppearanceStore(){
+  try{
+    const store=window.MarsAppearanceStore||window.AppearanceStore;
+    if(!store||typeof store.get!=='function') return null;
+    return store;
+  }catch(_){ return null; }
+}
+
+function _chatUxStoreValue(store,key){
+  try{
+    const raw=store.get(key);
+    if(raw===undefined||raw===null) return undefined;
+    if(typeof raw==='object'&&Object.prototype.hasOwnProperty.call(raw,'value')) return raw.value;
+    return raw;
+  }catch(_){ return undefined; }
+}
+
+function _chatUxValuesFromStore(base){
+  const values=Object.assign({},base||_chatUxValuesFromMirrors());
+  const store=_chatUxAppearanceStore();
+  if(!store) return values;
+  const keys=_chatUxStoreKeys();
+  Object.keys(keys).forEach(field=>{
+    const raw=_chatUxStoreValue(store,keys[field]);
+    if(raw===undefined) return;
+    if(field==='activityMode'||field==='thinkingMode') values[field]=raw;
+    else values[field]=!(raw===false||raw==='false'||raw===0||raw==='0');
+  });
+  return values;
+}
+
+function _applyChatUxSettings(values){
+  const merged=_chatUxValuesFromStore(values||_chatUxValuesFromMirrors());
+  _writeChatUxMirrors(merged);
+  return _applyChatUxClasses(merged);
+}
+
+function _bindChatUxAppearanceStore(){
+  const store=_chatUxAppearanceStore();
+  if(!store||window.__marsChatUxStoreBound) return false;
+  if(typeof store.subscribe!=='function') return false;
+  window.__marsChatUxStoreBound=true;
+  try{
+    store.subscribe(()=>{ try{ _applyChatUxSettings(); }catch(_){} });
+    if(store.ready&&typeof store.ready.then==='function'){
+      store.ready.then(()=>{ try{ _applyChatUxSettings(); }catch(_){} },()=>{});
+    }
+  }catch(_){
+    window.__marsChatUxStoreBound=false;
+    return false;
+  }
+  return true;
+}
+
+// Called from both settings paths (success and failure) so the DOM state after
+// boot is identical to the state after opening Settings.
+function _applyBootChatUxSettings(){
+  try{
+    _applyChatUxSettings({
+      activityMode:window._chatActivityDisplayMode,
+      thinkingMode:window._thinkingModeSetting,
+      showToolCalls:window._showToolCalls,
+      autoCollapsePreviousTurns:window._autoCollapsePreviousTurns,
+    });
+    _bindChatUxAppearanceStore();
+  }catch(_){}
+}
+window.MarsChatUx={
+  apply:_applyChatUxSettings,
+  applyBoot:_applyBootChatUxSettings,
+  classes:_chatUxClassState,
+  values:_chatUxValuesFromMirrors,
+  storeKeys:_chatUxStoreKeys,
+  bindAppearanceStore:_bindChatUxAppearanceStore,
+  resolveActivityMode:_resolveChatActivityMode,
+  resolveThinkingMode:_resolveChatThinkingMode,
+};
+// Paint the documented default mode before the settings request resolves:
+// stream_window + expanded reasoning is what ui.js falls back to, so the
+// transcript never renders without a mode class at all.
+try{ _applyChatUxClasses(); }catch(_){}
+
+
 (async()=>{
   // Load send key preference
   let _bootSettings={};
@@ -3464,16 +3740,7 @@ window._mirrorSpeechSettingsFromServer=_mirrorSpeechSettingsFromServer;
     window._whatsNewSummaryEnabled=!!s.whats_new_summary_enabled;
     window._showThinking=s.show_thinking!==false;
     window._simplifiedToolCalling=true;
-    const rawMode = s.chat_activity_display_mode;
-    if (rawMode === 'stream_full' || rawMode === 'stream_window' || rawMode === 'stream_quiet') {
-      window._chatActivityDisplayMode = rawMode;
-    } else if (rawMode === 'transparent_stream') {
-      window._chatActivityDisplayMode = 'stream_full';
-    } else if (rawMode === 'hide_all_activity') {
-      window._chatActivityDisplayMode = 'stream_quiet';
-    } else {
-      window._chatActivityDisplayMode = 'stream_window';
-    }
+    window._chatActivityDisplayMode = _resolveChatActivityMode(s.chat_activity_display_mode);
     window._transparentStream = window._chatActivityDisplayMode === 'stream_full';
     window._transparentEventTimestamps=s.transparent_stream_event_timestamps!==false;
     window._terminalAutoExpandOnOutput=!!s.terminal_auto_expand_on_output;
@@ -3485,23 +3752,15 @@ window._mirrorSpeechSettingsFromServer=_mirrorSpeechSettingsFromServer;
     // Mars chat UX: reasoning visibility has three states instead of the old
     // binary show/hide, so thinking can be folded (kept in the DOM, one row per
     // turn, click to expand) rather than deleted outright.
-    window._thinkingModeSetting=(typeof s.thinking_mode==='string'&&['auto','expanded','collapsed','hidden'].includes(s.thinking_mode))
-      ? s.thinking_mode
-      : 'auto';
+    window._thinkingModeSetting = _resolveChatThinkingMode(s.thinking_mode);
     // 'auto' (unset / other profiles) keeps the pre-existing behaviour: live
     // reasoning is rendered expanded, exactly as before this option existed.
-    window._thinkingMode=(window._thinkingModeSetting==='collapsed'||window._thinkingModeSetting==='hidden'||window._thinkingModeSetting==='expanded')
-      ? window._thinkingModeSetting
-      : 'expanded';
+    window._thinkingMode = _effectiveChatThinkingMode({thinkingMode:window._thinkingModeSetting});
     window._showThinking=window._thinkingMode!=='hidden';
     window._showToolCalls=s.show_tool_calls!==false;
     window._autoCollapsePreviousTurns=(s.auto_collapse_previous_turns!==false);
-    try{
-      document.documentElement.classList.toggle('mars-thinking-collapsed',window._thinkingMode==='collapsed');
-      document.documentElement.classList.toggle('mars-hide-tools',!window._showToolCalls);
-      document.documentElement.classList.toggle('mars-autocollapse-turns',window._autoCollapsePreviousTurns);
-      document.documentElement.classList.toggle('mars-transparent-stream',window._chatActivityDisplayMode==='stream_full');
-    }catch(_){}
+    // One projection for every mode class, identical to the one Settings uses.
+    _applyBootChatUxSettings();
     window._workspaceTodosTab=!!s.workspace_todos_tab;
     if(typeof _applyWorkspaceTodosTabVisibility==='function') _applyWorkspaceTodosTabVisibility();
     window._sidebarDensity=(s.sidebar_density==='detailed'?'detailed':'compact');
@@ -3652,6 +3911,17 @@ window._mirrorSpeechSettingsFromServer=_mirrorSpeechSettingsFromServer;
     window._transparentStream=false;
     window._transparentEventTimestamps=true;
     window._terminalAutoExpandOnOutput=false;
+    // Settings load failed: pin the documented defaults explicitly and project
+    // the same mode classes the success path projects. Previously these mirrors
+    // stayed undefined here, so a failed fetch left the transcript with no
+    // mode class at all until Settings was opened.
+    window._thinkingModeSetting='auto';
+    window._thinkingMode=_effectiveChatThinkingMode({thinkingMode:'auto'});
+    window._showThinking=window._thinkingMode!=='hidden';
+    window._showToolCalls=true;
+    window._autoCollapsePreviousTurns=true;
+    window._worklogDetailsExpandedByDefault=false;
+    _applyBootChatUxSettings();
     window._workspaceTodosTab=false;
     if(typeof _applyWorkspaceTodosTabVisibility==='function') _applyWorkspaceTodosTabVisibility();
     window._sessionJumpButtonsEnabled=false;
