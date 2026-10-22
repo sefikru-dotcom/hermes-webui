@@ -130,6 +130,27 @@ def sse_unsubscribe(session_id: str, q: queue.Queue) -> None:
                 _clarify_sse_subscribers.pop(session_id, None)
 
 
+def _push_clarify_attention(session_key: str, entry: "_ClarifyEntry") -> None:
+    """FCM push «Марс спрашивает» — уточняющий вопрос ждёт ответа.
+
+    Как и approval-хук: фоновый поток, никогда не влияет на постановку вопроса
+    в очередь и не бросает (нет ключа FCM / нет сети — молча ничего).
+    """
+    try:
+        from api.push_fcm import notify_attention_async  # noqa: PLC0415 — optional channel
+
+        question = str((entry.data or {}).get("question") or "").strip()
+        notify_attention_async(
+            "clarify",
+            str(session_key or ""),
+            "Марс спрашивает",
+            (question or "Нужен ответ, чтобы продолжить.")[:180],
+            tag=f"clarify:{getattr(entry, 'clarify_id', '') or session_key}",
+        )
+    except Exception:
+        pass
+
+
 def submit_pending(session_key: str, data: dict) -> _ClarifyEntry:
     """Queue a pending clarify request and notify the UI callback if registered."""
     data = _with_timeout_metadata(data)
@@ -161,6 +182,7 @@ def submit_pending(session_key: str, data: dict) -> _ClarifyEntry:
                 # Safe to call while holding _lock: publish() only takes the
                 # leaf _SESSION_EVENTS_LOCK and never re-acquires this lock.
                 publish_session_list_changed("attention_pending")
+                _push_clarify_attention(session_key, entry)
                 return entry
 
         entry = _ClarifyEntry(data)
@@ -172,6 +194,7 @@ def submit_pending(session_key: str, data: dict) -> _ClarifyEntry:
         # Notify SSE subscribers from inside _lock for ordering guarantees.
         _clarify_sse_notify(session_key, dict(gw_queue[0].data), len(gw_queue))
     publish_session_list_changed("attention_pending")
+    _push_clarify_attention(session_key, entry)
     if cb:
         try:
             cb(data)
