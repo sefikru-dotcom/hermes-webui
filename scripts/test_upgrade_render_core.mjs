@@ -17,6 +17,7 @@
  */
 import { createDocument, installGlobals, parseHTML } from './lib/mini_dom.mjs';
 import { createRequire } from 'node:module';
+import fs from 'node:fs';
 
 const require = createRequire(import.meta.url);
 const Patch = require('../static/chat_render_patch.js');
@@ -138,7 +139,14 @@ function row(key, text) {
     win.list.appendChild(r);
   }
   const rows = Array.from(win.list.children);
-  ok('window body is bounded', body.style.maxHeight === Activity.WINDOW_BODY_MAX_PX + 'px');
+  // Bounds ownership: the cap lives in CSS (`--activity-window-max`, applied by the
+  // `html.mars-mode-window|full` rules). The module must NOT write an inline
+  // max-height — inline beat the mode rule and pinned the window to a flat 260px
+  // regardless of the visual viewport. Only the scroll axis stays inline.
+  ok('window body writes no inline bound (CSS owns --activity-window-max)',
+    !body.style.maxHeight, `maxHeight=${JSON.stringify(body.style.maxHeight)}`);
+  ok('window body stays scrollable', body.style.overflowY === 'auto', body.style.overflowY);
+  ok('the module still publishes the cap for CSS/consumers', Activity.WINDOW_BODY_MAX_PX > 0);
 
   // quiet: rows are HIDDEN, never removed — the fix for quiet -> full.
   api.setMode(win.root, 'stream_quiet');
@@ -259,6 +267,144 @@ function row(key, text) {
   const writesNow = ctl.stats().writes;
   fire(300);
   ok('only one quiet pass is armed at a time', ctl.stats().writes === writesNow);
+}
+
+/* ─────────── 4. ui.js ↔ activity-block seam (factory vs instance) ─────────── */
+{
+  // The block exports a FACTORY: `setMode`/`ensureChrome`/`Disclosure` exist only on
+  // the object returned by `create()`. ui.js used to hand the factory to
+  // `_applyActivityModeToHost`, which threw `AB.setMode is not a function` on every
+  // live render and took the whole live turn with it (desktop: `turns=0`).
+  const seamSrc = (() => {
+    const ui = fs.readFileSync(new URL('../static/ui.js', import.meta.url), 'utf8');
+    const start = ui.indexOf('let _activityModeFacade=null;');
+    if (start < 0) throw new Error('ui.js: _activityModeFacade not found');
+    const fnAt = ui.indexOf('function _activityModeModule(', start);
+    let depth = 0;
+    for (let i = ui.indexOf('{', fnAt); i < ui.length; i++) {
+      if (ui[i] === '{') depth++;
+      else if (ui[i] === '}') {
+        depth--;
+        if (depth === 0) return ui.slice(start, i + 1) + '\nreturn _activityModeModule;';
+      }
+    }
+    throw new Error('ui.js: _activityModeModule braces unbalanced');
+  })();
+  const seam = globals =>
+    new Function('ChatActivityBlock', 'document', seamSrc)(
+      globals.ChatActivityBlock,
+      globals.document || doc
+    );
+
+  // No module loaded at all (old cached HTML): callers must see null, not throw.
+  eq('seam: no activity module -> null', seam({ ChatActivityBlock: undefined })(), null);
+
+  // The real shape: factory only.
+  const factoryOnly = { create: Activity.create, normalizeMode: Activity.normalizeMode, turnKey: Activity.turnKey };
+  const fromFactory = seam({ ChatActivityBlock: factoryOnly });
+  const api = fromFactory();
+  ok('seam: factory-only global yields an instance', !!api);
+  eq('seam: instance exposes setMode', typeof (api && api.setMode), 'function');
+  eq('seam: instance exposes ensureChrome', typeof (api && api.ensureChrome), 'function');
+  eq('seam: instance exposes syncVisibility', typeof (api && api.syncVisibility), 'function');
+  eq('seam: instance exposes Disclosure', typeof (api && api.Disclosure), 'object');
+  eq('seam: pure helpers stay reachable', api && api.normalizeMode('compact_worklog'), 'stream_window');
+  ok('seam: one instance for the page lifetime', fromFactory() === api);
+  ok('seam: the factory itself is never returned', api !== factoryOnly);
+
+  // And it actually works against a real host (the call that used to throw).
+  const host = doc.createElement('div');
+  const chrome = api.ensureChrome(host, { turnKey: 's:t1', mode: 'stream_window', state: 'live' });
+  ok('seam: ensureChrome builds the shell through the seam', !!chrome && !!chrome.root);
+  const switched = api.setMode(chrome.root, 'stream_quiet');
+  ok('seam: setMode through the seam does not throw', !!switched && switched.mode === 'stream_quiet');
+
+  // A legacy build that exports the instance methods directly keeps working.
+  const legacy = { setMode() {}, ensureChrome() {}, syncVisibility() {}, Disclosure: {}, disclosureFor() {} };
+  ok('seam: legacy direct export is used as-is', seam({ ChatActivityBlock: legacy })() === legacy);
+
+  // A factory that throws must degrade to null (no exception at the call site).
+  ok(
+    'seam: a throwing factory degrades to null',
+    seam({ ChatActivityBlock: { create() { throw new Error('boom'); } } })() === null
+  );
+}
+
+/* ────────── 5. the live turn belongs to the stream, not to a render ───────── */
+{
+  // A session snapshot landing mid-stream replaces S.messages with the server copy,
+  // where the in-flight turn has no `_live` marker and no text yet. The renderer then
+  // builds no row for it — and the patch must not delete the node the stream is still
+  // writing into (that blanked the answer until the next token; on desktop it never
+  // came back).
+  const inner = doc.createElement('div');
+  inner.id = 'msgInner';
+  const userRow = row(0, 'question');
+  inner.appendChild(userRow);
+  const live = doc.createElement('div');
+  live.id = 'liveAssistantTurn';
+  live.setAttribute('data-recycle-key', '1');
+  live.innerHTML = '<div class="msg-body">streaming text</div>';
+  inner.appendChild(live);
+
+  const ctx = Patch.begin(inner, { protect: n => n && n.id === 'liveAssistantTurn' });
+  Patch.place(ctx, row(0, 'question'));
+  const stats = Patch.finish(ctx);
+  ok('protect: the live turn survives a render that does not place it', inner.children.length === 2);
+  ok('protect: the SAME live node is still mounted', inner.children[1] === live);
+  ok('protect: its streamed text is untouched', inner.children[1].textContent.includes('streaming text'));
+  eq('protect: the keep is counted, not hidden', stats.kept, 1);
+  eq('protect: nothing was removed', stats.removed, 0);
+
+  // Without the protection (stream over) the stale row is dropped as before.
+  const after = Patch.begin(inner);
+  Patch.place(after, row(0, 'question'));
+  const stats2 = Patch.finish(after);
+  eq('no protect: the unplaced row is removed once the stream is over', stats2.removed, 1);
+  ok('no protect: only the placed row remains', inner.children.length === 1);
+
+  // A protected row that IS placed is a normal reuse — no double bookkeeping.
+  const inner2 = doc.createElement('div');
+  inner2.appendChild(row(0, 'question'));
+  const live2 = doc.createElement('div');
+  live2.id = 'liveAssistantTurn';
+  inner2.appendChild(live2);
+  const ctx3 = Patch.begin(inner2, { protect: n => n.id === 'liveAssistantTurn' });
+  Patch.place(ctx3, row(0, 'question'));
+  Patch.place(ctx3, live2);
+  const stats3 = Patch.finish(ctx3);
+  eq('protect: a placed live turn is reused, not kept', [stats3.kept, stats3.reused], [0, 1]);
+  ok('protect: placement keeps the live node', inner2.children[1] === live2);
+
+  // A throwing predicate must not break the render (defensive: protect is optional).
+  const inner3 = doc.createElement('div');
+  inner3.appendChild(row(0, 'q'));
+  inner3.appendChild(live);
+  const ctx4 = Patch.begin(inner3, { protect() { throw new Error('predicate'); } });
+  Patch.place(ctx4, row(0, 'q'));
+  const stats4 = Patch.finish(ctx4);
+  eq('protect: a throwing predicate falls back to removal', stats4.removed, 1);
+}
+
+/* ───────────────────── 6. virtual spacers keep their slot ─────────────────── */
+{
+  // Unkeyed spacers were removed + re-inserted on every render, which re-runs layout
+  // and can nudge the viewport. Stable keys make a same-height spacer a no-op and a
+  // resized one an in-place swap.
+  const src = fs.readFileSync(new URL('../static/ui.js', import.meta.url), 'utf8');
+  const at = src.indexOf('function _messageVirtualSpacer(');
+  ok('spacer: helper exists', at > 0);
+  const body = src.slice(at, src.indexOf('\n}\n', at) + 3);
+  ok('spacer: carries a stable render key', /data-render-key/.test(body));
+  ok('spacer: the key includes the side', /virtual-spacer:/.test(body) && /\bwhere\b/.test(body));
+
+  const makeSpacer = new Function('document', body + '\nreturn _messageVirtualSpacer;')(doc);
+  const top = makeSpacer(120, 'top');
+  const top2 = makeSpacer(120, 'top');
+  const bottom = makeSpacer(40, 'bottom');
+  eq('spacer: same side -> same key', Patch.keyOf(top), Patch.keyOf(top2));
+  ok('spacer: different sides -> different keys', Patch.keyOf(top) !== Patch.keyOf(bottom));
+  ok('spacer: the key is non-empty', !!Patch.keyOf(top));
 }
 
 /* ──────────────────────────────── report ─────────────────────────────────── */

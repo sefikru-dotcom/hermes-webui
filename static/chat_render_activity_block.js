@@ -241,7 +241,16 @@
       if(body&&body.style){
         // window = bounded, scrollable preview; full = unbounded flow. Same shell, so
         // switching modes never detaches the rows the parser is writing into.
-        body.style.maxHeight=m==='stream_window'?(WINDOW_BODY_MAX_PX+'px'):'';
+        //
+        // The BOUND is not ours to write: `--activity-window-max` owns it, applied by
+        // the `html.mars-mode-window|full` rules in style.css (single owner, see
+        // HANDOFF-layout.md → "Bounds ownership"). An inline `max-height` beat that
+        // declaration, so the viewport-aware `min(38vh, --activity-window-max)` cap
+        // never took effect and the window stayed at a flat 260px — ~half the visual
+        // viewport on a phone with the keyboard up. Clearing the property (instead of
+        // writing `''`) also drops a stale inline value a previous build left behind.
+        // Only the scroll axis stays inline: it is behavioural, not a design token.
+        try{ body.style.removeProperty('max-height'); }catch(_){ body.style.maxHeight=''; }
         body.style.overflowY=m==='stream_window'?'auto':'';
       }
       _applyDisplay(root);

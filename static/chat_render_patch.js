@@ -24,7 +24,11 @@
  *     disclosure state loss, no layout invalidation;
  *   - a row whose content changed is replaced in place (same slot) instead of being
  *     re-appended, so rows above/below keep their DOM identity;
- *   - a row that disappeared is removed at `finish()`;
+ *   - a row that disappeared is removed at `finish()`, EXCEPT a row claimed by
+ *     `begin(container,{protect})` — the live assistant turn while a stream is still
+ *     appending into it. A mid-stream session snapshot has no `_live` marker for that
+ *     turn, so the renderer builds no row for it; without the protection the patch
+ *     would delete the node the stream is writing into and blank the answer;
  *   - `place()` accepts an explicit `{reuse:false}` for nodes that will keep growing
  *     after placement (the live assistant turn appends segments post-placement), so
  *     a stale-but-equal shell is never reused for a subtree that is still mutating.
@@ -72,7 +76,8 @@
     try{ return String(a.outerHTML||'')===String(b.outerHTML||''); }catch(_){ return false; }
   }
 
-  function begin(container){
+  function begin(container, opts){
+    opts=opts||{};
     var old=children(container);
     var byKey=new Map();
     var used=new Set();
@@ -85,9 +90,16 @@
       old:old,
       byKey:byKey,
       used:used,
+      // `protect(node)` marks a row that ANOTHER writer owns for the duration of this
+      // render: the live assistant turn, while a stream is still appending into it.
+      // Such a row is never removed by finish() even when this render did not place it
+      // (a mid-stream session snapshot carries no `_live` marker for the turn, so the
+      // renderer builds no row for it — removing it would detach the node the stream
+      // keeps writing into and blank the answer).
+      protect:typeof opts.protect==='function'?opts.protect:null,
       last:null,
       placed:0,
-      stats:{reused:0, replaced:0, inserted:0, moved:0, removed:0, clears:0, unkeyed:0}
+      stats:{reused:0, replaced:0, inserted:0, moved:0, removed:0, clears:0, unkeyed:0, kept:0}
     };
   }
 
@@ -148,11 +160,16 @@
   }
 
   function finish(ctx){
-    if(!ctx) return {reused:0,replaced:0,inserted:0,moved:0,removed:0,clears:0,unkeyed:0,placed:0};
+    if(!ctx) return {reused:0,replaced:0,inserted:0,moved:0,removed:0,clears:0,unkeyed:0,kept:0,placed:0};
     var removed=0;
     for(var i=0;i<ctx.old.length;i++){
       var node=ctx.old[i];
       if(ctx.used.has(node)) continue;
+      if(ctx.protect){
+        var keep=false;
+        try{ keep=!!ctx.protect(node); }catch(_){ keep=false; }
+        if(keep){ ctx.used.add(node); ctx.stats.kept++; continue; }
+      }
       if(node.parentNode===ctx.container||(node.parentElement&&node.parentElement===ctx.container)){
         ctx.container.removeChild(node);
         removed++;
@@ -166,6 +183,25 @@
     return out;
   }
 
+  /**
+   * Adopt a node mounted OUTSIDE the cursor (compression / handoff cards anchor
+   * themselves by direct DOM insertion) as the new cursor position.
+   *
+   * Without this the cursor keeps pointing at the row BEFORE that node, so the next
+   * `place()` inserts at `cursor.nextSibling` — in front of the card that was just
+   * inserted — and the transcript order flips. Only a node that really landed
+   * directly after the cursor can advance it, so an out-of-order anchor stays where
+   * its author put it.
+   */
+  function adopt(ctx, node){
+    if(!ctx||!node) return node;
+    if(!ctx.last||node.parentNode!==ctx.container||ctx.last.parentNode!==ctx.container) return node;
+    if(ctx.last.nextSibling!==node) return node;
+    ctx.last=node;
+    ctx.used.add(node);
+    return node;
+  }
+
   function changed(stats){
     if(!stats) return false;
     return !!(stats.inserted||stats.removed||stats.moved||stats.replaced);
@@ -175,6 +211,7 @@
     begin:begin,
     place:place,
     finish:finish,
+    adopt:adopt,
     keyOf:keyOf,
     changed:changed,
     KEY_ATTR:KEY_ATTR,

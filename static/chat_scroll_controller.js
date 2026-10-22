@@ -77,6 +77,7 @@
     var pendingRaf=0;       // coalesced write scheduled for the next frame
     var pendingReason='';
     var pendingExplicit=false;
+    var pendingForce=false;  // sticky inside the frame; survives coalescing
     var ro=null;            // ONE reused observer
     var roObserved=false;
     var roGen=0;            // generation the active observation belongs to
@@ -130,20 +131,26 @@
       pendingRaf=0;
       pendingReason='';
       pendingExplicit=false;
+      pendingForce=false;
       st.staleCancelled++;
     }
 
-    function schedule(reason, explicit){
+    function schedule(reason, explicit, force){
       pendingReason=reason||'coalesced';
       pendingExplicit=!!explicit;
+      // `force` is STICKY inside the frame: a coalesced forced request must not be
+      // downgraded by a later unforced one, and the deferred attempt must keep it —
+      // otherwise the reader-unpinned guard refuses a scroll the caller explicitly
+      // demanded (explicit return to the bottom).
+      if(force) pendingForce=true;
       if(pendingRaf){ st.coalesced++; return; }
       pendingRaf=raf(function(){
         pendingRaf=0;
-        var r=pendingReason, ex=pendingExplicit;
-        pendingReason=''; pendingExplicit=false;
+        var r=pendingReason, ex=pendingExplicit, fo=pendingForce;
+        pendingReason=''; pendingExplicit=false; pendingForce=false;
         if(attemptedFrame){ st.coalesced++; return; }
         markAttempt();
-        attempt(r,{explicit:ex});
+        attempt(r,{explicit:ex, force:fo});
       });
     }
 
@@ -153,14 +160,14 @@
         // The frame budget is spent: collapse into the next frame instead of
         // forcing a second layout pass in the same frame.
         st.coalesced++;
-        schedule(reason, opts.explicit);
+        schedule(reason, opts.explicit, opts.force);
         return false;
       }
       if(opts.immediate){
         markAttempt();
         return attempt(reason, opts);
       }
-      schedule(reason, opts.explicit);
+      schedule(reason, opts.explicit, opts.force);
       return false;
     }
 

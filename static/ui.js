@@ -742,6 +742,12 @@ function _messageVirtualSpacer(height, where){
   const spacer=document.createElement('div');
   spacer.className='message-virtual-spacer';
   spacer.dataset.virtualSpacer=where||'gap';
+  // Stable key: without one every render treated the spacer as an unkeyed node,
+  // inserted a fresh one at the cursor and removed the old one at finish() — a
+  // remove+insert pair on the row that carries the virtualised height, i.e. exactly
+  // the collapse/re-expand that clamps scrollTop. Keyed, a height change is an
+  // in-place replace in the same slot.
+  spacer.setAttribute('data-render-key','virtual-spacer:'+(where||'gap'));
   spacer.setAttribute('aria-hidden','true');
   spacer.style.height=Math.max(0,Math.round(height||0))+'px';
   spacer.style.flex='0 0 auto';
@@ -4373,15 +4379,48 @@ function _marsReasoningProvider(modelValue,providerId){
 function _marsReasoningCacheKey(model,provider){
   return String(provider||'')+'::'+String(model||'');
 }
-// Spelling-tolerant lookup (claude-fable-5.1 == claude-fable-5-1), matching how
-// the core matches agent.reasoning_overrides keys.
-function _marsReasoningOverrideFor(model){
+// Effective pinned level for a model LANE (spelling-tolerant, provider-aware).
+//
+// The backend stores pins in `agent.reasoning_overrides` keyed by
+// `api/model_identity.reasoning_pin_key`: provider-qualified (`@provider:model`)
+// whenever a provider is known, bare only in the legacy shape. Comparing bare ids
+// here (the old behaviour) therefore never matched a qualified key, so the picker
+// said "Auto" while the turn actually ran at the pinned level — and a pin written for
+// the same model id on another provider could leak into this lane.
+// `MarsModelIdentity.findPin` is the browser mirror of that rule (qualified key
+// first, bare legacy key second, spelling-tolerant), so the two sides cannot
+// disagree. The local matcher below is only the fallback for an old cached HTML
+// build or a node harness where `model_identity.js` was not loaded.
+function _marsReasoningOverrideFor(model,provider){
   const target=String(model||'').trim();
   if(!target) return '';
+  const lane=String(provider||(typeof _marsReasoningProvider==='function'?_marsReasoningProvider(target,''):'')||'').trim();
+  const overrides=_marsModelReasoningOverrides||{};
+  if(typeof MarsModelIdentity!=='undefined'&&MarsModelIdentity&&typeof MarsModelIdentity.findPin==='function'){
+    try{
+      const hit=MarsModelIdentity.findPin(overrides,target,lane);
+      return hit?String(hit):'';
+    }catch(_){ /* fall through to the local matcher */ }
+  }
   const norm=function(s){return String(s||'').trim().toLowerCase().replace(/[\s._-]+/g,'-');};
-  const keys=Object.keys(_marsModelReasoningOverrides||{});
-  const hit=keys.find(function(k){return norm(k)===norm(target);});
-  return hit?String(_marsModelReasoningOverrides[hit]||''):'';
+  const splitLane=function(value){
+    const raw=String(value||'').trim();
+    if(!raw.startsWith('@')) return {model:raw,provider:''};
+    const inner=raw.slice(1), at=inner.lastIndexOf(':');
+    return at>0?{model:inner.slice(at+1),provider:inner.slice(0,at)}:{model:raw,provider:''};
+  };
+  const want=splitLane(target);
+  const wantProvider=norm(lane||want.provider);
+  const wantModel=norm(want.model);
+  const keys=Object.keys(overrides);
+  const qualified=keys.find(function(k){
+    if(!String(k).startsWith('@')) return false;
+    const id=splitLane(k);
+    return !!wantProvider&&norm(id.provider)===wantProvider&&norm(id.model)===wantModel;
+  });
+  const legacy=keys.find(function(k){return !String(k).startsWith('@')&&norm(k)===wantModel;});
+  const hit=qualified||legacy;
+  return hit?String(overrides[hit]||''):'';
 }
 function _marsReasoningLabel(effort){
   const eff=String(effort||'').trim().toLowerCase();
@@ -4418,10 +4457,15 @@ function _marsFetchModelReasoning(model,provider){
 
 // Paint one row's level list: 'Auto' (clears the pin) plus every level the model
 // actually supports. Pinned level gets the selected state.
-function _marsPaintEffortList(list,status,pill,bare){
+//
+// The pin is a LANE (model + provider): the status payload knows the provider it was
+// resolved for, and the caller knows the row's provider, so the lookup gets one of
+// them instead of guessing from the bare id alone.
+function _marsPaintEffortList(list,status,pill,bare,provider){
   if(!list) return;
   const levels=_marsReasoningSupported(status);
-  const pinned=_marsReasoningOverrideFor(bare);
+  const lane=String(provider||(status&&(status.provider||status.model_provider))||'').trim();
+  const pinned=_marsReasoningOverrideFor(bare,lane);
   const entries=[{effort:'',label:t('model_reasoning_auto')}];
   levels.forEach(function(level){entries.push({effort:level,label:_marsReasoningLabel(level)});});
   list.innerHTML='';
@@ -4481,7 +4525,7 @@ function _marsToggleReasoningRow(row,list,pill,bare,provider){
       pill.classList.remove('is-loading');
       return;
     }
-    _marsPaintEffortList(list,status,pill,bare);
+    _marsPaintEffortList(list,status,pill,bare,provider);
   }).catch(function(){
     if(_marsReasoningOpenRow===row){
       list.innerHTML='<div class="model-effort-empty">'+esc(t('model_reasoning_failed'))+'</div>';
@@ -4515,7 +4559,7 @@ function _marsSetModelReasoning(model,provider,effort,pill,list,row){
       const cached=_marsModelReasoningCache[key];
       if(cached&&typeof cached==='object') cached.model_overrides=_marsModelReasoningOverrides;
     });
-    _marsPaintEffortList(list,status,pill,model);
+    _marsPaintEffortList(list,status,pill,model,provider);
     if(list) list.hidden=true;
     if(pill) pill.setAttribute('aria-expanded','false');
     _marsReasoningOpenRow=null;
@@ -4540,7 +4584,7 @@ function _marsAttachReasoning(row,modelValue,providerId){
   holder.className='model-opt-reasoning';
   holder.innerHTML='<button type="button" class="model-effort-pill" aria-haspopup="listbox" aria-expanded="false">'
     +'<span class="model-effort-pill-icon" aria-hidden="true">\u25CF</span>'
-    +'<span class="model-effort-pill-label">'+esc(_marsReasoningLabel(_marsReasoningOverrideFor(bare)))+'</span>'
+    +'<span class="model-effort-pill-label">'+esc(_marsReasoningLabel(_marsReasoningOverrideFor(bare,provider)))+'</span>'
     +'</button>'
     +'<div class="model-effort-list" role="listbox" hidden></div>';
   row.appendChild(holder);
@@ -4563,7 +4607,7 @@ function _marsAttachReasoning(row,modelValue,providerId){
   // its pill shows the effective level instead of a generic 'Auto'.
   if(row.classList.contains('active')){
     _marsFetchModelReasoning(model,provider).then(function(status){
-      _marsPaintEffortList(list,status,pill,bare);
+      _marsPaintEffortList(list,status,pill,bare,provider);
     }).catch(function(){});
   }
 }
@@ -5651,7 +5695,10 @@ function _marsReasoningPinnedForQuery(key){
     const params=new URLSearchParams(String(key||'').replace(/^\?/,''));
     const model=params.get('model')||'';
     if(!model) return '';
-    return _marsReasoningOverrideFor(_marsBareModelId(model));
+    // Pass the model EXACTLY as the query carries it (it may be a qualified
+    // `@provider:model` route hint) plus the provider lane, so the pin lookup sees
+    // the same identity the request was made for.
+    return _marsReasoningOverrideFor(model,params.get('provider')||'');
   }catch(_marsErr){ return ''; }
 }
 
@@ -5771,6 +5818,23 @@ function closeReasoningDropdown(){
   if(mobileAction) mobileAction.classList.remove('active');
 }
 
+// POST body for a level picked in the composer chip.
+//
+// Mars: when the active model carries a per-model pin (set from the model picker) the
+// chip must edit that pin — otherwise the level picked here would be silently
+// overridden by the pin at runtime. `scope:'model'` is what makes the write a pin
+// instead of a global default, and `payload.model` is sent EXACTLY as the session
+// qualified it (`@provider:model`, `provider/model`): the backend derives the pin key
+// from that value (`reasoning_pin_key`), so stripping the route hint would pin the
+// bare id — or another provider's lane — while the chip reported success.
+function _marsReasoningChipPayload(effort){
+  const payload=Object.assign({effort:effort},_reasoningEffortContext());
+  const model=String((payload&&payload.model)||'');
+  const provider=String((payload&&payload.provider)||'');
+  if(model&&_marsReasoningOverrideFor(model,provider)) payload.scope='model';
+  return payload;
+}
+
 document.addEventListener('click',function(e){
   if(
     !e.target.closest('#composerReasoningChip') &&
@@ -5785,15 +5849,7 @@ document.addEventListener('click',function(e){
     // silently ignore the Default click and leave the toggle one-way off-only.
     // (#6219 round-3)
     if(opt){
-      const payload=Object.assign({effort:effort},_reasoningEffortContext());
-      // Mars: if the active model carries a per-model pin (set from the model
-      // picker), the chip must edit that pin — otherwise a level picked here
-      // would be silently overridden by the pin at runtime.
-      const _ctxModel=String((payload&&payload.model)||'');
-      if(_ctxModel&&_marsReasoningOverrideFor(_marsBareModelId(_ctxModel))){
-        payload.model=_marsBareModelId(_ctxModel);
-        payload.scope='model';
-      }
+      const payload=_marsReasoningChipPayload(effort);
       api('/api/reasoning',{method:'POST',body:JSON.stringify(payload)})
         .then(function(st){
           if(st&&st.model_overrides&&typeof st.model_overrides==='object'){
@@ -12311,8 +12367,41 @@ function _applyThinkingModeClasses(){
  * `stream_quiet` is a pure visibility concern. Applying a mode is therefore an
  * attribute-level operation on whatever is already rendered — it never removes a
  * row, never re-renders, and never needs a following event. */
+/* ── module access ────────────────────────────────────────────────────────────
+ * `chat_render_activity_block.js` exports a FACTORY (`ChatActivityBlock.create()`),
+ * not a ready instance: the DOM-bound methods (`ensureChrome`, `setMode`,
+ * `setState`, `disclosureFor`, `syncVisibility`, `Disclosure`) only exist on the
+ * object returned by `create()`. Calling `ChatActivityBlock.setMode(...)` therefore
+ * threw `TypeError: AB.setMode is not a function` on every live activity render —
+ * the exception escaped `ensureLiveWorklogContainer()` and took the whole live
+ * assistant turn with it (desktop: `turns=0`, stream never resumed).
+ *
+ * One memoized instance for the page lifetime is correct here: the instance holds
+ * only the injected document plus the storage handles, so it is stateless with
+ * respect to the transcript. A legacy build that exports the methods directly on
+ * the global is still accepted unchanged. */
+let _activityModeFacade=null;
 function _activityModeModule(){
-  return (typeof ChatActivityBlock!=='undefined'&&ChatActivityBlock)?ChatActivityBlock:null;
+  if(typeof ChatActivityBlock==='undefined'||!ChatActivityBlock) return null;
+  if(_activityModeFacade) return _activityModeFacade;
+  const AB=ChatActivityBlock;
+  // Legacy shape: instance methods already on the global — use it as-is.
+  if(typeof AB.setMode==='function'&&typeof AB.ensureChrome==='function'){
+    _activityModeFacade=AB;
+    return AB;
+  }
+  if(typeof AB.create!=='function') return null;
+  let inst=null;
+  try{ inst=AB.create({document:document}); }catch(_){ inst=null; }
+  if(!inst||typeof inst.setMode!=='function') return null;
+  // Facade = instance prototype chain + the factory's pure helpers, so callers can
+  // reach normalizeMode/turnKey/MODES/WINDOW_BODY_MAX_PX from either shape.
+  const facade=Object.create(inst);
+  for(const key of ['normalizeMode','turnKey','MODES','WINDOW_BODY_MAX_PX']){
+    if(AB[key]!==undefined&&inst[key]===undefined) facade[key]=AB[key];
+  }
+  _activityModeFacade=facade;
+  return facade;
 }
 /* Header label for the shared activity shell. In full mode the body is not a
  * "window", so fall back to the neutral label instead of the window one; if the
@@ -13569,15 +13658,21 @@ function _liveTurnOwnerRawIdx(){
   }
   return null;
 }
-/* Raw index of the user message owning a settled turn element. */
+/* Raw index that identifies a SETTLED turn for activity purposes.
+ *
+ * This used to look for a segment whose message is role `user` — but an assistant
+ * turn only ever carries assistant segments, so it returned null for every settled
+ * turn. `_reconcileActivityMode` then had no key, called no `disclosureFor`, and the
+ * disclosure chosen while the turn was LIVE (`s:tN`) was never applied to its settled
+ * form: the panel snapped shut the moment the turn finished. Any segment index is
+ * enough — `_turnActivityKeyForRawIdx` folds it to the ordinal of the user message
+ * that opened the turn, which is exactly the live key. */
 function _settledTurnOwnerRawIdx(turn){
   if(!turn) return null;
   const segments=turn.querySelectorAll('[data-msg-idx]');
   for(let i=0;i<segments.length;i++){
     const idx=Number(segments[i].getAttribute('data-msg-idx'));
-    if(!Number.isFinite(idx)) continue;
-    const m=S.messages[idx];
-    if(m&&m.role==='user') return idx;
+    if(Number.isFinite(idx)) return idx;
   }
   return null;
 }
@@ -15560,6 +15655,23 @@ function _renderSettledAnchorSceneForMessage(message, segment, rawIdx){
 }
 function _syncLiveWorklogReasonsForAnchor(anchor, displayTextOverride){
   if(S.activeStreamId&&isLiveAnchorActivitySceneOwner(S.activeStreamId)) return;
+  // NEVER fold the segment a stream is still writing into.
+  //
+  // This path mirrors the anchor's own body into a `wl-reason` row inside the
+  // Worklog rail and then hides the inline segment
+  // (`assistant-segment-worklog-source` → display:none). For an INTERMEDIATE round
+  // that is the Compact Worklog fold (#3401). For the segment the parser is
+  // currently appending to it is a data-loss bug: the streamed answer moves into a
+  // shell whose visibility belongs to the disclosure/bounded body, so in
+  // `stream_window` (bounded 260px preview, and collapsed whenever the disclosure
+  // says so) the live answer painted as a lone header — "Окно ⌄" — while tokens
+  // kept landing in a display:none node. That is the live-turn-vanishes report, and
+  // it fired on the first mode switch into window, mid-stream.
+  //
+  // Folding is a SETTLED concern: `renderMessages()` already applies it per
+  // message (`messageBelongsInWorklog`, compact-only, `!m._live`). While the stream
+  // is in flight the prose stays visible and chronologically inline.
+  if(S.activeStreamId) return;
   // Worklog reason-mirroring (folding intermediate prose into a top Worklog rail
   // and hiding the inline `assistant-segment` via `assistant-segment-worklog-source`
   // → display:none) is the Compact Worklog presentation (#3401). In Transparent
@@ -17747,6 +17859,28 @@ function _processWakeupCardHtml(info, rawText, extras){
   return `<details class="process-wakeup-card"><summary class="process-wakeup-summary"><span class="process-wakeup-toggle">${li('chevron-right',12)}</span><span class="process-wakeup-label">${li('terminal',13)}<span>${esc(t('process_wakeup_label'))}</span></span>${cmdHtml}${chip}${extras.timeHtml||''}</summary><div class="process-wakeup-detail">${extras.filesHtml||''}${patternRow}${cmdRow}<div class="msg-body process-wakeup-body">${outHtml}</div>${extras.footHtml||''}</div></details>`;
 }
 
+/* ── who owns the live assistant row ──────────────────────────────────────────
+ * While a chat stream is in flight the live turn is written by the STREAM, not by a
+ * render: messages.js appends tokens and tool rows straight into
+ * `#liveAssistantTurn`. A session snapshot can land mid-turn (the sidebar sees the
+ * session as externally updated → loadSession → `S.messages = data.session.messages`),
+ * and the server copy of the in-flight turn carries NO `_live` marker and no text yet.
+ * renderMessages() then finds an empty assistant message it treats as settled history,
+ * builds no row for it, and the keyed patch removes the mounted live turn — the answer
+ * goes blank, `#liveAssistantTurn` disappears, and on desktop it never comes back
+ * (`turns=0`), because the next token is appended into a detached node.
+ *
+ * The row belongs to the stream until the stream ends, so the patch is told to keep it
+ * even when this render did not place it. Only the live turn is protected, and only
+ * while `S.activeStreamId` is set (it is cleared by the stream's own end handlers), so
+ * the settled render that follows the `done` event replaces the row as usual. */
+function _liveTurnOwnedByStream(node){
+  if(!node||node.nodeType!==1) return false;
+  try{
+    if(!S.activeStreamId) return false;
+    return node.id==='liveAssistantTurn'||!!(node.querySelector&&node.querySelector('#liveAssistantTurn'));
+  }catch(_){ return false; }
+}
 function renderMessages(options){
   _lastMessageRenderAt=performance.now();
   if(typeof _beginMessageRenderSettlePass==='function') _beginMessageRenderSettlePass();
@@ -17940,8 +18074,15 @@ function renderMessages(options){
   // Without the module (standalone harnesses, old cached HTML) behaviour is exactly
   // the old wipe, so this degrades to the previous code path.
   const _patchCtx=(typeof ChatRenderPatch!=='undefined'&&ChatRenderPatch&&typeof ChatRenderPatch.begin==='function')
-    ? ChatRenderPatch.begin(inner) : null;
+    ? ChatRenderPatch.begin(inner,{protect:_liveTurnOwnedByStream}) : null;
   const _placeRow=(node,opts)=>_patchCtx?ChatRenderPatch.place(_patchCtx,node,opts):inner.appendChild(node);
+  // A card mounted by direct DOM insertion (compression/handoff, anchored to a row)
+  // must also advance the patch cursor, or the next placed row is inserted in front
+  // of it and the transcript order flips.
+  const _adoptRow=(node)=>{
+    if(_patchCtx&&node&&typeof ChatRenderPatch.adopt==='function') ChatRenderPatch.adopt(_patchCtx,node);
+    return node;
+  };
   const _finishPatch=()=>{
     if(!_patchCtx) return null;
     const stats=ChatRenderPatch.finish(_patchCtx);
@@ -18353,8 +18494,11 @@ function renderMessages(options){
         row._wakeupRenderedHtml=nextRowHtml;
         row.innerHTML=nextRowHtml;
       }
-      _placeRow(row);
-      userRows.set(rawIdx, row);
+      // `place()` may REUSE the mounted row and hand back THAT node; the row built
+      // above is then detached. Storing the built row would point every later
+      // lookup (anchors, intrinsic height, compression insertion) at a node that is
+      // not in the document.
+      userRows.set(rawIdx, _placeRow(row)||row);
       continue;
     }
 
@@ -18395,8 +18539,7 @@ function renderMessages(options){
       // typeof guard keeps renderMessages runnable in the node test harnesses that
       // extract it without this helper (they stub every collaborator by name).
       if(typeof _applyUserRowIntrinsicHeight==='function') _applyUserRowIntrinsicHeight(row, newRawText);
-      _placeRow(row);
-      userRows.set(rawIdx, row);
+      userRows.set(rawIdx, _placeRow(row)||row);
       continue;
     }
 
@@ -18492,7 +18635,18 @@ function renderMessages(options){
     seg.dataset.rawText=String(content).trim();
     if(m._activityBurstId!==undefined&&m._activityBurstId!==null) seg.setAttribute('data-activity-burst-id',String(m._activityBurstId));
     if(Number.isFinite(Number(m._liveSegmentSeq))) seg.setAttribute('data-live-segment-seq',String(Number(m._liveSegmentSeq)));
-    const messageBelongsInWorklog=!S.busy&&isCompactWorklogMode()&&_assistantMessageBelongsInWorklog(m, rawIdx, toolCallAssistantIdxs, displayContent, {isTurnFinalAssistant});
+    // NEVER fold the message a stream is currently writing into. `stream_window`
+    // folds intermediate assistant chatter into the Worklog and HIDES the source
+    // segment (`assistant-segment-worklog-source` → display:none); that is right for
+    // a settled turn, but the live segment is the smd parser's write target and the
+    // Worklog window carries tool activity, not the streamed answer. Folding it hid
+    // the answer mid-stream with no way back: tokens kept landing in a display:none
+    // node, so the transcript showed only "Окно ⌄" until the turn settled
+    // (desktop and mobile alike — it only looked mobile-specific because the mobile
+    // run is the one that boots in full mode and switches INTO window mid-stream).
+    // `!S.busy` is not a reliable "stream finished" signal here: it is already false
+    // while tokens are arriving, so the `_live` marker is the one that must gate this.
+    const messageBelongsInWorklog=!m._live&&!S.busy&&isCompactWorklogMode()&&_assistantMessageBelongsInWorklog(m, rawIdx, toolCallAssistantIdxs, displayContent, {isTurnFinalAssistant});
     if(messageBelongsInWorklog){
       seg.classList.add('assistant-segment-worklog-source');
       seg.setAttribute('aria-hidden','true');
@@ -18565,6 +18719,7 @@ function renderMessages(options){
       const userRow=userRows.get(anchorRawIdx);
       if(userRow && userRow.parentElement){
         userRow.parentElement.insertBefore(node, userRow.nextSibling);
+        _adoptRow(node);
         return;
       }
     }
@@ -18600,12 +18755,14 @@ function renderMessages(options){
       const turnParent=turn && turn.parentElement;
       if(turnParent){
         turnParent.insertBefore(node, turn);
+        _adoptRow(node);
         return;
       }
     }
     const userRow=userRows.get(anchorRawIdx);
     if(userRow && userRow.parentElement){
       userRow.parentElement.insertBefore(node, userRow);
+      _adoptRow(node);
       return;
     }
     _placeRow(node);
