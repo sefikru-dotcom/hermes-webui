@@ -940,6 +940,31 @@ def settle_gateway_pending_local_notification(
         return False, head, total
 
 
+def _push_approval_attention(session_key: str, entry: dict) -> None:
+    """FCM push «требуется подтверждение» на телефоны владельца.
+
+    Ход уже запаркован этим запросом: без пуша решение ждёт, пока человек сам
+    откроет WebUI. Отправка идёт в фоновом потоке (api.push_fcm.
+    notify_attention_async) и НИКОГДА не влияет на сам submit_pending: нет ключа
+    FCM, нет сети, нет google-auth — молча ничего.
+    """
+    try:
+        from api.push_fcm import notify_attention_async  # noqa: PLC0415 — optional channel
+
+        command = str(entry.get("command") or entry.get("tool") or "").strip()
+        description = str(entry.get("description") or "").strip()
+        body = description or command or "Марс ждёт подтверждения действия."
+        notify_attention_async(
+            "approval",
+            str(session_key or ""),
+            "Требуется подтверждение",
+            body[:180],
+            tag=f"approval:{entry.get('approval_id') or session_key}",
+        )
+    except Exception:
+        pass
+
+
 def submit_pending(session_key: str, approval: dict) -> None:
     """Append a pending approval to the per-session queue.
 
@@ -962,6 +987,7 @@ def submit_pending(session_key: str, approval: dict) -> None:
         # notify arriving before T1's earlier notify with a stale count).
         _approval_sse_notify_locked(session_key, head, total)
     publish_session_list_changed("attention_pending")
+    _push_approval_attention(session_key, entry)
     # NOTE: We do NOT call _submit_pending_raw here — that function overwrites
     # _pending[session_key] with a single dict, which would undo the list we just
     # built. The gateway blocking path uses _gateway_queues (a separate mechanism

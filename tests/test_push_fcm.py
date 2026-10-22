@@ -124,7 +124,9 @@ def test_build_message_payload_shape():
     assert message["data"]["tag"] == "hermes-abc"
     assert all(isinstance(v, str) for v in message["data"].values())
     assert message["android"]["priority"] == "high"
-    assert message["android"]["notification"]["channel_id"] == "hermes_default"
+    # Без kind — общий канал; id обязан совпадать с каналом нативного клиента,
+    # иначе Android 8+ отбрасывает системный notification-payload.
+    assert message["android"]["notification"]["channel_id"] == "mars_push_general"
     assert message["android"]["notification"]["tag"] == "hermes-abc"
     assert message["webpush"] == {"fcm_options": {"link": "session/abc"}}
 
@@ -401,3 +403,157 @@ def test_route_unregister_removes_token(monkeypatch):
     payload = json.loads(handler.wfile.getvalue().decode("utf-8"))
     assert payload["removed"] == 1
     assert push_fcm.token_count() == 0
+
+
+# ── нативные каналы и маршрутизация (клиент Марса) ─────────────────────────
+
+def test_channel_for_kind_mirrors_the_client_policy():
+    # app-mobile PushMessagePolicy: chat/approval/clarify/turn/cron — high.
+    for kind in ("chat", "approval", "clarify", "turn", "cron", "APPROVAL"):
+        assert push_fcm.channel_for_kind(kind) == "mars_push_chat", kind
+    for kind in ("system", "music", "", None, "unknown"):
+        assert push_fcm.channel_for_kind(kind) == "mars_push_general", kind
+
+
+def test_build_message_carries_routing_contract():
+    message = push_fcm._build_message(
+        "tok", "Требуется подтверждение", "rm -rf /tmp/x",
+        kind="approval", session_id="s-1", notification_id=42,
+    )["message"]
+    assert message["data"]["kind"] == "approval"
+    assert message["data"]["session_id"] == "s-1"
+    assert message["data"]["notification_id"] == "42"
+    assert message["android"]["notification"]["channel_id"] == "mars_push_chat"
+    # approval — событие, требующее внимания: heads-up даже без urgent=True.
+    assert message["android"]["priority"] == "high"
+    assert all(isinstance(v, str) for v in message["data"].values())
+
+
+def test_build_message_kind_is_normalized_and_omitted_when_blank():
+    message = push_fcm._build_message("tok", "t", kind="  ", session_id="")["message"]
+    assert "kind" not in message["data"]
+    assert "session_id" not in message["data"]
+    assert message["android"]["priority"] == "normal"
+
+
+def test_send_fcm_passes_routing_fields_into_every_message(monkeypatch):
+    push_fcm.register_token({"token": "tok-1"})
+    captured = []
+    _arm_delivery(monkeypatch, {"tok-1": _fake_response(200, {"name": "x"})}, captured)
+
+    push_fcm.send_fcm(
+        "Марс спрашивает", "Какой вариант?", kind="clarify",
+        session_id="s-9", notification_id=7,
+    )
+    data = captured[0]["payload"]["message"]["data"]
+    assert data["kind"] == "clarify"
+    assert data["session_id"] == "s-9"
+    assert data["notification_id"] == "7"
+    assert captured[0]["payload"]["message"]["android"]["notification"]["channel_id"] == "mars_push_chat"
+
+
+# ── тихий пуш ──────────────────────────────────────────────────────────────
+
+def test_send_fcm_silent_is_data_only(monkeypatch):
+    push_fcm.register_token({"token": "tok-1"})
+    captured = []
+    _arm_delivery(monkeypatch, {"tok-1": _fake_response(200, {"name": "x"})}, captured)
+
+    result = push_fcm.send_fcm_silent(
+        {"action": "refresh_pending", "session_id": "s-1"}, ttl_seconds=600
+    )
+
+    assert result == {"sent": 1, "pruned": 0, "total": 1, "errors": []}
+    message = captured[0]["payload"]["message"]
+    # Нет notification-блока — Android не рисует уведомление вообще.
+    assert "notification" not in message
+    assert "notification" not in message["android"]
+    assert message["data"] == {
+        "action": "refresh_pending",
+        "session_id": "s-1",
+        "silent": "1",
+        "kind": "sync",
+        "ts": message["data"]["ts"],
+    }
+    assert message["android"]["priority"] == "normal"
+    assert message["android"]["ttl"] == "600s"
+
+
+def test_send_fcm_silent_keeps_explicit_ts_and_drops_none_values(monkeypatch):
+    push_fcm.register_token({"token": "tok-1"})
+    captured = []
+    _arm_delivery(monkeypatch, {"tok-1": _fake_response(200, {"name": "x"})}, captured)
+
+    push_fcm.send_fcm_silent({"ts": "111", "session_id": None, "action": "token_resync"})
+    data = captured[0]["payload"]["message"]["data"]
+    assert data["ts"] == "111"
+    assert data["session_id"] == ""
+    assert data["action"] == "token_resync"
+
+
+def test_send_fcm_silent_prunes_dead_tokens(monkeypatch):
+    push_fcm.register_token({"token": "gone"})
+    captured = []
+    _arm_delivery(monkeypatch, {
+        "gone": _fake_response(404, _fcm_error("NOT_FOUND", "UNREGISTERED", "Requested entity was not found.")),
+    }, captured)
+
+    result = push_fcm.send_fcm_silent({"action": "refresh_sessions"})
+    assert result["pruned"] == 1
+    assert push_fcm.token_count() == 0
+
+
+# ── approval/clarify триггер ───────────────────────────────────────────────
+
+def test_notify_attention_async_sends_a_decision_push(monkeypatch):
+    import threading
+
+    calls = []
+    done = threading.Event()
+
+    def fake_send_fcm(title, body="", url=None, tag=None, **kwargs):
+        calls.append({"title": title, "body": body, "tag": tag, **kwargs})
+        done.set()
+        return {"sent": 1, "pruned": 0, "total": 1, "errors": []}
+
+    monkeypatch.setattr(push_fcm, "send_fcm", fake_send_fcm)
+
+    push_fcm.notify_attention_async("approval", "s-1", "Требуется подтверждение", "rm -rf /tmp")
+    assert done.wait(5), "push must be delivered from the background thread"
+    assert calls[0]["kind"] == "approval"
+    assert calls[0]["session_id"] == "s-1"
+    assert calls[0]["urgent"] is True
+    assert calls[0]["tag"] == "s-1"
+    assert isinstance(calls[0]["notification_id"], int)
+
+
+def test_notify_attention_async_ignores_non_decision_kinds(monkeypatch):
+    calls = []
+    monkeypatch.setattr(push_fcm, "send_fcm", lambda *a, **k: calls.append(a))
+
+    push_fcm.notify_attention_async("chat", "s-1", "t")
+    push_fcm.notify_attention_async("", "s-1", "t")
+    assert calls == []
+
+
+def test_notify_attention_async_never_raises(monkeypatch):
+    import threading
+
+    done = threading.Event()
+
+    def boom(*args, **kwargs):
+        done.set()
+        raise RuntimeError("FCM exploded")
+
+    monkeypatch.setattr(push_fcm, "send_fcm", boom)
+
+    # Не бросает в вызывающем потоке (иначе approval-хук уронил бы ход).
+    push_fcm.notify_attention_async("clarify", "s-2", "Марс спрашивает", "?")
+    assert done.wait(5)
+
+
+def test_stable_notification_id_is_deterministic_and_31_bit():
+    first = push_fcm._stable_notification_id("approval:abc")
+    assert first == push_fcm._stable_notification_id("approval:abc")
+    assert first != push_fcm._stable_notification_id("approval:abd")
+    assert 0 <= first <= 0x7FFFFFFF

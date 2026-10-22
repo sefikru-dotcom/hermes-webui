@@ -37,8 +37,9 @@ import os
 import sqlite3
 import threading
 import time
+import zlib
 from contextlib import contextmanager
-from typing import Any
+from typing import Any, Callable
 
 from api.config import STATE_DIR
 
@@ -321,6 +322,27 @@ def supported() -> tuple[bool, str, str]:
 
 # ── payload + delivery ──────────────────────────────────────────────────────
 
+#: Android Notification Channel ids — ОБЩИЙ контракт с нативным клиентом
+#: (app-mobile `PushMessagePolicy.CHANNEL_CHAT` / `CHANNEL_GENERAL`; тот же id
+#: стоит в манифесте как default_notification_channel_id). Несовпадение id —
+#: это молча потерянное уведомление: Android 8+ отбрасывает notification-payload,
+#: который система рисует сама (приложение в фоне/убито), если канала нет.
+CHANNEL_HIGH = "mars_push_chat"
+CHANNEL_GENERAL = "mars_push_general"
+
+#: Виды событий, требующие внимания владельца: высокий приоритет (heads-up).
+HIGH_PRIORITY_KINDS = frozenset({"chat", "approval", "clarify", "turn", "cron"})
+
+#: Виды событий, которые клиент обязан открыть в конкретном диалоге.
+DECISION_KINDS = frozenset({"approval", "clarify"})
+
+
+def channel_for_kind(kind: str | None) -> str:
+    """Android channel id for an event kind (mirror of the client's policy)."""
+    normalized = str(kind or "").strip().lower()
+    return CHANNEL_HIGH if normalized in HIGH_PRIORITY_KINDS else CHANNEL_GENERAL
+
+
 def _build_message(
     token: str,
     title: str,
@@ -329,26 +351,40 @@ def _build_message(
     tag: str | None = None,
     *,
     urgent: bool = False,
+    kind: str | None = None,
+    session_id: str | None = None,
+    notification_id: int | None = None,
 ) -> dict[str, Any]:
     """Compose one FCM HTTP v1 ``messages:send`` request body.
 
     ``notification`` renders the system tray entry on Android/iOS even with
-    the app process dead; ``data`` carries the deep link for the native
-    client's tap handler (FCM requires all data values to be strings).
+    the app process dead; ``data`` carries everything the native client needs
+    to draw the entry itself and route the tap (FCM requires all data values
+    to be strings): ``kind`` picks the channel and the "requires a decision"
+    semantics, ``session_id`` binds an approval/clarify push to ITS dialog
+    instead of the last opened one, ``notification_id`` lets a repeated event
+    replace the previous notification instead of stacking duplicates.
     """
+    normalized_kind = str(kind or "").strip().lower()
     data: dict[str, str] = {"ts": str(int(time.time()))}
     if url:
         data["url"] = str(url)
     if tag:
         data["tag"] = str(tag)
+    if normalized_kind:
+        data["kind"] = normalized_kind
+    if session_id:
+        data["session_id"] = str(session_id)
+    if notification_id is not None:
+        data["notification_id"] = str(int(notification_id))
     message: dict[str, Any] = {
         "token": token,
         "notification": {"title": title or "Марс", "body": body or ""},
         "data": data,
         "android": {
-            "priority": "high" if urgent else "normal",
+            "priority": "high" if (urgent or normalized_kind in HIGH_PRIORITY_KINDS) else "normal",
             "notification": {
-                "channel_id": "hermes_default",
+                "channel_id": channel_for_kind(normalized_kind),
                 **({"tag": str(tag)} if tag else {}),
             },
         },
@@ -399,21 +435,15 @@ def _http_post(url: str, payload: dict[str, Any], headers: dict[str, str], timeo
     return requests.post(url, json=payload, headers=headers, timeout=timeout)
 
 
-def send_fcm(
-    title: str,
-    body: str = "",
-    url: str | None = None,
-    tag: str | None = None,
-    *,
-    urgent: bool = False,
-) -> dict[str, Any]:
-    """Deliver a notification to every registered FCM token.
+def _deliver_each(build_payload: Callable[[str], dict[str, Any]]) -> dict[str, Any]:
+    """Send one FCM message per registered token; NEVER raises.
 
-    Returns ``{'sent': n, 'pruned': m, 'total': k, 'errors': [...]}`` — the
-    same shape ``send_push`` returns, so the streaming hook logs both
-    channels identically. NEVER raises: a dead FCM backend, a missing
-    service key or an unavailable google-auth stack degrade to a silent
-    no-op (total=0) exactly like an unconfigured Web Push channel.
+    Shared by the visible channel ([send_fcm]) and the silent one
+    ([send_fcm_silent]): registry read, availability/auth checks, one forced
+    token refresh on 401/403, dead-token pruning and per-token bookkeeping are
+    identical — only the message body differs.
+
+    ``build_payload(token)`` must return a complete ``messages:send`` body.
     """
     result: dict[str, Any] = {"sent": 0, "pruned": 0, "total": 0, "errors": []}
     try:
@@ -448,7 +478,11 @@ def send_fcm(
         token = str(row.get("token") or "")
         if not token:
             continue
-        payload = _build_message(token, title, body, url, tag, urgent=urgent)
+        try:
+            payload = build_payload(token)
+        except Exception as exc:
+            result["errors"].append(f"payload build failed: {exc}")
+            continue
         try:
             response = _http_post(
                 endpoint,
@@ -503,6 +537,132 @@ def send_fcm(
     result["total"] = token_count()
     result["errors"] = result["errors"][:10]
     return result
+
+
+def send_fcm(
+    title: str,
+    body: str = "",
+    url: str | None = None,
+    tag: str | None = None,
+    *,
+    urgent: bool = False,
+    kind: str | None = None,
+    session_id: str | None = None,
+    notification_id: int | None = None,
+) -> dict[str, Any]:
+    """Deliver a VISIBLE notification to every registered FCM token.
+
+    ``kind``/``session_id``/``notification_id`` are the native-client routing
+    contract (channel + "opens THIS dialog" + replace-instead-of-stack); they
+    travel in the data payload, so a client that does not know them simply
+    ignores them.
+
+    Returns ``{'sent': n, 'pruned': m, 'total': k, 'errors': [...]}`` — the
+    same shape ``send_push`` returns, so the streaming hook logs both
+    channels identically. NEVER raises: a dead FCM backend, a missing
+    service key or an unavailable google-auth stack degrade to a silent
+    no-op (total=0) exactly like an unconfigured Web Push channel.
+    """
+    return _deliver_each(
+        lambda token: _build_message(
+            token,
+            title,
+            body,
+            url,
+            tag,
+            urgent=urgent,
+            kind=kind,
+            session_id=session_id,
+            notification_id=notification_id,
+        )
+    )
+
+
+def send_fcm_silent(
+    data: dict[str, Any],
+    *,
+    ttl_seconds: int = 3600,
+) -> dict[str, Any]:
+    """Deliver a DATA-ONLY message (no tray entry) to every registered token.
+
+    Silent pushes carry synchronisation work: ``{"silent": "1", "kind": "sync",
+    "action": "refresh_pending", "session_id": "..."}`` makes a native client
+    refresh pending approval/clarify state without showing anything. The
+    message has no ``notification`` block at all, so Android never draws a
+    tray entry even when the app is dead; priority stays ``normal`` and a TTL
+    keeps a stale sync command from arriving hours later.
+
+    Same never-raises contract and same result shape as [send_fcm].
+    """
+    payload_data = {
+        str(key): ("" if value is None else str(value))
+        for key, value in (data or {}).items()
+        if str(key).strip()
+    }
+    payload_data.setdefault("silent", "1")
+    payload_data.setdefault("kind", "sync")
+    payload_data.setdefault("ts", str(int(time.time())))
+
+    return _deliver_each(
+        lambda token: {
+            "message": {
+                "token": token,
+                "data": payload_data,
+                "android": {
+                    "priority": "normal",
+                    "ttl": f"{max(0, int(ttl_seconds))}s",
+                },
+            }
+        }
+    )
+
+
+def notify_attention_async(
+    kind: str,
+    session_id: str,
+    title: str,
+    body: str = "",
+    *,
+    tag: str | None = None,
+) -> None:
+    """Push an approval/clarify request without blocking the caller.
+
+    Called from the agent's ``submit_pending`` hooks, i.e. on the request path
+    that parks a turn — minting an OAuth token and doing N HTTPS round-trips
+    there would add seconds to every approval. A daemon thread keeps the
+    contract: the caller never waits and never sees an exception.
+    """
+    normalized = str(kind or "").strip().lower()
+    if normalized not in DECISION_KINDS:
+        return
+    payload = (normalized, str(session_id or ""), str(title or ""), str(body or ""), tag)
+
+    def _worker() -> None:
+        try:
+            kind_, session_, title_, body_, tag_ = payload
+            send_fcm(
+                title_,
+                body_,
+                tag=tag_ or session_,
+                urgent=True,
+                kind=kind_,
+                session_id=session_,
+                notification_id=_stable_notification_id(tag_ or session_),
+            )
+        except Exception:  # never propagate into the agent turn
+            logger.debug("fcm: attention notify failed", exc_info=True)
+
+    threading.Thread(target=_worker, name="fcm-attention-push", daemon=True).start()
+
+
+def _stable_notification_id(key: str) -> int:
+    """Deterministic 31-bit id: a repeated event REPLACES its notification.
+
+    Mirrors the client's fallback (hash of tag/session) so the same pending
+    request never stacks duplicates in the tray.
+    """
+    # crc32 is stable across processes (unlike hash() with PYTHONHASHSEED).
+    return zlib.crc32(str(key).encode("utf-8")) & 0x7FFFFFFF
 
 
 def status() -> dict[str, Any]:
