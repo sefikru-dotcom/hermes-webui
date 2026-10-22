@@ -37,6 +37,7 @@ const SHELL_ASSETS = [
   './static/chat_scroll_controller.js' + VQ,
   './static/chat_render_activity_block.js' + VQ,
   './static/run_state.js' + VQ,
+  './static/turn_model_attribution.js' + VQ,
   './static/messages.js' + VQ,
   './static/chat_activity.js' + VQ,
   './static/sessions.js' + VQ,
