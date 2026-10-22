@@ -3701,6 +3701,15 @@ try{ _applyChatUxClasses(); }catch(_){}
   try{
     const s=await api('/api/settings');
     _bootSettings=s;
+    if(typeof _registerActivityModeRenderer==='function'){
+      _registerActivityModeRenderer(function(){
+        if(typeof _reconcileActivityMode==='function') _reconcileActivityMode();
+      });
+    }
+    if(typeof _ensureAppearanceStore==='function'){
+      const appearance=_ensureAppearanceStore();
+      if(appearance) appearance.hydrate(s);
+    }
     if(typeof checkWebUIVersionSkew==='function'){try{checkWebUIVersionSkew(s);}catch(_){}}
     window._sendKey=s.send_key||'enter';
     // Persist default workspace so the blank new-chat page can show it

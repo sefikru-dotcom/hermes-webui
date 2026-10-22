@@ -1,0 +1,11 @@
+const assert=require('node:assert/strict');
+const model=require('../static/model_identity.js');
+const pins={'@custom:a:vendor/model:free':'high','@custom:b:vendor/model:free':'low','vendor/model:free':'medium'};
+assert.equal(model.findPin(pins,'vendor/model:free','custom:a'),'high');
+assert.equal(model.findPin(pins,'@custom:b:vendor/model:free'),'low');
+assert.equal(model.findPin(pins,'vendor/model:free','custom:c'),'medium');
+assert.equal(model.parse('@custom:a:vendor/model:free').model,'vendor/model:free');
+assert.equal(model.parse('@custom:a:vendor/model:free').provider,'custom:a');
+assert.equal(model.findPin({'@custom:a:gpt-5.4':'high'},'gpt-5-4','custom:a'),'high');
+assert.equal(model.findPin({'@custom:a:gpt-5.4':'high'},'gpt-5.4','custom:b'),'');
+console.log('model identity: 7 assertions passed');
