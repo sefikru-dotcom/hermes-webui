@@ -131,3 +131,57 @@ ctl.stats();                                             // writes/reads/noop/re
    `.mars-process-window-stream` (JS now owns it per mode).
 6. `#messages` scroll anchoring (`overflow-anchor`) was not touched — it interacts with the patch
    (fewer layout invalidations) but is style-owned.
+
+## Mobile render blocker — CLOSED (6786602a1)
+
+Root causes, all in the render path (the harness was never the cause of the
+transcript failures; see "cross-viewport state" below for the one that was):
+
+1. **Factory vs instance seam.** `ui.js` handed the `ChatActivityBlock` *factory* to
+   `_applyActivityModeToHost`, so every live render threw `AB.setMode is not a
+   function` and took the turn with it. `_activityModeModule()` now resolves the
+   factory to one page-lifetime instance via `create()` (or returns `null` when the
+   module is absent) and keeps the pure helpers (`normalizeMode`, `turnKey`) reachable.
+2. **The live turn was deleted mid-stream.** `chat_render_patch.finish()` removed any
+   old child the current render did not place. A mid-stream session snapshot carries
+   no row for the live assistant turn (it has no `_live` marker), so the patch deleted
+   the node the stream was appending into → `len=35` / `len=89` "blanked answer".
+   `begin(container,{protect})` + `finish()` now keeps a protected node and counts it
+   as `kept` in `stats`.
+3. **Out-of-cursor anchors flipped the order.** Compression/handoff cards insert
+   themselves by direct DOM insertion; the cursor then stayed on the previous row and
+   the next `place()` wrote *in front of* the card. Added `Patch.adopt(ctx,node)` (only
+   a node that really landed at `cursor.nextSibling` advances it) and `ui.js` adopts
+   those anchors.
+4. **Inline `max-height` beat the CSS bound.** `chat_render_activity_block` wrote
+   `body.style.maxHeight=260px` inline, which overrode `--activity-window-max`, so the
+   viewport-aware `min(38vh, --activity-window-max)` cap never applied and the window
+   stayed flat 260px (≈half the visual viewport on a phone with the keyboard up). The
+   bound now belongs to CSS; only `overflow-y` stays inline.
+5. **Reasoning pin leaked across provider lanes.** A bare model name now resolves on
+   its own lane only: qualified `@provider` keys win, legacy bare keys still work, and
+   a pin made on one lane is not reported for another.
+
+### Cross-viewport state (coordinated with the harness owner)
+The combined desktop→mobile failures were a **harness state leak, not product**:
+`/__mock/config` did not restore `settings_default.json`, so desktop's
+`chat_activity_display_mode=stream_full` survived into the mobile boot (observed:
+`settingsBeforeBoot.chat_activity_display_mode=stream_full`, mobile boots
+`stream_quiet`, cycles to `stream_window`/`Full` and the activity window renders
+instead of the streaming text). Fixed in `f63990557` (`reset_settings` / `seed`
+re-reads the fixture). Verified in isolation: with the leak the mobile run fails
+exactly the transcript checks; with a fresh backend the same code is green.
+
+### Tests (green on this SHA)
+- `node scripts/test_upgrade_render_core.mjs` → **80 assertions** (factory/instance
+  seam, `protect`/`kept`, `adopt` ordering, window bound ownership).
+- `node tests/js/render_consumer_contract.mjs` → **30 checks** — the `mini_dom`
+  `cloneNode` gap is closed in the test's own helper (`cloneTree`), so the contract
+  exercises real clone semantics without teaching the shared mini_dom a new API.
+- `node tests/js/reasoning_pin_behavior.js` → 24 checks; `pytest
+  tests/test_reasoning_pin_behavior.py` → 4 passed.
+- Real Chromium, mobile-only (fresh backend, `--viewports mobile --only
+  modes_live_quiet_to_full,stream_reading_scroll`) → **2/2 scenarios, 24/24 checks**:
+  `/tmp/render-mobile-only.json`.
+- Combined desktop+mobile on the clean tree (post-harness fix) → 4/4, 52 checks, by
+  the coordinator.
