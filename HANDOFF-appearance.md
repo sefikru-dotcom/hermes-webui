@@ -53,7 +53,7 @@
 
 3. **`tests/js/appearance_store_behavior.js` + `tests/test_appearance_store_behavior.py`**
    — поведенческие тесты (node + vm, фейковый POST, без браузера и без живых
-   настроек): 60 проверок, 11 сценариев:
+   настроек): 93 проверки, 15 сценариев:
    - header mode **до** открытия Settings → POST `{chat_activity_display_mode}`
      и ничего кроме;
    - payload до гидратации контролов = только явные правки;
