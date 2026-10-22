@@ -10968,7 +10968,7 @@ def _run_agent_streaming(
             # not apply here).
             _reasoning_resolution = _resolve_turn_reasoning_effort(
                 _cfg,
-                session,
+                s,
                 resolved_model,
                 _turn_provider_canonical,
             )
