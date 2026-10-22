@@ -51,6 +51,8 @@ function extractFn(name) {
 const EXTRACTED = [
   '_canonicalActivityMode',
   '_currentActivityMode',
+  '_appliedThemeName',
+  '_reconcileStoreThemeWithAppliedTheme',
   '_structuredCodeViewFromUi',
   '_composerControlVisibilityPayload',
   '_appearancePayloadFromUi',
@@ -119,10 +121,21 @@ var localStorage={
   removeItem:function(k){ delete this._v[k]; }
 };
 
+var htmlDark=false;        // «страница сейчас в тёмной теме» (единственный сигнал темы)
+var themeApplies=[];       // вызовы _applyTheme(name) из panels.js
+
 var document={
   readyState:'complete',
   body:{appendChild:function(){}},
-  documentElement:{classList:{toggle:function(){},add:function(){},remove:function(){},contains:function(){return false;}},dataset:{}},
+  documentElement:{classList:{
+    toggle:function(cls,on){
+      if(cls!=='dark') return;
+      htmlDark=(on===undefined)?!htmlDark:!!on;
+    },
+    add:function(cls){ if(cls==='dark') htmlDark=true; },
+    remove:function(cls){ if(cls==='dark') htmlDark=false; },
+    contains:function(cls){ return cls==='dark'?htmlDark:false; }
+  },dataset:{}},
   querySelector:function(){ return null; },
   querySelectorAll:function(){ return []; },
   getElementById:function(id){ return $(id); },
@@ -143,6 +156,15 @@ function _applyAppearanceKeyValue(key,value,meta){
   return _applyAppearanceKeyValueReal(key,value,meta);
 }
 function _setAppearanceAutosaveStatus(state){ statusLog.push(state); }
+// Настоящий _applyTheme живёт в boot.js и переключает только класс .dark на
+// <html> — единственный сигнал темы в продукте (ни .light, ни data-theme).
+function _applyTheme(name){ themeApplies.push(name); htmlDark=(name==='dark'); }
+function __setHtmlDark(v){ htmlDark=!!v; }
+function __resetTheme(){
+  htmlDark=false; themeApplies.length=0;
+  // памятка применённых ключей — тоже состояние между секциями
+  _appliedAppearance={};
+}
 function _rememberAppearanceSaved(payload){ runtimeSync.push({memo:payload}); }
 function _applyAppearanceSavedToRuntime(saved,payload){ runtimeSync.push({saved:saved,payload:payload}); }
 function _applyThinkingModeClasses(){ thinkingClasses++; }
@@ -199,6 +221,7 @@ function __setAutoRespond(v){ autoRespond=!!v; }
 function __resetLogs(){
   posts.length=0; pending.length=0; statusLog.length=0; applied.length=0;
   titlebar.length=0; runtimeSync.length=0; legacySync=0; thinkingClasses=0;
+  themeApplies.length=0;
 }
 function __pendingRequests(){ return pending.filter(function(r){ return !r.done; }); }
 `;
@@ -296,6 +319,7 @@ function fresh() {
   store.reset();
   sandbox.__resetLogs();
   sandbox.__clearDom();
+  sandbox.__resetTheme();
   sandbox.__setBound(false);
   sandbox.__setAutoRespond(true);
   Object.keys(SERVER).forEach((k) => { sandbox.serverState[k] = SERVER[k]; });
@@ -668,6 +692,78 @@ async function main() {
     store.set('chat_activity_display_mode', 'stream_full');
     eq(store.get('chat_activity_display_mode'), 'stream_full', 'состояние применилось несмотря на ошибку рендерера');
     await store.flush();
+  }
+
+  // 13. Тема применяется по фактическому состоянию страницы, а не по памятке.
+  //     boot.js применяет тему напрямую (_applyTheme в reconcile и _pickTheme),
+  //     не трогая памятку panels.js, поэтому «памятка совпала» ≠ «уже на экране».
+  section('тема: применение сверяется с DOM, а не с памяткой');
+  {
+    fresh();
+    sandbox.__resetLogs();
+    // Памятка говорит «light уже применён», а страница на самом деле тёмная
+    // (boot применил dark из localStorage до открытия Settings).
+    sandbox.__setHtmlDark(true);
+    sandbox._appliedAppearance.theme = 'light';
+    sandbox._applyAppearanceKeyValue('theme', 'light', { reason: 'local' });
+    eq(sandbox.themeApplies, ['light'], '_applyTheme вызван несмотря на совпадение памятки');
+    eq(sandbox.htmlDark, false, 'страница переключилась в светлую тему');
+
+    // Обратный случай: и памятка, и DOM уже в нужном состоянии — лишнего
+    // переключения (и мигания prism-темы) быть не должно.
+    sandbox.__resetLogs();
+    sandbox.__setHtmlDark(false);
+    sandbox._appliedAppearance.theme = 'light';
+    sandbox._applyAppearanceKeyValue('theme', 'light', { reason: 'local' });
+    eq(sandbox.themeApplies, [], 'повторное применение видимой темы не вызывает _applyTheme');
+    eq(sandbox.htmlDark, false, 'страница осталась светлой');
+  }
+
+  // 14. Расхождение «страница ≠ сервер» (неудавшийся repair-POST в boot):
+  //     store обязан отдавать то, что видит пользователь, и дожать запись.
+  section('тема: расхождение с сервером чинится, а не маскируется');
+  {
+    fresh();                       // сервер: theme=dark
+    sandbox.__resetLogs();
+    sandbox.__setHtmlDark(true);   // hydrate применил dark
+    sandbox.__setHtmlDark(false);  // ...а boot оставил light из localStorage
+    eq(store.get('theme'), 'dark', 'store верит серверу до сверки');
+    eq(sandbox._reconcileStoreThemeWithAppliedTheme(), true, 'расхождение обнаружено');
+    eq(store.get('theme'), 'light', 'store = тема, которую видит пользователь');
+    eq(store.savedValue('theme'), 'dark', 'baseline остаётся серверным');
+    eq(store.diff(), { theme: 'light' }, 'diff требует записи на сервер');
+
+    await store.flush();
+    eq(sandbox.__state().posts[sandbox.__state().posts.length - 1], { theme: 'light' },
+      'уходит POST ровно с темой');
+    eq(store.diff(), {}, 'после подтверждения diff пуст');
+
+    // Повторный вызов ничего не делает: состояния совпали.
+    eq(sandbox._reconcileStoreThemeWithAppliedTheme(), false, 'совпадение — no-op');
+    await store.flush();
+    eq(sandbox.__state().posts.length, 1, 'лишних POST нет');
+
+    // 'system' не сверяем: класс .dark там — результат media query, а не выбор.
+    fresh();
+    store.set('theme', 'system', { noSave: true });
+    sandbox.__setHtmlDark(true);
+    eq(sandbox._reconcileStoreThemeWithAppliedTheme(), false, "'system' не перетирается разрешённой темой");
+    eq(store.get('theme'), 'system', 'выбор system сохранён');
+    store.reset();
+  }
+
+  // 15. Гидратация не подменяет localStorage: boot читает его на старте как
+  //     «что пользователь видел последним» и сам пишет туда после reconcile.
+  section('тема: hydrate не трогает localStorage');
+  {
+    fresh();
+    sandbox.localStorage.removeItem('hermes-theme');
+    store.set('theme', 'light', { noSave: true });
+    store.hydrate(Object.assign({}, SERVER, { theme: 'dark' }));
+    eq(sandbox.localStorage.getItem('hermes-theme'), null,
+      'store не пишет hermes-theme — иначе выбор пользователя отменится на следующем старте');
+    eq(store.get('theme'), 'light', 'локальная правка не перетёрта');
+    store.reset();
   }
 
   console.log('');

@@ -8789,6 +8789,40 @@ function _appearanceStorePendingValue(key){
 // ui/boot API — ui.js не меняется.
 const _appliedAppearance={};
 
+// Тема, реально применённая к странице. _applyTheme() живёт в boot.js и
+// вызывается там напрямую (reconcile localStorage↔сервер в старте, _pickTheme),
+// поэтому _appliedAppearance фиксирует только применения через store и может
+// врать. Источник истины — разрешённая база темы в boot (_resolvedThemeBaseDark,
+// до override схемы скина); фолбэк — класс .dark на <html>.
+function _appliedThemeName(){
+  try{
+    if(typeof _resolvedThemeBaseDark==='boolean') return _resolvedThemeBaseDark?'dark':'light';
+  }catch(_){}
+  return document.documentElement.classList.contains('dark')?'dark':'light';
+}
+
+// boot на старте предпочитает localStorage серверу (это его контракт: «что
+// пользователь видел последним»), и если POST-починка расхождения не прошла,
+// серверный baseline в store остаётся другим. Тогда Settings показывал бы одну
+// тему, а страница была бы другой, а повторный выбор видимой темы не давал бы
+// diff (значение уже равно baseline) — то есть не сохранялся бы вообще.
+// Отдаём store то, что реально видит пользователь; baseline остаётся серверным,
+// поэтому diff повторит запись при следующем автосейве.
+function _reconcileStoreThemeWithAppliedTheme(){
+  const S=_ensureAppearanceStore();
+  if(!S||typeof S.isHydrated!=='function'||!S.isHydrated()) return false;
+  const storeTheme=S.get('theme');
+  // 'system' и темы расширений не сверяем: класс .dark там — результат media
+  // query/схемы скина, а не выбора пользователя.
+  if(storeTheme!=='light'&&storeTheme!=='dark') return false;
+  const applied=_appliedThemeName();
+  if(applied===storeTheme) return false;
+  // silent: страница уже в этом состоянии, лишний _applyTheme не нужен.
+  // noSave НЕ ставим: расхождение с сервером надо дожать записью.
+  S.set('theme',applied,{silent:true});
+  return true;
+}
+
 function _currentActivityMode(){
   const S=_ensureAppearanceStore();
   if(S&&S.has('chat_activity_display_mode')) return S.get('chat_activity_display_mode');
@@ -8863,9 +8897,18 @@ function _scheduleLegacyActivityRenderSync(){
 function _applyAppearanceKeyValue(key,value,meta){
   switch(key){
     case 'theme':{
-      if(_appliedAppearance.theme===value) return;
+      // Сверяемся с фактическим состоянием страницы, а не только с памяткой:
+      // boot применяет тему напрямую (_applyTheme в reconcile localStorage↔
+      // сервер и в _pickTheme), памятку не обновляет — и выбор «уже выбранной»
+      // темы молча не доезжал бы до DOM.
+      const needsApply=_appliedAppearance.theme!==value
+        ||(value!=='system'&&_appliedThemeName()!==value);
       _appliedAppearance.theme=value;
-      if(typeof _applyTheme==='function') _applyTheme(value);
+      if(needsApply&&typeof _applyTheme==='function') _applyTheme(value);
+      // localStorage здесь НЕ трогаем: boot на старте читает его как «что
+      // пользователь видел последним» и сам пишет туда после reconcile.
+      // Запись из hydrate() подменила бы этот вход серверным значением и
+      // отменила бы выбор пользователя при следующей загрузке.
       if(typeof _syncThemePicker==='function') _syncThemePicker(value);
       const hidden=$('settingsTheme');
       if(hidden) hidden.value=value;
@@ -9821,6 +9864,10 @@ async function loadSettingsPanel(){
     // Settings — не перетираются серверным снимком.
     _settingsAppearanceControlsBound=false;
     const _appearanceStore=_ensureAppearanceStore();
+    // До гидратации сверяем store с темой, реально применённой на старте:
+    // boot мог предпочесть localStorage серверу (неудавшийся автосейв), и тогда
+    // серверный снимок ниже перетёр бы видимую пользователю тему.
+    _reconcileStoreThemeWithAppliedTheme();
     if(_appearanceStore) _appearanceStore.hydrate(settings);
     // Populate the version badges from the server — keeps them in sync with git
     // tags automatically without any manual release step.

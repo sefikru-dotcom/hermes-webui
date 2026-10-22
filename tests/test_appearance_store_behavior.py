@@ -96,6 +96,51 @@ def test_settings_open_hydrates_store_before_controls():
     assert body.index("_settingsAppearanceControlsBound=true") > theme_at
 
 
+def test_theme_has_single_signal_from_boot():
+    """Тема применяется только через boot._applyTheme: класс .dark на <html>.
+
+    Ни panels.js, ни store не вводят вторую тему (класс .light, data-theme):
+    иначе состояние страницы стало бы двойным и расходилось бы с CSS, где светлая
+    палитра — это `:root`, а тёмная — `:root.dark`.
+    """
+    panels = (STATIC / "panels.js").read_text(encoding="utf-8")
+    store_src = (STATIC / "appearance_store.js").read_text(encoding="utf-8")
+    for src, name in ((panels, "panels.js"), (store_src, "appearance_store.js")):
+        assert "dataset.theme=" not in src, f"{name} не должен писать data-theme"
+        assert "classList.add('light')" not in src, f"{name} не должен вводить класс .light"
+        assert "classList.toggle('light'" not in src, f"{name} не должен вводить класс .light"
+    # Применение — вызовом существующей boot-функции с одним аргументом-именем.
+    assert "_applyTheme(value)" in panels
+
+
+def test_theme_apply_checks_actual_page_state_not_only_memo():
+    """`_appliedAppearance` — памятка panels, boot её не обновляет.
+
+    Поэтому решение «применять ли тему» обязано сверяться с фактическим
+    состоянием страницы: иначе выбор видимой темы после старта из localStorage
+    не доезжает до DOM.
+    """
+    panels = (STATIC / "panels.js").read_text(encoding="utf-8")
+    start = panels.index("function _applyAppearanceKeyValue(")
+    body = panels[start:panels.index("case 'skin':", start)]
+    assert "_appliedThemeName()" in body, "сверка с реально применённой темой"
+    assert "_resolvedThemeBaseDark" in panels, "источник истины — разрешённая тема boot"
+    assert "localStorage.setItem('hermes-theme'" not in body, (
+        "применение темы не должно подменять hermes-theme: boot читает его на старте "
+        "как последний выбор пользователя"
+    )
+
+
+def test_settings_open_reconciles_page_theme_before_hydrate():
+    """Расхождение «страница ≠ сервер» чинится до гидратации, иначе снимок сервера
+    перетирает видимую тему, а повторный выбор видимой темы не даёт diff."""
+    panels = (STATIC / "panels.js").read_text(encoding="utf-8")
+    start = panels.index("async function loadSettingsPanel(")
+    body = panels[start:panels.index("async function ", start + 10)]
+    assert "_reconcileStoreThemeWithAppliedTheme()" in body
+    assert body.index("_reconcileStoreThemeWithAppliedTheme()") < body.index(".hydrate(settings)")
+
+
 def test_handoff_documents_index_and_boot_wiring():
     handoff = (REPO_ROOT / "HANDOFF-appearance.md").read_text(encoding="utf-8")
     # Точный тег подключения и порядок (store до panels.js).
