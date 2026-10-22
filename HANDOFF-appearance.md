@@ -173,10 +173,23 @@ window._registerActivityModeRenderer(function(mode, meta){
 node --check static/appearance_store.js
 node --check static/panels.js
 node tests/js/appearance_store_behavior.js      # OK: 93 проверки, 15 сценариев
-python -m pytest tests/test_appearance_store_behavior.py \
-                 tests/test_1003_appearance_autosave.py \
-                 tests/test_1003_preferences_autosave.py -q   # 27 passed
+
+# Только поимённые файлы + изолированное окружение (никаких `pytest tests -k`:
+# broad collection тянет тесты, которым нужен живой агент/состояние).
+ISO=$(mktemp -d /tmp/appr-iso-XXXX); mkdir -p "$ISO/home" "$ISO/hermes" "$ISO/state"
+HOME="$ISO/home" HERMES_HOME="$ISO/hermes" HERMES_WEBUI_STATE_DIR="$ISO/state" \
+  .venv/bin/python -m pytest -q -p no:cacheprovider \
+    tests/test_appearance_store_behavior.py \
+    tests/test_1003_appearance_autosave.py \
+    tests/test_1003_preferences_autosave.py \
+    tests/test_issue3820_chat_activity_display_mode.py \
+    tests/test_issue3595_activity_default_expanded.py \
+    tests/test_issue6612_update_channel_autosave.py \
+    tests/test_batch_fixes.py            # 146 passed
 ```
+
+`.venv` в worktree — симлинк на PROD-окружение: `pip install` и `scripts/test.sh`
+не запускать, зависимости уже стоят.
 
 Регресс-контроль по существующим контрактам (все зелёные):
 `test_issue3820_chat_activity_display_mode` (режим перерисовывает только при
