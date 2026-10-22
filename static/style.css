@@ -2173,6 +2173,26 @@ main.main.showing-plugin > #mainPlugin {
      of the trigger so it doesn't extend past the viewport edge. */
   .has-tooltip--left::after{left:auto;right:calc(100% + 8px);top:50%;transform:translateY(-50%);}
   @media(prefers-reduced-motion:reduce){.has-tooltip::after{transition:none;transition-delay:0s;}}
+  /* ── Tooltips in right-anchored containers ──────────────────────────────────
+     The default bubble opens to the RIGHT of its trigger, which is wrong for the
+     two containers that sit against a hard right edge and clip on overflow.
+     Measured at 1024x720 with the workspace panel open (`.rightpanel` is 278px
+     wide, `.main` is at its 420px floor): the panel-header bubble "Параметры
+     рабочей области" ran 167px past `.rightpanel`'s clip edge and the composer's
+     mic bubble 20px past `.main`'s, so both labels were sliced instead of read.
+
+     The fix mirrors the anchor (the same geometry `.has-tooltip--bottom-right`
+     and `.has-tooltip--left` already use) instead of clamping the container: the
+     label stays whole, nothing is hidden, and no container gains a horizontal
+     scrollbar. Bottom-anchored bubbles keep their vertical placement and grow
+     inward from the trigger's right edge. */
+  .rightpanel .has-tooltip:not(.has-tooltip--left):not(.has-tooltip--bottom):not(.has-tooltip--bottom-right)::after,
+  .composer-right .has-tooltip:not(.has-tooltip--left):not(.has-tooltip--bottom):not(.has-tooltip--bottom-right)::after{
+    left:auto;right:calc(100% + 8px);
+  }
+  .rightpanel .has-tooltip--bottom::after{
+    left:auto;right:0;transform:none;
+  }
 .rail-spacer{flex:1;min-height:8px;}
 .rail .nav-tab{flex:0 0 auto;padding:0;font-size:inherit;border-bottom:none;overflow:visible;}
 /* Note: previously this block had `.rail .nav-tab:hover::after { content: none }`
@@ -8789,6 +8809,10 @@ html.mars-thinking-expanded .wl-reason{
 
 /* Mars Modes: Full stream, Process window, Quiet */
 .mars-process-window{
+  /* The window's vertical bound, declared once. Everything else (the stream's
+     base rule and both `html.mars-mode-*` rules) reads this variable, so the
+     number cannot drift between the CSS layers again. */
+  --activity-window-max:260px;
   position:relative;
   border:1px solid var(--border2);
   background:color-mix(in srgb,var(--surface) 92%,var(--bg));
@@ -8836,7 +8860,12 @@ html.mars-thinking-expanded .wl-reason{
   border-color:var(--accent-bg-strong);
 }
 .mars-process-window-stream{
-  max-height:220px;
+  /* The bound lives in exactly one place: `--activity-window-max` below, applied
+     through the mode rules (`html.mars-mode-window|full`). A literal here used to
+     disagree with the renderer's own inline 260px — see the note on the mode
+     block at the end of this file. */
+  max-height:min(38vh,var(--activity-window-max,260px));
+  max-height:min(calc(var(--app-vh,1vh) * 38),var(--activity-window-max,260px));
   overflow-y:auto;
   overflow-x:hidden;
   padding:8px 10px;
@@ -9656,8 +9685,22 @@ button.send-btn:active:not(:disabled),
    already hides the quiet-mode rows; these rules only set the window geometry
    so a mode switch never leaves an empty capped shell. */
 html.mars-mode-full .mars-process-window{max-height:none;}
-html.mars-mode-full .mars-process-window .mars-process-window-stream{max-height:none;}
-html.mars-mode-window .mars-process-window:not(.is-collapsed) .mars-process-window-stream{max-height:min(38vh,260px);max-height:min(calc(var(--app-vh) * 38),260px);}
+html.mars-mode-full .mars-process-window .mars-process-window-stream{max-height:none!important;}
+html.mars-mode-window .mars-process-window:not(.is-collapsed) .mars-process-window-stream{max-height:min(38vh,var(--activity-window-max,260px))!important;max-height:min(calc(var(--app-vh) * 38),var(--activity-window-max,260px))!important;}
+/* Single owner of the window bound. `--activity-window-max` is the one place the
+   number lives; the two mode rules above are the only places it is applied.
+   `chat_render_activity_block.js::setMode()` also writes
+   `body.style.maxHeight = '260px' | ''` on the very same
+   `[data-activity-body="1"]` element (WINDOW_BODY_MAX_PX). Inline beats a normal
+   declaration, so before these `!important` flags the renderer silently owned the
+   bound and the viewport-aware `38vh` cap never took effect: on a 393x520 phone
+   with the keyboard up the window stayed at a flat 260px (~50% of the visual
+   viewport) instead of 197px, and on a 1024x720 desktop the 220px/260px literals
+   disagreed with each other. Keeping the mode rules authoritative means the CSS
+   cap is the effective value no matter what the renderer writes, and a mode
+   switch still flips the same element between `none` (full) and the cap
+   (window). Renderer follow-up (HANDOFF-layout.md → "Bounds ownership"): drop the
+   inline maxHeight write, keep `overflowY`, and this `!important` can go. */
 html.mars-hide-activity .mars-process-window{display:none!important;}
 /* A collapsed window keeps its header tappable even when reasoning is hidden:
    the disclosure is the only affordance left in stream_window + hidden mode. */

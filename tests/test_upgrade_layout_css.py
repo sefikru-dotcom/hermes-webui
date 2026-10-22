@@ -142,3 +142,59 @@ def test_mode_classes_stay_compatible_with_process_window():
 def test_content_visibility_auto_is_not_reintroduced():
     assert "content-visibility:auto" not in COMMENT.sub("", CSS).replace(" ", "")
     assert "content-visibility:visible" in CSS
+
+
+def test_right_anchored_containers_mirror_the_tooltip_anchor():
+    """A bubble must never be clipped to a sliver by its own container.
+
+    `.rightpanel` and `.composer-right` sit against a hard right edge and clip on
+    overflow, so the default `left:calc(100% + 8px)` bubble landed outside the
+    clip box (measured: 167px past `.rightpanel` at 1024x720). The fix mirrors the
+    anchor; a clamp on the container would hide the label instead.
+    """
+    mirrored = [
+        decls for sel, decls, _ in ALL_RULES
+        if ".rightpanel .has-tooltip" in sel or ".composer-right .has-tooltip" in sel
+    ]
+    assert mirrored, "tooltip anchor rules for right-anchored containers are missing"
+    joined = "".join("".join(d) for d in mirrored)
+    assert "right:calc(100% + 8px)" in joined, "bubble must open leftwards"
+    # The trigger's own label must stay intact: no truncation/clamp escape hatch.
+    for sel, decls, _ in ALL_RULES:
+        if ".rightpanel .has-tooltip" in sel or ".composer-right .has-tooltip" in sel:
+            body = "".join(decls)
+            assert "max-width" not in body and "text-overflow" not in body, (
+                "tooltips are mirrored, not truncated: " + sel
+            )
+
+
+def test_activity_window_bound_has_one_owner():
+    """The window height is declared once and applied only by the mode layer.
+
+    The renderer also writes an inline `max-height` on the same
+    `[data-activity-body]` element, and inline beats a normal declaration — so the
+    mode rules must stay authoritative or the viewport-aware 38vh cap is dead.
+    """
+    assert CSS.count("--activity-window-max:") == 1, (
+        "the bound must be declared in exactly one place"
+    )
+    stream = "".join(declarations(".mars-process-window-stream"))
+    assert "max-height:220px" not in stream, "the stale 220px literal disagreed with the renderer"
+    assert "--activity-window-max" in stream
+    for selector in (
+        "html.mars-mode-window .mars-process-window:not(.is-collapsed) .mars-process-window-stream",
+        "html.mars-mode-full .mars-process-window .mars-process-window-stream",
+    ):
+        value = last_declaration(selector, "max-height")
+        assert value and "!important" in value, (
+            selector + " must win over the renderer's inline max-height"
+        )
+
+
+def test_music_frame_host_is_not_clamped():
+    """The lazy /music/ embed keeps its own sizing; this zone may not bound it."""
+    host = "".join(declarations("#musicFrameHost"))
+    frame = "".join(declarations("#musicIframe"))
+    for body, name in ((host, "#musicFrameHost"), (frame, "#musicIframe")):
+        assert "max-height" not in body, name + " must not gain a max-height"
+        assert "overflow:hidden" not in body.replace(" ", ""), name + " must not be clipped"

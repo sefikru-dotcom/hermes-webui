@@ -102,6 +102,14 @@ function uiSandbox() {
   const context = vm.createContext({ window: win, document: doc, console });
   const names = ['thinkingMode', 'chatActivityMode', '_applyThinkingModeClasses'];
   vm.runInContext(names.map((n) => extractFunction(UI_SRC, n)).join('\n'), context);
+  // `_applyThinkingModeClasses()` also calls `_reconcileActivityMode()` (ui.js, render
+  // zone) which walks the live transcript and applies the mode to already-rendered
+  // activity blocks. That is DOM reconciliation, not class projection: it needs
+  // `liveAssistantTurn` / `msgInner` / `S` and is covered end-to-end by the browser
+  // scenarios (`modes_settled_cycle`). Stubbed here so the parity test keeps comparing
+  // the two real class writers instead of failing on a helper that is out of scope.
+  context._reconcileActivityMode = function () {};
+  win._reconcileActivityMode = context._reconcileActivityMode;
   return { win, doc, context };
 }
 
