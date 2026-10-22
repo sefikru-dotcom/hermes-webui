@@ -65,7 +65,7 @@ class State:
         self.lock = threading.Lock()
         self.fixture_dir = fixture_dir
         self.started_at = _now()
-        self.settings = self._fixture("settings_default.json", {}) or {}
+        self.settings = self._settings_from_fixture()
         self.stream_fixture = "stream_basic.json"
         self.sessions = {}
         self.streams = {}
@@ -131,6 +131,17 @@ class State:
             self.settings_posts = []
             self.chat_starts = []
             self.unknown = []
+
+    def _settings_from_fixture(self) -> dict:
+        """Fresh copy of settings_default.json (what a seeded backend starts with).
+
+        ``/__mock/config {seed:true}`` re-reads it so every seeded boot starts
+        from the fixture, independent of what a previous scenario (or a previous
+        viewport of the same scenario) wrote. No locking here: callers either
+        hold ``self.lock`` already or run during __init__, and
+        ``threading.Lock`` is not reentrant.
+        """
+        return json.loads(json.dumps(self._fixture("settings_default.json", {}) or {}))
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -426,6 +437,14 @@ class Handler(BaseHTTPRequestHandler):
             with self.state.lock:
                 if "stream_fixture" in body:
                     self.state.stream_fixture = str(body["stream_fixture"])
+                # A seeded backend is a FRESH backend. Settings are part of that
+                # state: without re-reading settings_default.json a previous
+                # viewport's writes (theme=light) leak into the next viewport and
+                # a scenario that picks the same value sees an empty store diff
+                # and no POST. Reset first so an explicit ``settings`` patch
+                # below still wins.
+                if body.get("reset_settings") or body.get("seed"):
+                    self.state.settings = self.state._settings_from_fixture()
                 if isinstance(body.get("settings"), dict):
                     self.state.settings.update(body["settings"])
                 if body.get("reset_session"):

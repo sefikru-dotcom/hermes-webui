@@ -124,6 +124,36 @@ function record(checks, name, ok, detail) {
 async function mockState(page) {
   return page.evaluate(() => fetch('/__mock/state').then((r) => r.json()));
 }
+/**
+ * Read what the page ACTUALLY renders plus the product's single theme signal.
+ *
+ * The product has exactly one theme marker — `.dark` on <html> (boot.js
+ * `_setResolvedTheme`); light is `:root`'s palette and `data-theme` is deleted
+ * on purpose. So "light" can never be a token in the class list: it has to be
+ * measured as the resolved palette. `--bg`/`--sidebar`/`--text` are read from
+ * getComputedStyle on <html>, i.e. the values the browser paints with, so a
+ * scenario can compare a captured light palette against a captured dark one.
+ */
+async function themeProbe(page) {
+  return page.evaluate(() => {
+    const html = document.documentElement;
+    const cs = getComputedStyle(html);
+    const picker = document.querySelector('[data-theme-val="light"]');
+    const bg = cs.getPropertyValue('--bg').trim();
+    return {
+      ls: localStorage.getItem('hermes-theme'),
+      htmlDark: html.classList.contains('dark'),
+      bg,
+      sidebar: cs.getPropertyValue('--sidebar').trim(),
+      text: cs.getPropertyValue('--text').trim(),
+      // Real painted background: <body> inherits var(--bg); a transparent value
+      // means the palette never reached layout.
+      bodyBg: getComputedStyle(document.body).backgroundColor,
+      skin: html.dataset.skin || 'default',
+      pickerActive: picker ? picker.classList.contains('active') : null,
+    };
+  });
+}
 async function mockPost(page, url, body) {
   return page.evaluate(
     ([u, b]) => fetch(u, {
@@ -135,10 +165,26 @@ async function mockPost(page, url, body) {
 const chatSse = (st) => (st.sse_connections || []).filter((c) => c.path === '/api/chat/stream').length;
 
 async function boot(page, { seed = false, fixture = 'stream_long.json', sessionId = '' } = {}) {
+  // Land on the origin first so the mock control endpoints are reachable; this
+  // load is throwaway, it only proves the app boots.
   await page.goto('/', { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => typeof S !== 'undefined' && S._bootReady === true, null, { timeout: 20000 });
-  await mockPost(page, '/__mock/config', { seed, stream_fixture: fixture });
+  // Let the boot-time settings reconcile POST (if any) land before resetting, so
+  // the reset cannot be overtaken by a request already in flight.
+  await page.waitForTimeout(150);
+  // Reset the backend — settings included — BEFORE the load the scenario will
+  // assert on. Without this, one viewport's writes (e.g. theme=light) leak into
+  // the next scenario/viewport: the app boots with the previous choice, picking
+  // the same value produces an empty store diff, and no POST is sent at all.
+  await mockPost(page, '/__mock/config', { seed, stream_fixture: fixture, reset_settings: true });
   await mockPost(page, '/__mock/reset', {});
+  // The throwaway load also wrote appearance keys to localStorage; boot prefers
+  // localStorage over the server, so they must go too or the leak survives the
+  // settings reset.
+  await page.evaluate(() => { try { localStorage.clear(); sessionStorage.clear(); } catch (_) {} });
+  // Definitive load against the freshly seeded backend.
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => typeof S !== 'undefined' && S._bootReady === true, null, { timeout: 20000 });
   if (sessionId) {
     await page.evaluate((s) => { localStorage.setItem('hermes-webui-session', s); }, sessionId);
     await page.reload({ waitUntil: 'domcontentloaded' });
@@ -403,6 +449,14 @@ SCENARIOS.push({
   name: 'settings_theme_persist',
   async run(page, checks) {
     await boot(page, { seed: true, sessionId: 'fx-session-long' });
+    // Negative control: the seeded backend says theme=dark, so the page must be
+    // painting the dark palette. Captured here so "light survived the reload" is
+    // measured as a palette change against a distinct, real dark baseline —
+    // not as the absence/presence of a class token.
+    const darkCtl = await themeProbe(page);
+    record(checks, 'seeded theme paints the dark palette (control)',
+      darkCtl.ls === 'dark' && darkCtl.htmlDark === true && !!darkCtl.bg,
+      JSON.stringify(darkCtl));
     // Open Settings through its real sidebar entry, then the Appearance tab, so
     // the scenario exercises the same path a user takes (and the same hydration
     // order the upgrade touches).
@@ -410,14 +464,46 @@ SCENARIOS.push({
       if (typeof switchPanel === 'function') await switchPanel('settings');
     });
     await page.waitForTimeout(400);
-    // Desktop shows the section list; the mobile frame shows a dropdown. Use
-    // whichever control the current layout actually offers, then fall back to
-    // the same function that control calls (still the app's own code path).
+    // On a phone the section list lives in the slide-in drawer: the real first
+    // step is tapping the hamburger. Detect the affordance instead of branching
+    // on the viewport name, so a layout change cannot silently skip it (which is
+    // how the mobile run used to click an off-screen element and post nothing).
+    const drawer = await page.evaluate(() => {
+      const box = (el) => {
+        if (!el) return null;
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && r.height > 0 ? r : null;
+      };
+      const sb = document.querySelector('.sidebar');
+      const hb = document.getElementById('btnHamburger');
+      return {
+        closed: !!box(sb) && sb.getBoundingClientRect().right <= 1,
+        hamburger: !!box(hb) && getComputedStyle(hb).display !== 'none',
+      };
+    });
+    if (drawer.hamburger && drawer.closed) {
+      await page.click('#btnHamburger', { timeout: 5000 });
+      await page.waitForFunction(() => {
+        const sb = document.querySelector('.sidebar');
+        if (!sb) return false;
+        const r = sb.getBoundingClientRect();
+        return r.left >= -1 && r.width > 100;
+      }, null, { timeout: 5000 });
+    }
+    // Desktop shows the section list; a compact frame may show a dropdown. Use
+    // whichever control is actually on screen (in-viewport, not merely in the
+    // DOM), then fall back to the function that control calls.
     const nav = await page.evaluate(() => {
-      const tab = document.querySelector('[data-settings-section="appearance"]');
-      const dd = document.getElementById('settingsSectionDropdown');
-      const visible = (el) => !!el && el.getBoundingClientRect().width > 0 && getComputedStyle(el).visibility !== 'hidden';
-      return { tab: visible(tab), dropdown: visible(dd) };
+      const visible = (el) => {
+        if (!el) return false;
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && r.height > 0 && r.right > 0 && r.left < window.innerWidth
+          && getComputedStyle(el).visibility !== 'hidden';
+      };
+      return {
+        tab: visible(document.querySelector('[data-settings-section="appearance"]')),
+        dropdown: visible(document.getElementById('settingsSectionDropdown')),
+      };
     });
     record(checks, 'settings offers an Appearance entry point', nav.tab || nav.dropdown, JSON.stringify(nav));
     if (nav.tab) {
@@ -428,22 +514,52 @@ SCENARIOS.push({
       await page.evaluate(() => { if (typeof switchSettingsSection === 'function') switchSettingsSection('appearance', { skipLazyLoad: true }); });
     }
     await page.waitForTimeout(500);
-    const picker = await page.$('[data-theme-val="light"]');
-    record(checks, 'appearance pane exposes the theme picker', !!picker,
-      `paneVisible=${await page.isVisible('#settingsPaneAppearance').catch(() => false)}`);
-    if (picker) {
+    // The picker must be on screen and the pane active — a hidden pane with a
+    // present-but-zero-sized button is not a usable entry point.
+    const pickerState = await page.evaluate(() => {
+      const pane = document.getElementById('settingsPaneAppearance');
+      const pick = document.querySelector('[data-theme-val="light"]');
+      const geo = (el) => {
+        if (!el) return null;
+        const r = el.getBoundingClientRect();
+        return { w: Math.round(r.width), h: Math.round(r.height), x: Math.round(r.left), y: Math.round(r.top) };
+      };
+      return {
+        paneActive: !!pane && pane.classList.contains('active'),
+        pane: geo(pane),
+        picker: geo(pick),
+        section: typeof _currentSettingsSection === 'undefined' ? null : _currentSettingsSection,
+      };
+    });
+    const vpSize = page.viewportSize() || { width: 0, height: 0 };
+    const pickerReady = pickerState.paneActive
+      && !!pickerState.pane && pickerState.pane.w > 0 && pickerState.pane.h > 0
+      && !!pickerState.picker && pickerState.picker.w > 0 && pickerState.picker.h > 0
+      // Actually on screen: the row a user can tap without hunting for it.
+      && pickerState.picker.y >= 0 && pickerState.picker.y < vpSize.height
+      && pickerState.picker.x >= 0 && pickerState.picker.x < vpSize.width;
+    record(checks, 'appearance pane exposes the theme picker', pickerReady, JSON.stringify(pickerState));
+    if (pickerReady) {
       await mockPost(page, '/__mock/reset', {});
-      await page.click('[data-theme-val="light"]', { timeout: 8000 }).catch(async () => {
-        await page.evaluate(() => { if (typeof _pickTheme === 'function') _pickTheme('light'); });
-      });
+      // A real click only: falling back to _pickTheme() would prove nothing about
+      // the UI the user actually operates.
+      let clickError = '';
+      await page.click('[data-theme-val="light"]', { timeout: 8000 })
+        .catch((e) => { clickError = String((e && e.message) || e).split('\n')[0]; });
       await page.waitForTimeout(1400);
       const st = await mockState(page);
       const posts = st.settings_posts || [];
       const withTheme = posts.filter((p) => p && p.theme === 'light');
       record(checks, 'picking a theme posts it to /api/settings', withTheme.length >= 1,
-        JSON.stringify(posts.map((p) => p.theme)));
+        JSON.stringify({ posted: posts.map((p) => p.theme), serverTheme: (st.settings || {}).theme, clickError }));
       record(checks, 'theme is mirrored to localStorage',
         (await page.evaluate(() => localStorage.getItem('hermes-theme'))) === 'light');
+      // The choice must reach the page, not just the store: light palette,
+      // `.dark` gone, picker marked active.
+      const picked = await themeProbe(page);
+      record(checks, 'picking light repaints with the light palette',
+        picked.htmlDark === false && !!picked.bg && picked.bg !== darkCtl.bg && picked.pickerActive === true,
+        JSON.stringify({ picked, darkBg: darkCtl.bg }));
       const known = new Set([
         'theme', 'skin', 'font_size', 'chat_activity_display_mode',
         'transparent_stream_event_timestamps', 'session_jump_buttons', 'session_endless_scroll',
@@ -459,25 +575,28 @@ SCENARIOS.push({
         : [];
       record(checks, 'appearance save sends only appearance keys', unrelated.length === 0,
         `unexpected keys: ${unrelated.join(',')}`);
-    }
 
-    await page.reload({ waitUntil: 'domcontentloaded' });
-    await page.waitForFunction(() => typeof S !== 'undefined' && S._bootReady === true, null, { timeout: 20000 });
-    // The theme is applied after the settings hydration round-trip, so give the
-    // boot sequence a bounded moment before judging.
-    await page.waitForFunction(() => {
-      const t = `${document.body.className} ${document.documentElement.className}`;
-      return /(^|\s)(light|dark)(\s|$)/.test(t) || document.body.dataset.theme || document.documentElement.dataset.theme;
-    }, null, { timeout: 8000 }).catch(() => {});
-    const afterReload = await page.evaluate(() => ({
-      ls: localStorage.getItem('hermes-theme'),
-      body: document.body.className,
-      html: document.documentElement.className,
-      attr: document.documentElement.getAttribute('data-theme') || document.body.getAttribute('data-theme'),
-    }));
-    record(checks, 'theme survives a reload',
-      afterReload.ls === 'light' && /light/.test(`${afterReload.body} ${afterReload.html} ${afterReload.attr || ''}`),
-      JSON.stringify(afterReload));
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await page.waitForFunction(() => typeof S !== 'undefined' && S._bootReady === true, null, { timeout: 20000 });
+      // The theme is applied after the settings hydration round-trip, so give the
+      // boot sequence a bounded moment to reach the stored palette.
+      await page.waitForFunction(
+        (bg) => getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() === bg,
+        picked.bg, { timeout: 8000 },
+      ).catch(() => {});
+      const afterReload = await themeProbe(page);
+      // Strict: the stored choice is light, the page is NOT dark, and the painted
+      // palette is byte-identical to the light palette captured before the reload
+      // (and therefore different from the dark control). A theme that reverted
+      // to dark fails all three.
+      record(checks, 'theme survives a reload',
+        afterReload.ls === 'light'
+          && afterReload.htmlDark === false
+          && !!afterReload.bg
+          && afterReload.bg === picked.bg
+          && afterReload.bg !== darkCtl.bg,
+        JSON.stringify({ beforeReload: picked, afterReload, darkControlBg: darkCtl.bg }));
+    }
 
     await mockPost(page, '/__mock/reset', {});
     await page.evaluate(() => { if (typeof switchPanel === 'function') switchPanel('chat'); });
