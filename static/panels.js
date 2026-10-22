@@ -8703,14 +8703,17 @@ function _thinkingModeFromUi(){
   return (v==='expanded'||v==='collapsed'||v==='hidden')?v:'auto';
 }
 function _marsApplyChatUxSettings(options){
-  const mode=_thinkingModeFromUi();
+  const S=_ensureAppearanceStore();
+  const mode=(S&&S.has('thinking_mode'))?S.get('thinking_mode'):_thinkingModeFromUi();
   window._thinkingModeSetting=mode;
   window._thinkingMode=(mode==='expanded'||mode==='collapsed'||mode==='hidden')?mode:'expanded';
   window._showThinking=window._thinkingMode!=='hidden';
   const toolsCb=$('settingsShowToolCalls');
-  if(toolsCb) window._showToolCalls=toolsCb.checked!==false;
+  if(S&&S.has('show_tool_calls')) window._showToolCalls=!!S.get('show_tool_calls');
+  else if(toolsCb) window._showToolCalls=toolsCb.checked!==false;
   const autoCb=$('settingsAutoCollapsePreviousTurns');
-  if(autoCb) window._autoCollapsePreviousTurns=autoCb.checked!==false;
+  if(S&&S.has('auto_collapse_previous_turns')) window._autoCollapsePreviousTurns=!!S.get('auto_collapse_previous_turns');
+  else if(autoCb) window._autoCollapsePreviousTurns=autoCb.checked!==false;
   if(typeof _applyThinkingModeClasses==='function') _applyThinkingModeClasses();
   if(typeof window._marsSyncTurnFoldButton==='function') window._marsSyncTurnFoldButton();
   if(options&&options.rerender){
@@ -8720,7 +8723,310 @@ function _marsApplyChatUxSettings(options){
 }
 if(typeof window!=='undefined') window._marsApplyChatUxSettings=_marsApplyChatUxSettings;
 
+// AppearanceStore — единая основа UI и сохранения (static/appearance_store.js).
+// Пока скрипт не подключён интегратором, работает прежний DOM-путь, поэтому
+// порядок загрузки не ломает страницу (см. HANDOFF-appearance.md).
+let _appearanceStoreRef=null;
+let _appearanceStoreConfigured=false;
+// Гидратация appearance-контролов в loadSettingsPanel() завершена. До этого
+// момента DOM — неполное зеркало настроек, и читать из него payload нельзя.
+let _settingsAppearanceControlsBound=false;
+
+function _ensureAppearanceStore(){
+  const S=(typeof window!=='undefined')?window.AppearanceStore:null;
+  if(!S||typeof S.configure!=='function') return null;
+  if(!_appearanceStoreConfigured||_appearanceStoreRef!==S){
+    S.configure({
+      save:function(payload){ return _enqueueSettingsPost({method:'POST',body:JSON.stringify(payload)}); },
+      apply:_applyAppearanceKeyValue,
+      onStatus:_onAppearanceStoreStatus,
+      onSaved:_onAppearanceStoreSaved,
+      onError:_onAppearanceStoreError,
+      debounceMs:350
+    });
+    _appearanceStoreRef=S;
+    _appearanceStoreConfigured=true;
+  }
+  return S;
+}
+
+function _onAppearanceStoreStatus(state){
+  _setAppearanceAutosaveStatus(state==='error'?'failed':(state==='idle'?'':state));
+}
+
+function _onAppearanceStoreSaved(saved,payload){
+  _rememberAppearanceSaved(payload);
+  _applyAppearanceSavedToRuntime(saved,payload);
+}
+
+function _onAppearanceStoreError(err){
+  console.warn('[settings] appearance autosave failed',err);
+}
+
+// Значение из store, если он уже гидратирован; иначе — прежний источник.
+// Нужен, чтобы контролы Settings показывали ровно то, что будет сохранено.
+function _appearanceStoreValue(key,fallback){
+  const S=_ensureAppearanceStore();
+  if(S&&S.has(key)) return S.get(key);
+  return fallback;
+}
+
+// Применение одного ключа к живому UI. Вызывается store'ом сразу при set()
+// (быстрый отклик) и при подтверждении/откате сервером. Только существующие
+// ui/boot API — ui.js не меняется.
+const _appliedAppearance={};
+
+function _currentActivityMode(){
+  const S=_ensureAppearanceStore();
+  if(S&&S.has('chat_activity_display_mode')) return S.get('chat_activity_display_mode');
+  return _canonicalActivityMode(window._chatActivityDisplayMode);
+}
+
+// ── Точка расширения для автора рендер-слоя (ui.js) ─────────────────────────
+// panels.js — владелец "как применить режим к UI"; ui.js — владелец того, как
+// перерисовать живой/осевший ход. Рендер-слой регистрирует свою функцию ОДИН
+// раз при инициализации:
+//
+//   window._registerActivityModeRenderer(function(mode, meta){
+//     // mode: 'stream_full' | 'stream_window' | 'stream_quiet' (всегда канон)
+//     // meta: {reason:'local'|'hydrate'|'server'|'revert', live:true}
+//   });
+//
+// Договор: функция синхронная, делает адресный patch (не полный rebuild),
+// не сохраняет настройки и не вызывает _pickChatActivityDisplayMode.
+let _activityModeRenderer=null;
+
+function _registerActivityModeRenderer(fn){
+  if(typeof fn!=='function') return false;
+  _activityModeRenderer=fn;
+  return true;
+}
+if(typeof window!=='undefined') window._registerActivityModeRenderer=_registerActivityModeRenderer;
+
+// Совместимость: если рендер-слой уже объявил глобальный хук, он считается
+// зарегистрированным рендерером (старый контракт не ломается).
+function _activityModeRendererFn(){
+  if(_activityModeRenderer) return _activityModeRenderer;
+  if(typeof window._marsActivityModeChanged==='function') return window._marsActivityModeChanged;
+  return null;
+}
+
+function _applyActivityModeFast(mode,meta){
+  const next=_canonicalActivityMode(mode);
+  // Существующие API: селект + кнопки data-chat-activity-mode + titlebar +
+  // html-классы (mars-mode-*). hideLive:false — переключение режима не должно
+  // стирать уже нарисованную активность (см. webui-audit-modes.md, P2).
+  _syncChatActivityDisplayModeControl(next,{hideLive:false});
+  if(typeof _applyThinkingModeClasses==='function') _applyThinkingModeClasses();
+  const renderer=_activityModeRendererFn();
+  if(renderer){
+    // Адресный patch живого хода — забота рендер-слоя.
+    try{ renderer(next,{reason:(meta&&meta.reason)||'local',live:true}); }
+    catch(e){ console.warn('[appearance] activity mode renderer failed',e); }
+    return;
+  }
+  _scheduleLegacyActivityRenderSync();
+}
+
+let _legacyActivityRenderTimer=null;
+
+// Фолбэк, пока рендерер не зарегистрирован: один склеенный rebuild на серию
+// переключений и только если в транскрипте есть activity-разметка.
+function _scheduleLegacyActivityRenderSync(){
+  if(_legacyActivityRenderTimer) return;
+  _legacyActivityRenderTimer=setTimeout(function(){
+    _legacyActivityRenderTimer=null;
+    if(_activityModeRendererFn()) return;
+    let hasActivity=false;
+    try{
+      hasActivity=!!document.querySelector('.mars-process-window,[data-live-worklog-shell],.transparent-event-row,.tool-worklog-group');
+    }catch(e){ hasActivity=false; }
+    if(!hasActivity) return;
+    if(typeof clearMessageRenderCache==='function') clearMessageRenderCache();
+    if(typeof renderMessages==='function') renderMessages({preserveScroll:true});
+  },140);
+}
+
+function _applyAppearanceKeyValue(key,value,meta){
+  switch(key){
+    case 'theme':{
+      if(_appliedAppearance.theme===value) return;
+      _appliedAppearance.theme=value;
+      if(typeof _applyTheme==='function') _applyTheme(value);
+      if(typeof _syncThemePicker==='function') _syncThemePicker(value);
+      const hidden=$('settingsTheme');
+      if(hidden) hidden.value=value;
+      break;
+    }
+    case 'skin':{
+      if(_appliedAppearance.skin===value) return;
+      _appliedAppearance.skin=value;
+      if(typeof _applySkin==='function') _applySkin(value);
+      if(typeof _syncSkinPicker==='function') _syncSkinPicker(value);
+      const hidden=$('settingsSkin');
+      if(hidden) hidden.value=value;
+      break;
+    }
+    case 'font_size':{
+      if(_appliedAppearance.font_size===value) return;
+      _appliedAppearance.font_size=value;
+      try{ localStorage.setItem('hermes-font-size',value); }catch(e){}
+      if(typeof _applyFontSize==='function') _applyFontSize(value);
+      if(typeof _syncFontSizePicker==='function') _syncFontSizePicker(value);
+      const hidden=$('settingsFontSize');
+      if(hidden) hidden.value=value;
+      break;
+    }
+    case 'chat_activity_display_mode':
+      _applyActivityModeFast(value,meta);
+      break;
+    case 'transparent_stream_event_timestamps':
+      _syncTransparentEventTimestampsControl(value,_currentActivityMode());
+      _scheduleLegacyActivityRenderSync();
+      break;
+    case 'thinking_mode':{
+      const mode=(value==='expanded'||value==='collapsed'||value==='hidden')?value:'auto';
+      window._thinkingModeSetting=mode;
+      window._thinkingMode=(mode==='expanded'||mode==='collapsed'||mode==='hidden')?mode:'expanded';
+      window._showThinking=window._thinkingMode!=='hidden';
+      const sel=$('settingsThinkingMode');
+      if(sel) sel.value=mode;
+      if(typeof _applyThinkingModeClasses==='function') _applyThinkingModeClasses();
+      break;
+    }
+    case 'show_tool_calls':
+      window._showToolCalls=value!==false;
+      if(typeof _applyThinkingModeClasses==='function') _applyThinkingModeClasses();
+      break;
+    case 'auto_collapse_previous_turns':
+      window._autoCollapsePreviousTurns=value!==false;
+      if(typeof _applyThinkingModeClasses==='function') _applyThinkingModeClasses();
+      break;
+    case 'worklog_details_expanded_default':
+      window._worklogDetailsExpandedByDefault=!!value;
+      if(typeof _applyWorklogDetailsExpandedDefault==='function') _applyWorklogDetailsExpandedDefault();
+      break;
+    case 'session_jump_buttons':
+      window._sessionJumpButtonsEnabled=!!value;
+      if(typeof _applySessionNavigationPrefs==='function') _applySessionNavigationPrefs();
+      break;
+    case 'session_endless_scroll':
+      window._sessionEndlessScrollEnabled=!!value;
+      break;
+    case 'auto_scroll_follow':
+      window._autoScrollFollow=value!==false;
+      if(typeof _persistAutoScrollFollow==='function') _persistAutoScrollFollow(window._autoScrollFollow);
+      break;
+    case 'render_user_markdown':
+      window._renderUserMarkdown=!!value;
+      // Меняет разметку сообщений — это не CSS, кэш обязан быть сброшен.
+      if(typeof clearMessageRenderCache==='function') clearMessageRenderCache();
+      if(typeof renderMessages==='function') renderMessages({preserveScroll:true});
+      break;
+    case 'large_text_paste_as_attachment':
+      window._largeTextPasteAsAttachment=value!==false;
+      break;
+    case 'project_quick_create_buttons':
+      window._projectQuickCreate=!!value;
+      try{ if(typeof renderSessionListFromCache==='function') renderSessionListFromCache(); }catch(e){}
+      break;
+    case 'structured_code_default_view':
+    case 'structured_code_auto_tree_lines':{
+      const S=_ensureAppearanceStore();
+      const view=S&&S.has('structured_code_default_view')?S.get('structured_code_default_view'):window._structuredCodeDefaultView;
+      const lines=S&&S.has('structured_code_auto_tree_lines')?S.get('structured_code_auto_tree_lines'):window._structuredCodeAutoTreeLines;
+      if(typeof _applyStructuredCodeViewSettings==='function') _applyStructuredCodeViewSettings(view,lines,false);
+      break;
+    }
+    case 'composer_control_order':{
+      const next=_setComposerControlOrder(Array.isArray(value)?value:[]);
+      if(typeof window._applyComposerControlOrder==='function') window._applyComposerControlOrder(next);
+      _renderComposerControlChips();
+      _renderComposerSituationalControlChips();
+      break;
+    }
+    case 'hidden_tabs':
+      _setHiddenTabs(Array.isArray(value)?value:[]);
+      _applyTabVisibility(_getHiddenTabs());
+      _renderTabVisibilityChips();
+      break;
+    case 'tab_order':
+      _setTabOrder(Array.isArray(value)?value:[]);
+      _applyTabOrder(_getTabOrder());
+      break;
+    case 'show_titlebar_profile':
+      window._showTitlebarProfile=!!value;
+      if(typeof _applyTitlebarProfileVisibility==='function') _applyTitlebarProfileVisibility();
+      break;
+    default:{
+      // Композерные тумблеры и прочие динамические ключи: состояние живёт в
+      // window._composerControlVisibility, DOM перерисовывают чипы.
+      if(Object.prototype.hasOwnProperty.call(window._composerControlVisibility||{},key)){
+        window._composerControlVisibility[key]=!!value;
+        _renderComposerControlChips();
+        _renderComposerSituationalControlChips();
+        if(typeof _applyComposerFooterVisibilitySettings==='function') _applyComposerFooterVisibilitySettings();
+      }
+      break;
+    }
+  }
+}
+
+// Значения appearance-контролов как они есть в DOM + только изменённые ключи.
+// Ключ попадает в карту, только если контрол реально существует: отсутствующий
+// чекбокс раньше давал `false` и молча выключал настройку. Пустой результат =
+// сохранять нечего (и POST не будет).
 function _appearancePayloadFromUi(){
+  const S=_ensureAppearanceStore();
+  if(!S) return _appearancePayloadFromUiLegacy();
+  if(!_settingsAppearanceControlsBound){
+    // Settings ещё не гидратирован: DOM — не зеркало настроек, читать из него
+    // нельзя. Отдаём только то, что пользователь изменил явно (кнопка режима
+    // в шапке и т.п.) — это и есть diff одного ключа.
+    return S.diff();
+  }
+  const themeEl=$('settingsTheme');
+  const skinEl=$('settingsSkin');
+  const fontEl=$('settingsFontSize');
+  const controls={
+    ...(themeEl?{theme:themeEl.value||localStorage.getItem('hermes-theme')||'dark'}:{}),
+    ...(skinEl?{skin:skinEl.value||localStorage.getItem('hermes-skin')||'default'}:{}),
+    ...(fontEl?{font_size:fontEl.value||localStorage.getItem('hermes-font-size')||'default'}:{}),
+  };
+  const modeSel=$('settingsChatActivityDisplayMode');
+  if(modeSel) controls.chat_activity_display_mode=_canonicalActivityMode(modeSel.value);
+  const timestampsCb=$('settingsTransparentEventTimestamps');
+  if(timestampsCb) controls.transparent_stream_event_timestamps=!!timestampsCb.checked;
+  [
+    ['settingsSessionJumpButtons','session_jump_buttons'],
+    ['settingsSessionEndlessScroll','session_endless_scroll'],
+    ['settingsAutoScrollFollow','auto_scroll_follow'],
+    ['settingsRenderUserMarkdown','render_user_markdown'],
+    ['settingsLargeTextPasteAsAttachment','large_text_paste_as_attachment'],
+    ['settingsProjectQuickCreate','project_quick_create_buttons'],
+    ['settingsShowTitlebarProfile','show_titlebar_profile'],
+    ['settingsWorklogDetailsExpandedDefault','worklog_details_expanded_default'],
+    ['settingsShowToolCalls','show_tool_calls'],
+    ['settingsAutoCollapsePreviousTurns','auto_collapse_previous_turns']
+  ].forEach(function(pair){
+    const el=$(pair[0]);
+    if(el) controls[pair[1]]=!!el.checked;
+  });
+  // thinking_mode намеренно НЕ читается из DOM: в селекте нет `auto`, и любой
+  // автосейв молча превращал бы auto → expanded. Значение ставится только
+  // явным выбором пользователя (onchange → store.set).
+  if($('settingsStructuredCodeMode')) Object.assign(controls,_structuredCodeViewFromUi());
+  Object.assign(controls,_composerControlVisibilityPayload());
+  controls.composer_control_order=_getComposerControlOrder();
+  controls.hidden_tabs=_getHiddenTabs();
+  controls.tab_order=_getTabOrder();
+  S.stage(controls);
+  return S.diff();
+}
+
+// Прежний DOM-снапшот: используется, только если appearance_store.js не
+// подключён. Оставлен для обратной совместимости script order.
+function _appearancePayloadFromUiLegacy(){
   const worklogDetailsExpanded=!!($('settingsWorklogDetailsExpandedDefault')||{}).checked;
   const chatActivityModeSel=$('settingsChatActivityDisplayMode');
   const transparentEventTimestamps=$('settingsTransparentEventTimestamps');
@@ -8771,6 +9077,11 @@ const _ACTIVITY_MODE_FULL_KEY={
 };
 
 function _canonicalActivityMode(mode){
+  // Единственный словарь режимов живёт в AppearanceStore (appearance_store.js).
+  // Здесь остаётся только фолбэк для случая, когда модуль ещё не подключён
+  // (script order задаёт интегратор — см. HANDOFF-appearance.md).
+  const S=(typeof window!=='undefined')?window.AppearanceStore:null;
+  if(S&&typeof S.canonicalActivityMode==='function') return S.canonicalActivityMode(mode);
   if(mode==='stream_full'||mode==='stream_window'||mode==='stream_quiet') return mode;
   if(mode==='transparent_stream') return 'stream_full';
   if(mode==='compact_worklog') return 'stream_window';
@@ -8874,7 +9185,7 @@ function _scheduleTitlebarActivityModeSync(){
 if(typeof window!=='undefined'){window._cycleChatActivityDisplayMode=_cycleChatActivityDisplayMode;window._syncTitlebarActivityModeButton=_syncTitlebarActivityModeButton;window._refreshTitlebarActivityModeButton=_refreshTitlebarActivityModeButton;window._showActivityModeCard=_showActivityModeCard;window._hideActivityModeCard=_hideActivityModeCard;}
 _scheduleTitlebarActivityModeSync();
 
-function _syncChatActivityDisplayModeControl(mode){
+function _syncChatActivityDisplayModeControl(mode, options){
   const next=_canonicalActivityMode(mode);
   const select=$('settingsChatActivityDisplayMode');
   if(select) select.value=next;
@@ -8888,7 +9199,10 @@ function _syncChatActivityDisplayModeControl(mode){
   window._transparentStream=next==='stream_full';
   if(typeof _syncTitlebarActivityModeButton==='function') _syncTitlebarActivityModeButton(next);
   if(typeof _syncTransparentEventTimestampsControl==='function') _syncTransparentEventTimestampsControl(window._transparentEventTimestamps,next);
-  if(next==='stream_quiet'&&typeof window._hideLiveActivityForFinalAnswerOnly==='function') window._hideLiveActivityForFinalAnswerOnly();
+  // hideLive:false — гидратация настроек и быстрое переключение режима не
+  // должны стирать уже нарисованную активность (webui-audit-modes.md, P2).
+  const hideLive=!(options&&options.hideLive===false);
+  if(next==='stream_quiet'&&hideLive&&typeof window._hideLiveActivityForFinalAnswerOnly==='function') window._hideLiveActivityForFinalAnswerOnly();
 }
 
 function _syncTransparentEventTimestampsControl(enabled, mode){
@@ -8904,6 +9218,15 @@ function _syncTransparentEventTimestampsControl(enabled, mode){
 }
 
 function _pickChatActivityDisplayMode(mode){
+  const next=_canonicalActivityMode(mode);
+  const S=_ensureAppearanceStore();
+  if(S){
+    // Быстрое применение + сохранение РОВНО этого ключа. Store применяет
+    // значение синхронно (_applyActivityModeFast: селект, titlebar, html-классы)
+    // и не перестраивает транскрипт.
+    S.set('chat_activity_display_mode',next,{source:'header'});
+    return;
+  }
   _syncChatActivityDisplayModeControl(mode);
   // Keep the html-level mode classes (folded reasoning, fold-all button) in
   // sync when the activity mode changes without a reload.
@@ -8915,6 +9238,11 @@ function _pickChatActivityDisplayMode(mode){
 if(typeof window!=='undefined') window._pickChatActivityDisplayMode=_pickChatActivityDisplayMode;
 
 function _pickTransparentEventTimestamps(enabled){
+  const S=_ensureAppearanceStore();
+  if(S){
+    S.set('transparent_stream_event_timestamps',!!enabled,{source:'settings'});
+    return;
+  }
   _syncTransparentEventTimestampsControl(enabled,window._chatActivityDisplayMode);
   if(typeof clearMessageRenderCache==='function') clearMessageRenderCache();
   if(typeof renderMessages==='function') renderMessages({preserveScroll:true});
@@ -8948,34 +9276,61 @@ function _rememberAppearanceSaved(payload){
 }
 
 function _scheduleAppearanceAutosave(){
+  const S=_ensureAppearanceStore();
   const payload=_appearancePayloadFromUi();
+  const keys=payload?Object.keys(payload):[];
+  if(!keys.length){
+    // Нечего сохранять: пустой diff никогда не превращается в POST.
+    return payload||{};
+  }
   // Keep discard/close behavior aligned with the new mental model: appearance
   // changes are committed immediately instead of treated as preview-only edits.
+  _setAppearanceAutosaveStatus('saving');
+  if(S){
+    S.queueSave();
+    return payload;
+  }
   _rememberAppearanceSaved(payload);
   _settingsAppearanceAutosaveRetryPayload=payload;
-  _setAppearanceAutosaveStatus('saving');
   if(_settingsAppearanceAutosaveTimer) clearTimeout(_settingsAppearanceAutosaveTimer);
   _settingsAppearanceAutosaveTimer=setTimeout(()=>_autosaveAppearanceSettings(payload),350);
+  return payload;
 }
 
 async function _autosaveAppearanceSettings(payload){
   try{
     const saved=await _enqueueSettingsPost({method:'POST',body:JSON.stringify(payload)});
+    const S=_ensureAppearanceStore();
+    if(S&&typeof S.adoptSaved==='function') S.adoptSaved(saved,S.keysPresent(payload));
     _settingsAppearanceAutosaveRetryPayload=null;
     _rememberAppearanceSaved(payload);
+    _applyAppearanceSavedToRuntime(saved,payload);
+    _setAppearanceAutosaveStatus('saved');
+  }catch(e){
+    console.warn('[settings] appearance autosave failed', e);
+    _setAppearanceAutosaveStatus('failed');
+  }
+}
+
+// Синхронизация рантайма после успешной записи. Общая для store-пути
+// (onSaved) и legacy-пути, поэтому значения берутся из ответа сервера, а не
+// из оптимистичного состояния.
+function _applyAppearanceSavedToRuntime(saved,payload){
     if(saved&&saved.font_size){
       localStorage.setItem('hermes-font-size',saved.font_size);
     }
     if(saved){
       window._sessionJumpButtonsEnabled=!!saved.session_jump_buttons;
       if(Object.prototype.hasOwnProperty.call(saved,'chat_activity_display_mode')){
-        const beforeMode=window._chatActivityDisplayMode;
+        const beforeMode=_canonicalActivityMode(window._chatActivityDisplayMode);
         const beforeTimestamps=window._transparentEventTimestamps!==false;
-        _syncChatActivityDisplayModeControl(saved.chat_activity_display_mode);
+        if(_canonicalActivityMode(saved.chat_activity_display_mode)!==beforeMode){
+          // Быстрый путь: существующие ui API + html-классы, без rebuild.
+          _applyActivityModeFast(saved.chat_activity_display_mode);
+        }
         _syncTransparentEventTimestampsControl(saved.transparent_stream_event_timestamps, saved.chat_activity_display_mode);
-        if(window._chatActivityDisplayMode!==beforeMode||((window._transparentEventTimestamps!==false)!==beforeTimestamps)){
-          if(typeof clearMessageRenderCache==='function') clearMessageRenderCache();
-          if(typeof renderMessages==='function') renderMessages({preserveScroll:true});
+        if((window._transparentEventTimestamps!==false)!==beforeTimestamps){
+          _scheduleLegacyActivityRenderSync();
         }
       }
       if(typeof _applySessionNavigationPrefs==='function') _applySessionNavigationPrefs();
@@ -9022,16 +9377,17 @@ async function _autosaveAppearanceSettings(payload){
       _renderComposerSituationalControlChips();
       if(typeof _applyComposerFooterVisibilitySettings==='function') _applyComposerFooterVisibilitySettings();
     }
-    _setAppearanceAutosaveStatus('saved');
-  }catch(e){
-    console.warn('[settings] appearance autosave failed', e);
-    _setAppearanceAutosaveStatus('failed');
-  }
 }
 
 function _retryAppearanceAutosave(){
-  const payload=_settingsAppearanceAutosaveRetryPayload||_appearancePayloadFromUi();
+  const S=_ensureAppearanceStore();
   _setAppearanceAutosaveStatus('saving');
+  if(S){
+    // Baseline не сдвинулся при ошибке, поэтому retry отправляет тот же diff.
+    S.retry();
+    return;
+  }
+  const payload=_settingsAppearanceAutosaveRetryPayload||_appearancePayloadFromUi();
   _autosaveAppearanceSettings(payload);
 }
 
@@ -9420,6 +9776,13 @@ async function loadSettingsPanel(){
   try{
     const settings=await api('/api/settings');
     checkWebUIVersionSkew(settings);
+    // AppearanceStore гидратируется ДО заполнения контролов: значения из
+    // загруженных настроек становятся baseline, а локальные (ещё не
+    // сохранённые) правки — например переключение режима из шапки до открытия
+    // Settings — не перетираются серверным снимком.
+    _settingsAppearanceControlsBound=false;
+    const _appearanceStore=_ensureAppearanceStore();
+    if(_appearanceStore) _appearanceStore.hydrate(settings);
     // Populate the version badges from the server — keeps them in sync with git
     // tags automatically without any manual release step.
     //
@@ -9446,14 +9809,14 @@ async function loadSettingsPanel(){
     // Hydrate appearance controls first so a slow /api/models request
     // cannot overwrite an in-progress theme/skin selection.
     const themeSel=$('settingsTheme');
-    const themeVal=settings.theme||'dark';
+    const themeVal=_appearanceStoreValue('theme',settings.theme||'dark');
     if(themeSel) themeSel.value=themeVal;
     if(typeof _syncThemePicker==='function') _syncThemePicker(themeVal);
-    const skinVal=(localStorage.getItem('hermes-skin')||settings.skin||'default').toLowerCase();
+    const skinVal=_appearanceStoreValue('skin',(localStorage.getItem('hermes-skin')||settings.skin||'default')).toLowerCase();
     const skinSel=$('settingsSkin');
     if(skinSel) skinSel.value=skinVal;
     if(typeof _buildSkinPicker==='function') _buildSkinPicker(skinVal);
-    const fontSizeVal=settings.font_size||localStorage.getItem('hermes-font-size')||'default';
+    const fontSizeVal=_appearanceStoreValue('font_size',settings.font_size||localStorage.getItem('hermes-font-size')||'default');
     localStorage.setItem('hermes-font-size',fontSizeVal);
     if(typeof _applyFontSize==='function') _applyFontSize(fontSizeVal);
     const fontSizeSel=$('settingsFontSize');
@@ -9516,8 +9879,15 @@ async function loadSettingsPanel(){
     const chatActivityModeSel=$('settingsChatActivityDisplayMode');
     const transparentEventTimestampsCb=$('settingsTransparentEventTimestamps');
     if(chatActivityModeSel){
-      _syncChatActivityDisplayModeControl(settings.chat_activity_display_mode);
-      _syncTransparentEventTimestampsControl(settings.transparent_stream_event_timestamps, settings.chat_activity_display_mode);
+      // Значение режима берём из store (там может лежать ещё не сохранённый
+      // выбор из шапки). hideLive:false — открытие Settings не стирает уже
+      // нарисованную активность в режиме «Тишина».
+      const storeMode=_appearanceStoreValue('chat_activity_display_mode',settings.chat_activity_display_mode);
+      _syncChatActivityDisplayModeControl(storeMode,{hideLive:false});
+      _syncTransparentEventTimestampsControl(
+        _appearanceStoreValue('transparent_stream_event_timestamps',settings.transparent_stream_event_timestamps),
+        storeMode
+      );
       chatActivityModeSel.addEventListener('change',()=>{
         _pickChatActivityDisplayMode(chatActivityModeSel.value);
       },{once:false});
@@ -9544,32 +9914,41 @@ async function loadSettingsPanel(){
     // automatic folding of finished turns.
     const thinkingModeSel=$('settingsThinkingMode');
     if(thinkingModeSel){
-      const stored=typeof settings.thinking_mode==='string'?settings.thinking_mode:'auto';
+      const stored=_appearanceStoreValue('thinking_mode',typeof settings.thinking_mode==='string'?settings.thinking_mode:'auto');
+      // В селекте нет опции `auto` (index.html вне моей зоны), поэтому
+      // неявный auto показывается как expanded, но в store остаётся `auto`:
+      // thinking_mode не читается из DOM при автосейве (см. webui-audit-modes.md, P6).
       thinkingModeSel.value=(stored==='expanded'||stored==='collapsed'||stored==='hidden')
         ? stored
         : 'expanded';
       thinkingModeSel.onchange=function(){
-        _marsApplyChatUxSettings({rerender:true});
-        _scheduleAppearanceAutosave();
+        const S=_ensureAppearanceStore();
+        if(S){
+          const v=this.value;
+          S.set('thinking_mode',(v==='expanded'||v==='collapsed'||v==='hidden')?v:'auto',{source:'settings'});
+        }else{
+          _marsApplyChatUxSettings({rerender:false});
+          _scheduleAppearanceAutosave();
+        }
       };
     }
     const showToolCallsCb=$('settingsShowToolCalls');
     if(showToolCallsCb){
-      showToolCallsCb.checked=settings.show_tool_calls!==false;
+      showToolCallsCb.checked=_appearanceStoreValue('show_tool_calls',settings.show_tool_calls)!==false;
       window._showToolCalls=showToolCallsCb.checked;
       showToolCallsCb.onchange=function(){
         window._showToolCalls=this.checked;
-        _marsApplyChatUxSettings({rerender:true});
+        _marsApplyChatUxSettings({rerender:false});
         _scheduleAppearanceAutosave();
       };
     }
     const autoCollapseCb=$('settingsAutoCollapsePreviousTurns');
     if(autoCollapseCb){
-      autoCollapseCb.checked=settings.auto_collapse_previous_turns!==false;
+      autoCollapseCb.checked=_appearanceStoreValue('auto_collapse_previous_turns',settings.auto_collapse_previous_turns)!==false;
       window._autoCollapsePreviousTurns=autoCollapseCb.checked;
       autoCollapseCb.onchange=function(){
         window._autoCollapsePreviousTurns=this.checked;
-        _marsApplyChatUxSettings({rerender:true});
+        _marsApplyChatUxSettings({rerender:false});
         _scheduleAppearanceAutosave();
       };
     }
@@ -9643,6 +10022,9 @@ async function loadSettingsPanel(){
         _scheduleAppearanceAutosave();
       };
     }
+    // Все appearance-контролы заполнены из гидратированного store — с этого
+    // момента DOM можно читать как зеркало (и только с этого момента).
+    _settingsAppearanceControlsBound=true;
     _ensureComposerControlVisibilityState(settings);
     if(Array.isArray(settings.composer_control_order)){
       const composerOrder=_setComposerControlOrder(settings.composer_control_order);
@@ -12562,6 +12944,11 @@ function _applySavedSettingsUi(saved, body, opts){
   }
   _setSettingsAuthButtonsVisible(!!saved.auth_enabled);
   _settingsDirty=false;
+  // Полное сохранение двигает baseline store: иначе следующий автосейв
+  // отправил бы уже сохранённые ключи повторно. hydrate() не перетирает
+  // локальные правки, сделанные за время round-trip.
+  const _storeAfterFullSave=_ensureAppearanceStore();
+  if(_storeAfterFullSave&&saved&&typeof saved==='object') _storeAfterFullSave.hydrate(saved);
   _settingsThemeOnOpen=theme;
   _settingsSkinOnOpen=skin||'default';
   _settingsFontSizeOnOpen=fontSize||localStorage.getItem('hermes-font-size')||'default';
