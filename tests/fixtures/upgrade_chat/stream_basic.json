@@ -1,0 +1,95 @@
+{
+  "events": [
+    {
+      "event": "reasoning",
+      "data": {
+        "text": "Собираю контекст."
+      },
+      "delay_ms": 80
+    },
+    {
+      "event": "tool",
+      "data": {
+        "name": "read_file",
+        "tid": "t1",
+        "args": {
+          "path": "/tmp/mock/part1.py"
+        }
+      },
+      "delay_ms": 120
+    },
+    {
+      "event": "tool_complete",
+      "data": {
+        "name": "read_file",
+        "tid": "t1",
+        "result": "ok",
+        "output": "part1.py: 120 lines"
+      },
+      "delay_ms": 90
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": "Проверил три вещи.\n\n1. Р"
+      },
+      "delay_ms": 40
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": "ежимы переключаются без "
+      },
+      "delay_ms": 40
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": "нового SSE.\n2. Настройки"
+      },
+      "delay_ms": 40
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": " сохраняются частичным P"
+      },
+      "delay_ms": 40
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": "OST.\n3. Скролл не отбира"
+      },
+      "delay_ms": 40
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": "ет жест у читателя.\n\nЕсл"
+      },
+      "delay_ms": 40
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": "и нужно, разверну любой "
+      },
+      "delay_ms": 40
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": "пункт.\n"
+      },
+      "delay_ms": 40
+    },
+    {
+      "event": "done",
+      "data": {
+        "final_text": "Проверил три вещи.\n\n1. Режимы переключаются без нового SSE.\n2. Настройки сохраняются частичным POST.\n3. Скролл не отбирает жест у читателя.\n\nЕсли нужно, разверну любой пункт.\n"
+      },
+      "delay_ms": 120
+    }
+  ]
+}

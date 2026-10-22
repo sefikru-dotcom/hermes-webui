@@ -1,0 +1,522 @@
+{
+  "events": [
+    {
+      "event": "reasoning",
+      "data": {
+        "text": "Сначала прочитаю фикстуры, потом соберу ответ по частям. Сначала прочитаю фикстуры, потом соберу ответ по частям. Сначала прочитаю фикстуры, потом соберу ответ по частям. Сначала прочитаю фикстуры, потом соберу ответ по частям. "
+      },
+      "delay_ms": 80
+    },
+    {
+      "event": "tool",
+      "data": {
+        "name": "read_file",
+        "tid": "t1",
+        "args": {
+          "path": "/tmp/mock/part1.py"
+        }
+      },
+      "delay_ms": 120
+    },
+    {
+      "event": "tool_complete",
+      "data": {
+        "name": "read_file",
+        "tid": "t1",
+        "result": "ok",
+        "output": "part1.py: 120 lines"
+      },
+      "delay_ms": 90
+    },
+    {
+      "event": "tool",
+      "data": {
+        "name": "read_file",
+        "tid": "t2",
+        "args": {
+          "path": "/tmp/mock/part2.py"
+        }
+      },
+      "delay_ms": 120
+    },
+    {
+      "event": "tool_complete",
+      "data": {
+        "name": "read_file",
+        "tid": "t2",
+        "result": "ok",
+        "output": "part2.py: 120 lines"
+      },
+      "delay_ms": 90
+    },
+    {
+      "event": "tool",
+      "data": {
+        "name": "read_file",
+        "tid": "t3",
+        "args": {
+          "path": "/tmp/mock/part3.py"
+        }
+      },
+      "delay_ms": 120
+    },
+    {
+      "event": "tool_complete",
+      "data": {
+        "name": "read_file",
+        "tid": "t3",
+        "result": "ok",
+        "output": "part3.py: 120 lines"
+      },
+      "delay_ms": 90
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": "Ниже разбор потока событий и таблица реж"
+      },
+      "delay_ms": 55
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": "имов.\n\nСначала соберём ходы из плоского "
+      },
+      "delay_ms": 55
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": "списка сообщений — инструментальные стро"
+      },
+      "delay_ms": 55
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": "ки нельзя терять:\n\n```python\ndef collect"
+      },
+      "delay_ms": 55
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": "_turns(session):\n    # Group flat messag"
+      },
+      "delay_ms": 55
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": "es into turns without dropping tool rows"
+      },
+      "delay_ms": 55
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": ".\n    turns = []\n    current = None\n    "
+      },
+      "delay_ms": 55
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": "for msg in session.get('messages') or []"
+      },
+      "delay_ms": 55
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": ":\n        role = msg.get('role')\n       "
+      },
+      "delay_ms": 55
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": " if role == 'user':\n            current "
+      },
+      "delay_ms": 55
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": "= {'user': msg, 'assistant': [], 'tools'"
+      },
+      "delay_ms": 55
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": ": []}\n            turns.append(current)\n"
+      },
+      "delay_ms": 55
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": "        elif current is None:\n          "
+      },
+      "delay_ms": 55
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": "  continue\n        elif role == 'assista"
+      },
+      "delay_ms": 55
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": "nt':\n            current['assistant'].ap"
+      },
+      "delay_ms": 55
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": "pend(msg)\n        elif role == 'tool':\n "
+      },
+      "delay_ms": 55
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": "           current['tools'].append(msg)\n"
+      },
+      "delay_ms": 55
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": "    return turns\n\ndef summarize(turns, l"
+      },
+      "delay_ms": 55
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": "imit=12):\n    rows = []\n    for turn in "
+      },
+      "delay_ms": 55
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": "turns[-limit:]:\n        user = (turn['us"
+      },
+      "delay_ms": 55
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": "er'].get('content') or '').strip().repla"
+      },
+      "delay_ms": 55
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": "ce('\\n', ' ')\n        answer = ' '.join("
+      },
+      "delay_ms": 55
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": "(m.get('content') or '') for m in turn['"
+      },
+      "delay_ms": 55
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": "assistant']).strip()\n        rows.append"
+      },
+      "delay_ms": 55
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": "({'prompt': user[:80], 'answer_chars': l"
+      },
+      "delay_ms": 55
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": "en(answer), 'tools': len(turn['tools'])}"
+      },
+      "delay_ms": 55
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": ")\n    return rows\n\nif __name__ == '__mai"
+      },
+      "delay_ms": 55
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": "n__':\n    import sys\n    data = json.loa"
+      },
+      "delay_ms": 55
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": "d(open(sys.argv[1], encoding='utf-8'))\n "
+      },
+      "delay_ms": 55
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": "   for row in summarize(collect_turns(da"
+      },
+      "delay_ms": 55
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": "ta)):\n        print(f\"{row['answer_chars"
+      },
+      "delay_ms": 55
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": "']:>6}  tools={row['tools']:<2}  {row['p"
+      },
+      "delay_ms": 55
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": "rompt']}\")\n```\n\nСводка по режимам отобра"
+      },
+      "delay_ms": 55
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": "жения (переключение не должно открывать "
+      },
+      "delay_ms": 55
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": "новый SSE):\n\n| режим | что видно | свора"
+      },
+      "delay_ms": 55
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": "чивается | помнит раскрытие | источник |"
+      },
+      "delay_ms": 55
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": " шум | окна | таймер | финал |\n| --- | -"
+      },
+      "delay_ms": 55
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": "-- | --- | --- | --- | --- | --- | --- |"
+      },
+      "delay_ms": 55
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": " --- |\n| stream_full | все события в хро"
+      },
+      "delay_ms": 55
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": "нологии | нет | нет | live | high | 0 | "
+      },
+      "delay_ms": 55
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": "n/a | full transcript |\n| stream_window "
+      },
+      "delay_ms": 55
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": "| сворачиваемое окно | да | да | live | "
+      },
+      "delay_ms": 55
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": "medium | 1 | 3.4s | single window |\n| st"
+      },
+      "delay_ms": 55
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": "ream_quiet | одна строка статуса | нет |"
+      },
+      "delay_ms": 55
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": " нет | live | low | 1 | 3.4s | final onl"
+      },
+      "delay_ms": 55
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": "y |\n| legacy:transparent_stream | алиас "
+      },
+      "delay_ms": 55
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": "stream_full | нет | нет | legacy | high "
+      },
+      "delay_ms": 55
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": "| 0 | n/a | compat |\n| legacy:compact_wo"
+      },
+      "delay_ms": 55
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": "rklog | алиас stream_window | да | да | "
+      },
+      "delay_ms": 55
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": "legacy | medium | 1 | 3.4s | compat |\n| "
+      },
+      "delay_ms": 55
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": "legacy:hide_all_activity | алиас stream_"
+      },
+      "delay_ms": 55
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": "quiet | нет | нет | legacy | low | 1 | 3"
+      },
+      "delay_ms": 55
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": ".4s | compat |\n\nДлинная строка без перен"
+      },
+      "delay_ms": 55
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": "осов для проверки горизонтального скролл"
+      },
+      "delay_ms": 55
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": "а внутри блока кода:\n\n```bash\nhermes-web"
+      },
+      "delay_ms": 55
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": "ui --profile default --workspace /srv/ma"
+      },
+      "delay_ms": 55
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": "rs/workspace --model-provider custom:plu"
+      },
+      "delay_ms": 55
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": "svibe-api --model deepseek-v4.1-flash-10"
+      },
+      "delay_ms": 55
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": "17 --log-level debug --stream-mode strea"
+      },
+      "delay_ms": 55
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": "m_window --anchor-policy stable --scroll"
+      },
+      "delay_ms": 55
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": "-policy user-gesture-wins --composer-geo"
+      },
+      "delay_ms": 55
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": "metry keyboard-inset --transcript long-s"
+      },
+      "delay_ms": 55
+    },
+    {
+      "event": "token",
+      "data": {
+        "text": "ession\n```\n\nГотово.\n"
+      },
+      "delay_ms": 55
+    },
+    {
+      "event": "done",
+      "data": {
+        "final_text": "Ниже разбор потока событий и таблица режимов.\n\nСначала соберём ходы из плоского списка сообщений — инструментальные строки нельзя терять:\n\n```python\ndef collect_turns(session):\n    # Group flat messages into turns without dropping tool rows.\n    turns = []\n    current = None\n    for msg in session.get('messages') or []:\n        role = msg.get('role')\n        if role == 'user':\n            current = {'user': msg, 'assistant': [], 'tools': []}\n            turns.append(current)\n        elif current is None:\n            continue\n        elif role == 'assistant':\n            current['assistant'].append(msg)\n        elif role == 'tool':\n            current['tools'].append(msg)\n    return turns\n\ndef summarize(turns, limit=12):\n    rows = []\n    for turn in turns[-limit:]:\n        user = (turn['user'].get('content') or '').strip().replace('\\n', ' ')\n        answer = ' '.join((m.get('content') or '') for m in turn['assistant']).strip()\n        rows.append({'prompt': user[:80], 'answer_chars': len(answer), 'tools': len(turn['tools'])})\n    return rows\n\nif __name__ == '__main__':\n    import sys\n    data = json.load(open(sys.argv[1], encoding='utf-8'))\n    for row in summarize(collect_turns(data)):\n        print(f\"{row['answer_chars']:>6}  tools={row['tools']:<2}  {row['prompt']}\")\n```\n\nСводка по режимам отображения (переключение не должно открывать новый SSE):\n\n| режим | что видно | сворачивается | помнит раскрытие | источник | шум | окна | таймер | финал |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- |\n| stream_full | все события в хронологии | нет | нет | live | high | 0 | n/a | full transcript |\n| stream_window | сворачиваемое окно | да | да | live | medium | 1 | 3.4s | single window |\n| stream_quiet | одна строка статуса | нет | нет | live | low | 1 | 3.4s | final only |\n| legacy:transparent_stream | алиас stream_full | нет | нет | legacy | high | 0 | n/a | compat |\n| legacy:compact_worklog | алиас stream_window | да | да | legacy | medium | 1 | 3.4s | compat |\n| legacy:hide_all_activity | алиас stream_quiet | нет | нет | legacy | low | 1 | 3.4s | compat |\n\nДлинная строка без переносов для проверки горизонтального скролла внутри блока кода:\n\n```bash\nhermes-webui --profile default --workspace /srv/mars/workspace --model-provider custom:plusvibe-api --model deepseek-v4.1-flash-1017 --log-level debug --stream-mode stream_window --anchor-policy stable --scroll-policy user-gesture-wins --composer-geometry keyboard-inset --transcript long-session\n```\n\nГотово.\n"
+      },
+      "delay_ms": 120
+    }
+  ]
+}

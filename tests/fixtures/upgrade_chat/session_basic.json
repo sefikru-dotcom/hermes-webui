@@ -1,0 +1,29 @@
+{
+  "session": {
+    "session_id": "fx-session-long",
+    "title": "Разбор режимов и длинных артефактов",
+    "model": "mock-model",
+    "model_provider": "mock",
+    "workspace": "/tmp/mock-workspace",
+    "profile": "default",
+    "created_at": 1750000000.0,
+    "updated_at": 1750000500.0,
+    "message_count": 2,
+    "input_tokens": 1200,
+    "output_tokens": 340
+  },
+  "messages": [
+    {
+      "id": "u-1",
+      "role": "user",
+      "content": "Покажи разбор режимов и пример длинного кода с таблицей.",
+      "created_at": 1750000400.0
+    },
+    {
+      "id": "a-1",
+      "role": "assistant",
+      "content": "Ниже разбор потока событий и таблица режимов.\n\nСначала соберём ходы из плоского списка сообщений — инструментальные строки нельзя терять:\n\n```python\ndef collect_turns(session):\n    # Group flat messages into turns without dropping tool rows.\n    turns = []\n    current = None\n    for msg in session.get('messages') or []:\n        role = msg.get('role')\n        if role == 'user':\n            current = {'user': msg, 'assistant': [], 'tools': []}\n            turns.append(current)\n        elif current is None:\n            continue\n        elif role == 'assistant':\n            current['assistant'].append(msg)\n        elif role == 'tool':\n            current['tools'].append(msg)\n    return turns\n\ndef summarize(turns, limit=12):\n    rows = []\n    for turn in turns[-limit:]:\n        user = (turn['user'].get('content') or '').strip().replace('\\n', ' ')\n        answer = ' '.join((m.get('content') or '') for m in turn['assistant']).strip()\n        rows.append({'prompt': user[:80], 'answer_chars': len(answer), 'tools': len(turn['tools'])})\n    return rows\n\nif __name__ == '__main__':\n    import sys\n    data = json.load(open(sys.argv[1], encoding='utf-8'))\n    for row in summarize(collect_turns(data)):\n        print(f\"{row['answer_chars']:>6}  tools={row['tools']:<2}  {row['prompt']}\")\n```\n\nСводка по режимам отображения (переключение не должно открывать новый SSE):\n\n| режим | что видно | сворачивается | помнит раскрытие | источник | шум | окна | таймер | финал |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- |\n| stream_full | все события в хронологии | нет | нет | live | high | 0 | n/a | full transcript |\n| stream_window | сворачиваемое окно | да | да | live | medium | 1 | 3.4s | single window |\n| stream_quiet | одна строка статуса | нет | нет | live | low | 1 | 3.4s | final only |\n| legacy:transparent_stream | алиас stream_full | нет | нет | legacy | high | 0 | n/a | compat |\n| legacy:compact_worklog | алиас stream_window | да | да | legacy | medium | 1 | 3.4s | compat |\n| legacy:hide_all_activity | алиас stream_quiet | нет | нет | legacy | low | 1 | 3.4s | compat |\n\nДлинная строка без переносов для проверки горизонтального скролла внутри блока кода:\n\n```bash\nhermes-webui --profile default --workspace /srv/mars/workspace --model-provider custom:plusvibe-api --model deepseek-v4.1-flash-1017 --log-level debug --stream-mode stream_window --anchor-policy stable --scroll-policy user-gesture-wins --composer-geometry keyboard-inset --transcript long-session\n```\n\nГотово.\n",
+      "created_at": 1750000500.0
+    }
+  ]
+}

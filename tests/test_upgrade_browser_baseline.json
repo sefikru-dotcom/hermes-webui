@@ -1,0 +1,84 @@
+{
+  "note": "Known failures that reproduce on the pre-merge tree. They are reported but do not fail the run. Delete an entry when it starts passing (runner prints FIXED).",
+  "owner_hint": "activity-modes / appearance / layout-zone авторы волны upgrade",
+  "known": [
+    {
+      "scenario": "modes_live_quiet_to_full",
+      "check": "mode switch keeps the streamed text",
+      "viewports": [
+        "desktop",
+        "mobile"
+      ],
+      "reason": "Переключение режима во время live-стрима перерисовывает транскрипт из S.messages, где live-ход ещё пуст: текст (69-77 симв.) схлопывается до одного user-сообщения (19). Нарушает 'Данные не уничтожать при hide'.",
+      "first_seen": "2026-10-22"
+    },
+    {
+      "scenario": "modes_live_quiet_to_full",
+      "check": "mode switch keeps the assistant turn mounted",
+      "viewports": [
+        "desktop",
+        "mobile"
+      ],
+      "reason": "Тот же корень: после switch turns=0, rows=1 — assistant-turn размонтирован, live-буфер не подключён к рендеру.",
+      "first_seen": "2026-10-22"
+    },
+    {
+      "scenario": "modes_live_quiet_to_full",
+      "check": "stream continues after the switch",
+      "viewports": [
+        "desktop",
+        "mobile"
+      ],
+      "reason": "После переключения поток визуально обрывается: новые токены не появляются, т.к. turn размонтирован.",
+      "first_seen": "2026-10-22"
+    },
+    {
+      "scenario": "modes_live_quiet_to_full",
+      "check": "final answer survives the mode switch",
+      "viewports": [
+        "desktop",
+        "mobile"
+      ],
+      "reason": "Итоговый ответ теряется вместе с ходом (len=19 — только user-текст).",
+      "first_seen": "2026-10-22"
+    },
+    {
+      "scenario": "settings_theme_persist",
+      "check": "theme survives a reload",
+      "viewports": [
+        "desktop",
+        "mobile"
+      ],
+      "reason": "Тема не восстанавливается из localStorage на boot: через 6с после reload body.className пуст, data-theme нет (проверено отдельным пробником). В сессии переключение работает.",
+      "first_seen": "2026-10-22"
+    },
+    {
+      "scenario": "settings_theme_persist",
+      "check": "header mode button saves only its own key",
+      "viewports": [
+        "desktop",
+        "mobile"
+      ],
+      "reason": "Кнопка режима в заголовке отправляет весь appearance-блок (37 ключей) вместо одного chat_activity_display_mode — нарушает требование частичного POST.",
+      "first_seen": "2026-10-22"
+    },
+    {
+      "scenario": "completion_resize_composer_geometry",
+      "check": "desktop resize introduces no horizontal page scroll",
+      "viewports": [
+        "desktop"
+      ],
+      "reason": "При 1024px aside.rightpanel + #rightpanelResize выходят за вьюпорт (offenders @1038..@1214), docScrollW=1038>1024: горизонтальный скролл страницы.",
+      "first_seen": "2026-10-22"
+    },
+    {
+      "scenario": "completion_resize_composer_geometry",
+      "check": "composer stays anchored after a desktop resize",
+      "viewports": [
+        "mobile"
+      ],
+      "reason": "Следствие того же overflow: при 1024px высота вьюпорта 730 при h-скролле, композер заканчивается на 720 — 10px зазор, 'прилипание' к низу ломается.",
+      "first_seen": "2026-10-22"
+    }
+  ]
+}
