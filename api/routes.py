@@ -2573,6 +2573,7 @@ from api.config import (
     _parse_provider_qualified_model_id,
 )
 from api import config as api_config
+from api import model_identity
 from api.helpers import (
     require,
     bad,
@@ -6581,38 +6582,28 @@ def _session_model_identity_matches(
     resolved_model: str | None,
     resolved_provider: str | None,
 ) -> bool:
-    stored = str(stored_model or "").strip()
-    resolved = str(resolved_model or "").strip()
-    if not stored or not resolved:
-        return False
+    """True when the persisted and resolved model describe the same lane.
 
-    def _split_model_identity(value: str) -> tuple[str, str | None]:
-        # Handle BOTH provider-qualified shapes so a slash-prefixed session model
-        # (e.g. ``deepseek/deepseek-v4-1m``, OpenRouter-style) compares equal to its
-        # resolved bare id. ``_split_provider_qualified_model`` only handles the
-        # ``@provider:model`` form; without the slash case a reload of a
-        # slash-stored model is wrongly treated as a model change, bypassing the
-        # #4248 256k-clobber guard (Codex regression gate, v0.51.x).
-        bare, prov = _split_provider_qualified_model(value)
-        if prov is None and "/" in value:
-            prefix, rest = value.split("/", 1)
-            prefix = prefix.strip()
-            rest = rest.strip()
-            if prefix and rest:
-                return rest, prefix
-        return bare, prov
+    Delegates to :func:`api.model_identity.identities_match` so the context-window
+    guard, the session payload and the reasoning status all compare model identity
+    the same way (provider-aware, vendor slash and route suffix preserved).
 
-    stored_bare, stored_explicit_provider = _split_model_identity(stored)
-    resolved_bare, resolved_explicit_provider = _split_model_identity(resolved)
-    stored_provider_norm = _canonical_context_provider(stored_explicit_provider or stored_provider)
-    resolved_provider_norm = _canonical_context_provider(resolved_explicit_provider or resolved_provider)
-    if stored == resolved and stored_provider_norm == resolved_provider_norm:
-        return True
-    if stored_bare != resolved_bare:
-        return False
-    if stored_provider_norm and resolved_provider_norm:
-        return stored_provider_norm == resolved_provider_norm
-    return True
+    ``allow_slash_prefix`` keeps the historical tolerance: a slash-prefixed
+    session model (e.g. ``deepseek/deepseek-v4-1m``, OpenRouter-style) compares
+    equal to its resolved bare id. Without it a reload of a slash-stored model is
+    wrongly treated as a model change and bypasses the #4248 256k-clobber guard
+    (Codex regression gate, v0.51.x).
+    """
+    return model_identity.identities_match(
+        stored_model,
+        stored_provider,
+        resolved_model,
+        resolved_provider,
+        known_providers=api_config._KNOWN_MODEL_PROVIDER_IDS,
+        allow_slash_prefix=True,
+        provider_normalizer=_canonical_context_provider,
+        custom_endpoint_slug=api_config._custom_slug_rest_looks_like_host_port,
+    )
 
 
 def _should_accept_session_context_length_refresh(
@@ -6720,27 +6711,72 @@ def _worktree_default_from_config(profile: str | None) -> bool:
         return False
 
 
+def _bad_model_identity(handler, exc: model_identity.ModelIdentityError, status: int = 400):
+    """400 response for an unusable model/provider identity.
+
+    Besides ``error`` (what every client already reads) the body carries
+    ``field``/``code`` and, when known, the rejected ``model``/``provider`` so a
+    client can highlight the offending control instead of showing a generic
+    failure. Values are the caller-supplied strings, never the config contents.
+    """
+    payload = {"error": str(exc)}
+    for key, value in exc.as_dict().items():
+        if key == "message":
+            continue
+        if value is not None:
+            payload[key] = value
+    return j(handler, payload, status=status)
+
+
+def _require_requested_model(model):
+    """Validate a client-supplied model id at the HTTP boundary.
+
+    Blank/``None`` stays legal (a new session has no model yet and inherits the
+    profile default); a non-string shape or control characters raises.
+    """
+    if model is None:
+        return None
+    if isinstance(model, str) and not model.strip():
+        return ""
+    return model_identity.validate_model_id(model, field="model")
+
+
 def _session_model_state_from_request(
     model: str | None,
     requested_provider: str | None,
     current_provider: str | None = None,
 ) -> tuple[str | None, str | None]:
-    model_value = str(model).strip() if model is not None else None
+    """Normalize the model/provider a client asked a session to use.
+
+    ``None`` means "the request did not mention it" and stays ``None`` so callers
+    can keep the current value. A present-but-unusable value (blank, whitespace,
+    non-string, control characters) raises :class:`ModelIdentityError` instead of
+    being persisted as a model the session can never route to.
+
+    The id itself is never rewritten: vendor slashes (``vendor/model``) and route
+    suffixes (``:free``, ``:kiro``) are part of the identity.
+    """
+    if model is None:
+        return None, (
+            _clean_session_model_provider(requested_provider)
+            if requested_provider is not None
+            else None
+        )
+    model_value = model_identity.validate_model_id(model, field="model")
     provider = (
         _clean_session_model_provider(requested_provider)
         if requested_provider is not None
         else None
     )
-    if model_value:
-        _bare, explicit_provider = _split_provider_qualified_model(model_value)
-        if explicit_provider:
-            provider = explicit_provider
-        elif requested_provider is None:
-            provider = _clean_session_model_provider(current_provider)
-        model_value, provider, _changed = _resolve_compatible_session_model_state(
-            model_value,
-            provider,
-        )
+    _bare, explicit_provider = _split_provider_qualified_model(model_value)
+    if explicit_provider:
+        provider = explicit_provider
+    elif requested_provider is None:
+        provider = _clean_session_model_provider(current_provider)
+    model_value, provider, _changed = _resolve_compatible_session_model_state(
+        model_value,
+        provider,
+    )
     return model_value, provider
 
 
@@ -12849,10 +12885,13 @@ def handle_post(handler, parsed) -> bool:
             except Exception as e:
                 logger.exception("failed to create worktree-backed session")
                 return bad(handler, f"Failed to create worktree: {e}", status=500)
-        model, model_provider = _session_model_state_from_request(
-            body.get("model"),
-            body.get("model_provider"),
-        )
+        try:
+            model, model_provider = _session_model_state_from_request(
+                body.get("model"),
+                body.get("model_provider"),
+            )
+        except model_identity.ModelIdentityError as e:
+            return _bad_model_identity(handler, e)
         try:
             enabled_toolsets = _validate_session_toolsets_shape(body.get("enabled_toolsets"))
         except ValueError as e:
@@ -13177,9 +13216,16 @@ def handle_post(handler, parsed) -> bool:
                 if scope == "model":
                     if not model_id:
                         return bad(handler, "reasoning: scope=model requires 'model'")
+                    # Pass the provider so the pin is written provider-qualified:
+                    # the same model id on two providers keeps two levels, and a
+                    # pin for one lane never leaks into the other.
                     return j(
                         handler,
-                        set_model_reasoning_override(effort, model_id=model_id),
+                        set_model_reasoning_override(
+                            effort,
+                            model_id=model_id,
+                            provider_id=provider_id,
+                        ),
                     )
                 return j(
                     handler,
@@ -13455,11 +13501,14 @@ def handle_post(handler, parsed) -> bool:
         with _get_session_agent_lock(body["session_id"]):
             s.workspace = new_ws
             if "model" in body or "model_provider" in body:
-                model, provider = _session_model_state_from_request(
-                    body.get("model", s.model),
-                    body.get("model_provider") if "model_provider" in body else None,
-                    getattr(s, "model_provider", None),
-                )
+                try:
+                    model, provider = _session_model_state_from_request(
+                        body.get("model", s.model),
+                        body.get("model_provider") if "model_provider" in body else None,
+                        getattr(s, "model_provider", None),
+                    )
+                except model_identity.ModelIdentityError as e:
+                    return _bad_model_identity(handler, e)
                 if model is not None:
                     s.model = model
                 s.model_provider = provider
@@ -20906,6 +20955,10 @@ def _handle_goal_command(handler, body):
             if "model_provider" in body
             else getattr(s, "model_provider", None)
         )
+        try:
+            requested_model = _require_requested_model(requested_model)
+        except model_identity.ModelIdentityError as e:
+            return _bad_model_identity(handler, e)
         # #6703: carry the explicit-pick marker through goal kickoffs. The
         # frontend marks a session-level provider/model choice as explicit (same
         # signal /api/chat/start receives); without it the model resolver treats
@@ -21204,6 +21257,10 @@ def _handle_chat_start(handler, body, diag=None):
             if "model_provider" in body
             else getattr(s, "model_provider", None)
         )
+        try:
+            requested_model = _require_requested_model(requested_model)
+        except model_identity.ModelIdentityError as e:
+            return _bad_model_identity(handler, e)
         _locked_profile = (
             os.environ.get("HERMES_WEBUI_ISOLATED_PROFILE") == "1"
             or active_profile in {"office", "sergey"}
