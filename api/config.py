@@ -32,6 +32,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 # ── Basic layout ──────────────────────────────────────────────────────────────
+import api.model_identity as _model_identity
 import api.paths as _paths
 from api.plugin_providers import (
     effective_provider_display_name as _effective_provider_display_name,
@@ -2633,29 +2634,26 @@ def _custom_slug_rest_looks_like_host_port(rest: str) -> bool:
     return False
 
 
+# Provider ids whose route hints are split on the FIRST colon (their model ids
+# may themselves carry colons, e.g. `@openai:gpt-5:beta`). Static snapshot of the
+# provider tables above — both are module-level literals and are never mutated.
+_KNOWN_MODEL_PROVIDER_IDS = frozenset(_PROVIDER_MODELS) | frozenset(_PROVIDER_DISPLAY)
+
+
 def _parse_provider_qualified_model_id(model_id: str) -> tuple[str, str] | None:
     """Parse WebUI's ``@provider:model`` route hint into ``(model, provider)``.
 
     The provider segment can contain colons for named custom providers, while
     the model segment can also contain colons for tags such as ``:free``.
-    Keep this parser shared with ``resolve_model_provider`` so any caller that
-    compares route-hinted model lanes uses the same grammar.
+    The grammar itself lives in ``api.model_identity`` (single implementation);
+    this wrapper only supplies the provider tables that decide whether the split
+    happens on the first or the last colon.
     """
-    candidate = str(model_id or "").strip()
-    if not candidate.startswith("@") or ":" not in candidate:
-        return None
-    inner = candidate[1:]
-    provider_hint, bare_model = inner.rsplit(":", 1)
-    if provider_hint.startswith("custom:") and provider_hint.count(":") >= 2:
-        _slug_rest = provider_hint[len("custom:"):]
-        if not _custom_slug_rest_looks_like_host_port(_slug_rest):
-            provider_hint, extra = provider_hint.rsplit(":", 1)
-            bare_model = f"{extra}:{bare_model}"
-    elif (provider_hint not in _PROVIDER_MODELS
-            and provider_hint not in _PROVIDER_DISPLAY
-            and not provider_hint.startswith("custom:")):
-        provider_hint, bare_model = inner.split(":", 1)
-    return bare_model, provider_hint
+    return _model_identity.parse_route_hint(
+        model_id,
+        known_providers=_KNOWN_MODEL_PROVIDER_IDS,
+        custom_endpoint_slug=_custom_slug_rest_looks_like_host_port,
+    )
 
 
 def _get_provider_base_url(provider_id):
@@ -4526,6 +4524,24 @@ def get_reasoning_status(
             if not resolve_base_url and model_cfg.get("base_url"):
                 resolve_base_url = str(model_cfg["base_url"]).strip()
 
+    # The picker sends the qualified route hint (``@openai:gpt-5``) when the row
+    # was chosen from a provider group. Split it so the lane reported here, the
+    # effort ladder and the pin lookup all describe the SAME (model, provider)
+    # pair the runtime will use — otherwise a pin written as
+    # ``@openai:gpt-5`` looks absent from a status queried by the raw hint.
+    if resolve_model:
+        _lane = _model_identity.split_model_identity(
+            resolve_model,
+            resolve_provider,
+            known_providers=_KNOWN_MODEL_PROVIDER_IDS,
+            custom_endpoint_slug=_custom_slug_rest_looks_like_host_port,
+        )
+        if _lane.model and (
+            _lane.model != resolve_model or (_lane.provider and not resolve_provider)
+        ):
+            resolve_model = _lane.model
+            resolve_provider = _lane.provider or resolve_provider
+
     supported_efforts = resolve_model_reasoning_efforts(
         resolve_model,
         provider_id=resolve_provider,
@@ -4555,25 +4571,15 @@ def get_reasoning_status(
             session_effort = None
 
     model_overrides = get_model_reasoning_overrides()
-    model_pin_effort = None
-    if resolve_model:
-        _k = _match_reasoning_override_key(model_overrides, resolve_model)
-        if not _k and "/" in resolve_model:
-            _k = _match_reasoning_override_key(model_overrides, resolve_model.split("/")[-1])
-        if _k and model_overrides.get(_k):
-            model_pin_effort = str(model_overrides.get(_k)).strip().lower()
-
-    global_effort = str(effort_raw or "").strip().lower()
-
-    if session_effort:
-        candidate_effort = session_effort
-        source = "session"
-    elif model_pin_effort:
-        candidate_effort = model_pin_effort
-        source = "model"
-    else:
-        candidate_effort = global_effort
-        source = "default"
+    resolution = _model_identity.resolve_reasoning_effort(
+        session_effort=session_effort,
+        overrides=model_overrides,
+        global_effort=effort_raw,
+        model_id=resolve_model,
+        provider=resolve_provider,
+    )
+    candidate_effort = resolution["effort"]
+    source = resolution["source"]
 
     return {
         # Match CLI default (True if unset in config.yaml)
@@ -4597,6 +4603,21 @@ def get_reasoning_status(
         # picker renders its inline effort ladder from this map so a level chosen
         # next to a model in the list survives across sessions and devices.
         "model_overrides": model_overrides,
+        # ── Identity diagnostics (read-only) ────────────────────────────────
+        # Which model/provider lane this status describes, the exact pin key that
+        # won, and the keys that were tried. The composer uses the lane to label
+        # the reasoning chip; support/diagnostics use the rest to explain why a
+        # level is or is not in force (e.g. a pin that belongs to another
+        # provider's copy of the same model id).
+        "model": resolution["model"] or None,
+        "provider": resolution["provider"],
+        "requested_model": str(model_id or "").strip() or None,
+        "requested_provider": str(provider_id or "").strip() or None,
+        "reasoning_pin_key": resolution["pin_key"],
+        "reasoning_pin_candidates": resolution["candidates"],
+        "reasoning_pin_effort": resolution["pin_effort"],
+        "global_reasoning_effort": resolution["global_effort"],
+        "session_reasoning_effort": resolution["session_effort"],
     }
 
 
@@ -4775,24 +4796,22 @@ def get_model_reasoning_overrides() -> dict:
 def _match_reasoning_override_key(existing: dict, model_id: str) -> str | None:
     """Find the stored override key for *model_id* (spelling-tolerant).
 
-    Mirrors the core's spelling tolerance (``claude-fable-5.1`` ==
-    ``claude-fable-5-1``) so a level pinned in the picker updates the same key
-    the core reads instead of creating a near-duplicate.
+    Kept for callers/tests that only have a bare model id; the authoritative
+    provider-aware lookup is :func:`api.model_identity.match_reasoning_pin`. Both
+    share the spelling normaliser in that module, so a level pinned in the picker
+    updates the same key the core reads instead of creating a near-duplicate.
     """
-
-    def _norm(value: str) -> str:
-        return re.sub(r"[-_.\s]+", "-", str(value or "").strip().lower())
-
-    target = _norm(model_id)
-    if not target:
+    if not isinstance(existing, dict) or not existing:
         return None
-    for key in existing:
-        if _norm(key) == target:
-            return key
-    return None
+    return _model_identity.match_spelling_key(existing, str(model_id or "").strip())
 
 
-def set_model_reasoning_override(effort: str, *, model_id: str) -> dict:
+def set_model_reasoning_override(
+    effort: str,
+    *,
+    model_id: str,
+    provider_id: str | None = None,
+) -> dict:
     """Persist a per-model reasoning level into ``agent.reasoning_overrides``.
 
     Mars: the model picker offers the effort ladder inline on each model row, so
@@ -4800,18 +4819,27 @@ def set_model_reasoning_override(effort: str, *, model_id: str) -> dict:
     session override > ``agent.reasoning_overrides`` (per model) > global, which
     is why this writes the per-model map instead of the global key.
 
+    The key is provider-qualified (``@provider:model``) whenever the caller knows
+    the provider, so the same model id served by two providers keeps two
+    independent levels. Without a provider the legacy bare-model key is written —
+    still readable by every build, and still matched by
+    :func:`api.model_identity.match_reasoning_pin`.
+
     An empty *effort* removes the pin (the model falls back to the global level).
-    Raises ``ValueError`` for an unknown level or a missing model id.
+    Raises ``ModelIdentityError`` (a ``ValueError``) for an unknown level or an
+    unusable model id.
     """
-    model_key = str(model_id or "").strip()
-    if not model_key:
-        raise ValueError("model is required for a per-model reasoning level")
+    model_key = _model_identity.validate_model_id(
+        model_id, field="model"
+    )
+    provider_key = _model_identity.validate_provider_id(provider_id)
     raw = str(effort or "").strip().lower()
     if raw and raw != "none" and raw not in VALID_REASONING_EFFORTS:
         raise ValueError(
             f"Unknown reasoning effort '{effort}'. "
             f"Valid: none, {', '.join(VALID_REASONING_EFFORTS)}."
         )
+    pin_key = _model_identity.reasoning_pin_key(model_key, provider_key)
     config_path = _get_config_path()
     with _cfg_lock:
         config_data = _load_yaml_config_file(config_path)
@@ -4821,15 +4849,17 @@ def set_model_reasoning_override(effort: str, *, model_id: str) -> dict:
         overrides = agent_cfg.get("reasoning_overrides")
         if not isinstance(overrides, dict):
             overrides = {}
-        # Drop near-duplicate spellings of the same model before writing, so the
-        # map cannot accumulate 'gpt-5.4' and 'gpt-5-4' entries that both match.
-        existing_key = _match_reasoning_override_key(overrides, model_key)
-        if existing_key and existing_key != model_key:
+        # Drop near-duplicate spellings of the same identity before writing, so
+        # the map cannot accumulate 'gpt-5.4' and 'gpt-5-4' entries that both
+        # match. Only the SAME lane is touched: another provider's qualified key
+        # for the same model id is a different identity and must survive.
+        existing_key = _match_reasoning_override_key(overrides, pin_key)
+        if existing_key and existing_key != pin_key:
             overrides.pop(existing_key, None)
         if raw:
-            overrides[model_key] = raw
+            overrides[pin_key] = raw
         else:
-            overrides.pop(model_key, None)
+            overrides.pop(pin_key, None)
         if overrides:
             agent_cfg["reasoning_overrides"] = overrides
         else:
@@ -4837,7 +4867,10 @@ def set_model_reasoning_override(effort: str, *, model_id: str) -> dict:
         config_data["agent"] = agent_cfg
         _save_yaml_config_file(config_path, config_data)
     reload_config()
-    return get_reasoning_status(model_id=model_key)
+    return get_reasoning_status(
+        model_id=model_key,
+        provider_id=provider_key,
+    )
 
 
 def _public_advanced_model_options(model_cfg: dict) -> dict:
@@ -5077,9 +5110,7 @@ def _apply_advanced_model_options(model_cfg: dict, advanced: dict | None) -> Non
 
 def set_hermes_default_model(model_id: str, provider: str | None = None, advanced: dict | None = None) -> dict:
     """Persist the Hermes default model in config.yaml and reload runtime config."""
-    selected_model = str(model_id or "").strip()
-    if not selected_model:
-        raise ValueError("model is required")
+    selected_model = _model_identity.validate_model_id(model_id, field="model")
 
     config_path = _get_config_path()
     # Hold _cfg_lock only around the read-modify-write of the YAML file.
@@ -5295,7 +5326,9 @@ def set_auxiliary_model(task: str, provider: str, model: str, advanced: dict | N
     whether one is set.
     """
     provider = str(provider or "").strip() or "auto"
-    model = str(model or "").strip()
+    # Empty model is meaningful here ("auto" slot); a non-string or
+    # control-character model is not — reject it before it reaches config.yaml.
+    model = _model_identity.validate_optional_model_id(model, field="model")
     config_path = _get_config_path()
     with _cfg_lock:
         config_data = _load_yaml_config_file(config_path)
