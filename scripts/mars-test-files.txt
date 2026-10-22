@@ -33,6 +33,19 @@ tests/test_native_bearer_exact_paths.py
 tests/test_native_bearer_write_paths.py
 tests/test_push_fcm.py
 tests/test_turn_start_model_attribution.py
+# Chat upgrade: render, appearance, viewport and canonical model identity.
+tests/test_upgrade_render_core.py
+tests/test_reasoning_pin_behavior.py
+tests/test_appearance_store_behavior.py
+tests/test_upgrade_layout_css.py
+tests/test_upgrade_layout_modes.py
+tests/test_upgrade_layout_viewport.py
+tests/test_upgrade_models_identity.py
+tests/test_upgrade_models_reasoning.py
+tests/test_upgrade_models_runtime.py
+tests/test_named_custom_model_lane.py
+tests/test_turn_model_attribution_persistence.py
+tests/test_upgrade_attribution.py
 tests/test_embedded_frames_lazy.py
 tests/test_embedded_frames_runtime.py
 tests/test_theme_shadow_tokens.py
