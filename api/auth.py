@@ -160,6 +160,14 @@ NATIVE_BEARER_READONLY_EXACT_PATHS = frozenset({
     # siblings (/api/voice/session, /interrupt, /close) stay in the exact-POST
     # set above and can never be reached through this read-only branch.
     '/api/voice/stream',
+    # Live interactive dialogs for the native client: a long-lived SSE read that
+    # pushes approval/clarify cards the moment the agent parks on one, instead
+    # of the client polling /pending every two seconds. Same shape as
+    # /api/voice/stream above: GET-only through the read-only branch, so the
+    # responding siblings (/api/approval/respond, /api/clarify/respond) stay in
+    # NATIVE_BEARER_EXACT_PATHS and are unaffected.
+    '/api/approval/stream',
+    '/api/clarify/stream',
 })
 NATIVE_BEARER_READONLY_PREFIXES = ('/api/kanban/',)
 NATIVE_BEARER_READONLY_METHODS = frozenset({'GET', 'HEAD'})
