@@ -43,6 +43,11 @@ EXPECTED_READONLY_EXACT_PATHS = {
     '/api/skills/usage',
     # Voice gateway downstream SSE read (api/voice_session.py).
     '/api/voice/stream',
+    # Live approval/clarify card streams for the native client: a long-lived SSE
+    # read that replaces the two-second /pending poll. GET-only through the
+    # read-only branch; the responding siblings stay in NATIVE_BEARER_EXACT_PATHS.
+    '/api/approval/stream',
+    '/api/clarify/stream',
 }
 EXPECTED_READONLY_PREFIXES = ('/api/kanban/',)
 SAFE_METHODS = ('GET', 'HEAD')
