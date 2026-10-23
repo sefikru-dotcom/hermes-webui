@@ -1210,6 +1210,72 @@ def _strip_sidebar_heavy_metadata(row: dict) -> dict:
     return row
 
 
+# ── Sidebar session preview (R3) ─────────────────────────────────────────────
+# Native clients render a session row's subtitle from a `preview` field
+# (Android: SessionModels.kt `val preview: String?`, filled from
+# SessionRepository's "preview"/"last_message"/"summary" lookup). The web
+# sidebar ignores it. The list endpoint therefore has to carry the snippet, but
+# it must be derived from messages that are ALREADY loaded: opening each session
+# file to build one line per row is exactly the N-file read storm that made
+# /api/sessions multi-second before #4662 Phase 3.
+_SIDEBAR_PREVIEW_MAX_CHARS = 160
+# Bounded tail window, mirroring _last_message_timestamp(): the last substantive
+# message sits at the very end (only a few tool rows can follow it).
+_SIDEBAR_PREVIEW_TAIL_WINDOW = 12
+# Legacy index rows re-derived per /api/sessions call. The backfill persists, so
+# an index that predates `preview` converges over a handful of requests instead
+# of paying one full N-file scan on the first request after an upgrade.
+_SIDEBAR_PREVIEW_BACKFILL_MAX_ROWS = 12
+
+
+def _truncate_sidebar_preview(text: str, limit: int = _SIDEBAR_PREVIEW_MAX_CHARS) -> str:
+    """Trim a normalized snippet to ``limit`` chars, preferring a word boundary."""
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    space = cut.rfind(' ')
+    if space >= max(1, int(limit * 0.6)):
+        cut = cut[:space]
+    return cut.rstrip(' \t,;:-') + '...'
+
+
+def _sidebar_preview_from_messages(messages, limit: int):
+    for message in reversed(messages):
+        role = _message_role(message)
+        # Tool/system rows are machine noise; the subtitle must read like the
+        # conversation's last human-visible line.
+        if role not in ('user', 'assistant'):
+            continue
+        if _is_empty_partial_activity_message(message):
+            continue
+        text = _strip_attached_files_marker(_message_content_text(message))
+        normalized = ' '.join(str(text or '').split())
+        if not normalized:
+            continue
+        return _truncate_sidebar_preview(normalized, limit)
+    return None
+
+
+def _sidebar_preview_text(messages, *, max_chars: int = _SIDEBAR_PREVIEW_MAX_CHARS):
+    """Return a one-line snippet of the last substantive message, or None.
+
+    Called from ``Session.compact()`` so every session-index row carries the
+    subtitle native clients render. Whitespace (newlines, tabs, runs of spaces)
+    is collapsed to single spaces, so the value is always single-line.
+    """
+    if not isinstance(messages, list) or not messages:
+        return None
+    limit = max(32, int(max_chars or _SIDEBAR_PREVIEW_MAX_CHARS))
+    n = len(messages)
+    start = max(0, n - _SIDEBAR_PREVIEW_TAIL_WINDOW)
+    preview = _sidebar_preview_from_messages(messages[start:], limit)
+    if preview is not None:
+        return preview
+    # Window miss (long tool tail / all-empty rows) — pay the full reverse scan
+    # only here, which is the unusual case.
+    return _sidebar_preview_from_messages(messages, limit)
+
+
 class Session:
     def __init__(self, session_id: str=None, title: str='Untitled',
                  workspace=str(DEFAULT_WORKSPACE), created_workspace=None,
@@ -1770,6 +1836,10 @@ class Session:
             'created_at': self.created_at,
             'updated_at': self.updated_at,
             'last_message_at': last_message_at,
+            # R3: single-line snippet of the last substantive message. Native
+            # clients render it as the row subtitle; computed from the messages
+            # already in memory, so the index gains it without extra disk I/O.
+            'preview': _sidebar_preview_text(self.messages),
             'pinned': self.pinned,
             'archived': self.archived,
             'project_id': self.project_id,
@@ -6308,6 +6378,51 @@ def _diag_stage(diag, name: str) -> None:
             pass
 
 
+def _backfill_index_previews(index, *, sidebar_metadata_only: bool = False, diag=None) -> list:
+    """Fill the ``preview`` key on legacy session-index rows, bounded per call.
+
+    ``Session.compact()`` has always written the other sidebar fields, so an
+    index built before R3 simply lacks ``preview``. Loading every such session
+    to compute one snippet is the N-file read storm this endpoint was already
+    fixed for (#4662 Phase 3), so:
+
+    * at most ``_SIDEBAR_PREVIEW_BACKFILL_MAX_ROWS`` sessions are loaded per
+      call — the budget counts ATTEMPTS, so an unreadable sidecar can never
+      turn one request into a full scan;
+    * the rebuilt rows are persisted by the caller, so each row is loaded at
+      most once and the index converges over a few requests;
+    * the index is ordered newest-first, so the rows a client actually shows
+      first get their subtitle on the very first request.
+
+    Returns the loaded sessions to hand to ``_write_session_index``.
+    """
+    if not isinstance(index, list) or not index:
+        return []
+    budget = max(0, int(_SIDEBAR_PREVIEW_BACKFILL_MAX_ROWS))
+    filled = []
+    for i, row in enumerate(index):
+        if budget <= 0:
+            break
+        if not isinstance(row, dict) or 'preview' in row:
+            continue
+        sid = row.get('session_id')
+        if not sid:
+            continue
+        budget -= 1
+        _diag_stage(diag, "all_sessions.preview_backfill_load")
+        try:
+            full = Session.load(sid)
+        except Exception:
+            full = None
+        if not full:
+            # Leave the key absent: a transient load failure is retried on a
+            # later request, still inside the per-call budget.
+            continue
+        index[i] = full.compact(sidebar_metadata_only=sidebar_metadata_only)
+        filled.append(full)
+    return filled
+
+
 def all_sessions(
     diag=None,
     *,
@@ -6361,6 +6476,24 @@ def all_sessions(
                     _write_session_index(updates=backfilled)
                 except Exception:
                     logger.debug("Failed to persist last_message_at backfill")
+            # R3: rows written before `preview` existed carry no snippet, so
+            # native clients render an empty subtitle. Re-derive only a BOUNDED
+            # slice of them per request and persist the result: an old index
+            # converges over a few requests instead of turning the first
+            # /api/sessions after an upgrade into an N-file read storm (the
+            # regression class behind #4662 Phase 3). Rows that already carry the
+            # key — including a deliberate None — are never re-read.
+            preview_backfill = _backfill_index_previews(
+                index,
+                sidebar_metadata_only=sidebar_metadata_only,
+                diag=diag,
+            )
+            if preview_backfill:
+                try:
+                    _diag_stage(diag, "all_sessions.preview_backfill_write")
+                    _write_session_index(updates=preview_backfill)
+                except Exception:
+                    logger.debug("Failed to persist session preview backfill")
             _diag_stage(diag, "all_sessions.mark_streaming")
             for s in index:
                 s['is_streaming'] = _is_streaming_session(
