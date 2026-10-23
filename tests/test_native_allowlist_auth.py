@@ -73,7 +73,10 @@ NON_ALLOWLISTED_MUTATIONS = (
     ('POST', '/api/settings'),  # rewrites server-global settings.json
     ('POST', '/api/projects/create'),
     ('POST', '/api/workspaces/add'),
-    ('POST', '/api/kanban/tasks'),
+    # Owner-approved exception: kanban task writes now accept the device
+    # token (api.auth.NATIVE_BEARER_KANBAN_WRITE_PATHS). Board
+    # create/switch/archive stays cookie-only administration.
+    ('POST', '/api/kanban/boards'),
 )
 
 

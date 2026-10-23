@@ -63,17 +63,18 @@ ALL_READONLY_PATHS = tuple(sorted(EXPECTED_READONLY_EXACT_PATHS)) + KANBAN_GET_P
 
 # Mutating kanban/insights/logs/quota requests that must NEVER accept the
 # device Bearer (cookie + CSRF path only).
+#
+# Owner-approved exception: the native client may now write to the kanban board
+# it displays (task create / patch / comment / block / bulk, links, dispatch).
+# Those live in api.auth.NATIVE_BEARER_KANBAN_WRITE_PATHS plus the
+# tasks/<id>/<suffix> shapes and are NOT listed here. Everything below stays
+# unreachable with a device token — board create/archive/switch is
+# desktop-shaped administration, and the non-kanban routes are unrelated.
 MUTATING_TARGETS = (
-    ('POST', '/api/kanban/tasks'),
-    ('POST', '/api/kanban/tasks/bulk'),
     ('POST', '/api/kanban/boards'),
     ('POST', '/api/kanban/boards/demo/switch'),
-    ('POST', '/api/kanban/dispatch'),
-    ('POST', '/api/kanban/links'),
-    ('POST', '/api/kanban/links/delete'),
     ('PUT', '/api/kanban/tasks/demo'),
     ('PATCH', '/api/kanban/boards/demo'),
-    ('PATCH', '/api/kanban/tasks/demo'),
     ('DELETE', '/api/kanban/boards/demo'),
     ('DELETE', '/api/kanban/tasks/demo'),
     ('POST', '/api/insights'),
@@ -90,6 +91,36 @@ MUTATING_TARGETS = (
     ('PUT', '/api/settings'),
     ('PATCH', '/api/settings'),
     ('DELETE', '/api/settings'),
+)
+
+# Owner-approved kanban writes: the device Bearer authenticates and reaches
+# dispatch, and each one is bound to exactly one verb.
+KANBAN_WRITE_TARGETS = (
+    ('POST', '/api/kanban/tasks'),
+    ('POST', '/api/kanban/tasks/bulk'),
+    ('POST', '/api/kanban/dispatch'),
+    ('POST', '/api/kanban/links'),
+    ('POST', '/api/kanban/links/delete'),
+    ('PATCH', '/api/kanban/tasks/2026-10-12-demo-task/patch'),
+    ('POST', '/api/kanban/tasks/2026-10-12-demo-task/comments'),
+    ('POST', '/api/kanban/tasks/2026-10-12-demo-task/block'),
+    ('POST', '/api/kanban/tasks/2026-10-12-demo-task/unblock'),
+)
+
+# Same paths with the wrong verb must stay shut: admission is path+method
+# bound, so a mutation cannot be replayed as a safe or unrelated request.
+# Only unsafe verbs are listed here — a GET under '/api/kanban/' is admitted
+# by the read-only prefix by design (and 404s at the bridge, not at auth).
+KANBAN_WRITE_WRONG_VERB = (
+    ('PATCH', '/api/kanban/tasks'),
+    ('DELETE', '/api/kanban/tasks'),
+    ('PATCH', '/api/kanban/tasks/bulk'),
+    ('DELETE', '/api/kanban/dispatch'),
+    ('POST', '/api/kanban/tasks/2026-10-12-demo-task/patch'),
+    ('PATCH', '/api/kanban/tasks/2026-10-12-demo-task/comments'),
+    ('DELETE', '/api/kanban/tasks/2026-10-12-demo-task/block'),
+    # A crafted multi-segment id must not steer admission to another route.
+    ('POST', '/api/kanban/tasks/demo/extra/patch'),
 )
 
 # The exact-path allowlist, pinned so it can never silently widen beyond the
@@ -236,6 +267,74 @@ def test_readonly_allowlist_shape_and_scope():
         & set(auth.NATIVE_BEARER_EXACT_PATHS)
     )
     assert not (set(auth.NATIVE_BEARER_READONLY_EXACT_PATHS) & set(auth.PUBLIC_PATHS))
+
+
+def test_kanban_writes_admitted_for_device_bearer(native_server):
+    """Owner-approved: the native client writes to the board it displays.
+
+    Each admitted route is path+method bound and reaches dispatch with the
+    device Bearer — the read-only GET/HEAD prefix is not involved.
+    """
+    auth, pairings, port, dispatched, _mp = native_server
+    token, _device_id = _mint_native_token(pairings)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    for method, path in KANBAN_WRITE_TARGETS:
+        dispatched.clear()
+        status, payload = _request(port, method, path, headers)
+        assert status == 200, (method, path, status)
+        assert dispatched == [(method, path)]
+
+
+def test_kanban_writes_reject_wrong_verb(native_server):
+    """Admission is verb-bound: the same path with another method stays 401."""
+    auth, pairings, port, dispatched, _mp = native_server
+    token, _device_id = _mint_native_token(pairings)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    for method, path in KANBAN_WRITE_WRONG_VERB:
+        dispatched.clear()
+        status, payload = _request(port, method, path, headers)
+        assert status == 401, (method, path, status)
+        assert payload == {"error": "Authentication required"}
+        assert dispatched == []
+
+
+def test_kanban_writes_require_valid_bearer(native_server):
+    """The write branch fails closed on a bad credential."""
+    auth, pairings, port, dispatched, _mp = native_server
+    for authorization in ("Bearer hdev_invalidcredential", "", "Bearer "):
+        headers = {"Authorization": authorization} if authorization else {}
+        for method, path in KANBAN_WRITE_TARGETS:
+            dispatched.clear()
+            status, _payload = _request(port, method, path, headers)
+            assert status == 401, (authorization, method, path, status)
+            assert dispatched == []
+
+
+def test_kanban_write_admission_is_narrow():
+    """Shape guard: the write branch never widens into the read-only sets."""
+    import api.auth as auth
+
+    # The read-only safe-methods invariant the write branch must not touch.
+    assert set(auth.NATIVE_BEARER_READONLY_METHODS) <= {"GET", "HEAD"}
+    # Not a prefix rule: writes are enumerated, never a blanket '/api/kanban/' grant.
+    assert "/api/kanban/" not in auth.NATIVE_BEARER_KANBAN_WRITE_PATHS
+    for path in auth.NATIVE_BEARER_KANBAN_WRITE_PATHS:
+        assert path.startswith("/api/")
+        assert path not in auth.PUBLIC_PATHS
+        assert path not in auth.NATIVE_BEARER_EXACT_PATHS
+        assert path not in auth.NATIVE_BEARER_READONLY_EXACT_PATHS
+    # Task-scoped writes are suffix+verb bound, and only one segment deep.
+    assert auth.native_kanban_write_path("/api/kanban/tasks/t1/patch", "PATCH")
+    assert not auth.native_kanban_write_path("/api/kanban/tasks/t1/patch", "POST")
+    assert not auth.native_kanban_write_path("/api/kanban/tasks/t1/delete", "DELETE")
+    assert not auth.native_kanban_write_path("/api/kanban/tasks/t1", "DELETE")
+    assert not auth.native_kanban_write_path("/api/kanban/tasks//patch", "PATCH")
+    assert not auth.native_kanban_write_path("/api/kanban/tasks/a/b/patch", "PATCH")
+    # Board-level administration stays a desktop action.
+    assert not auth.native_kanban_write_path("/api/kanban/boards", "POST")
+    assert not auth.native_kanban_write_path("/api/kanban/boards/demo", "DELETE")
 
 
 def test_401_before_admission_and_authorized_after(native_server):

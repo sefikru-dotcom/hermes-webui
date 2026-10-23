@@ -164,6 +164,47 @@ NATIVE_BEARER_READONLY_EXACT_PATHS = frozenset({
 NATIVE_BEARER_READONLY_PREFIXES = ('/api/kanban/',)
 NATIVE_BEARER_READONLY_METHODS = frozenset({'GET', 'HEAD'})
 
+# Mutating kanban routes the native Android client may reach with its device
+# Bearer. Deliberately kept OUT of NATIVE_BEARER_READONLY_* so that set's
+# safe-methods-only invariant (GET/HEAD) stays an untouched guarantee: the
+# writes live in their own branch, require an unsafe method, and never widen
+# the read-only '/api/kanban/' prefix.
+NATIVE_BEARER_KANBAN_WRITE_PATHS = frozenset({
+    '/api/kanban/dispatch',
+    '/api/kanban/tasks',
+    '/api/kanban/tasks/bulk',
+    '/api/kanban/links',
+    '/api/kanban/links/delete',
+})
+# Each task-shaped write is bound to the single verb its route actually
+# answers, so the admission can never be replayed with a different method.
+NATIVE_BEARER_KANBAN_TASK_WRITE_SUFFIXES = {
+    'patch': 'PATCH',
+    'comments': 'POST',
+    'block': 'POST',
+    'unblock': 'POST',
+}
+
+
+def native_kanban_write_path(path: str, method: str = '') -> bool:
+    """True for exactly the task-shaped kanban writes the native client owns.
+
+    Task-scoped writes are ``/api/kanban/tasks/<id>/<suffix>``. Anything with
+    more than one segment past the prefix is rejected, so a crafted task id
+    can never steer admission towards a different route.
+    """
+    verb = (method or '').upper()
+    if path in NATIVE_BEARER_KANBAN_WRITE_PATHS:
+        return verb == 'POST'
+    prefix = '/api/kanban/tasks/'
+    if not path.startswith(prefix):
+        return False
+    parts = path[len(prefix):].split('/')
+    if len(parts) != 2 or not parts[0]:
+        return False
+    expected = NATIVE_BEARER_KANBAN_TASK_WRITE_SUFFIXES.get(parts[1])
+    return bool(expected) and verb == expected
+
 COOKIE_NAME = 'hermes_session'
 CSRF_HEADER_NAME = 'X-Hermes-CSRF-Token'
 
@@ -1404,10 +1445,20 @@ def check_auth(handler, parsed) -> bool:
             or parsed.path.startswith(NATIVE_BEARER_READONLY_PREFIXES)
         )
     )
+    # Kanban writes are a separate branch on purpose: they need an unsafe
+    # method and a task-shaped path, so the read-only prefix above keeps its
+    # GET/HEAD-only guarantee and cannot be used to reach a mutation.
+    kanban_write_native_route = (
+        str(getattr(handler, 'command', '') or '').upper() in ('POST', 'PATCH', 'DELETE')
+        and native_kanban_write_path(
+            parsed.path, str(getattr(handler, 'command', '') or '')
+        )
+    )
     if (
         parsed.path.startswith(('/api/chat', '/api/sessions', '/api/session', '/api/models', '/api/upload', '/api/profiles'))
         or parsed.path in NATIVE_BEARER_EXACT_PATHS
         or readonly_native_route
+        or kanban_write_native_route
     ):
         from api.device_pairings import extract_bearer, verify_native_credential
         authorization = _header_values(handler, 'Authorization')
