@@ -57,6 +57,10 @@ _SIDEBAR_SESSION_RESPONSE_FIELDS = {
     "created_at",
     "updated_at",
     "last_message_at",
+    # R3: single-line snippet of the last substantive message. Native clients
+    # (Android session list) render it as the row subtitle; the web sidebar
+    # ignores it. Redacted like every other user-content-derived field.
+    "preview",
     "pinned",
     "archived",
     "project_id",

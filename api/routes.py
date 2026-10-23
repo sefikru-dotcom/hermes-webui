@@ -9491,7 +9491,7 @@ def _sidebar_session_response_item(session: dict, *, redact_enabled: bool | None
 
 
 def _redact_sidebar_title_fields(item: dict, redact_enabled: bool | None = None) -> None:
-    """Redact every user-content-derived title field on a sidebar/search row in place.
+    """Redact every user-content-derived text field on a sidebar/search row in place.
 
     `title` is redacted by the callers directly (they special-case it), but
     `display_title`, `_state_db_title`, and `parent_title` can ALSO carry raw
@@ -9499,11 +9499,14 @@ def _redact_sidebar_title_fields(item: dict, redact_enabled: bool | None = None)
     `display_title` from its first user message, and `parent_title` copies a
     parent session's (possibly derived) title. Without this a credential-shaped
     value in a delegated goal would surface in the sidebar / search results even
-    with `api_redact_enabled=True`. Shared by `_sidebar_session_response_item`
-    (`/api/sessions`) and every `/api/sessions/search` response branch so the two
-    endpoints can never drift on which fields get redacted.
+    with `api_redact_enabled=True`. `preview` (R3) is a snippet of the last
+    message, i.e. raw user/assistant text, so it belongs to the same set: it is
+    served by `/api/sessions` and by the `/api/sessions/search` list branch.
+    Shared by `_sidebar_session_response_item` (`/api/sessions`) and every
+    `/api/sessions/search` response branch so the two endpoints can never drift
+    on which fields get redacted.
     """
-    for field in ("display_title", "_state_db_title", "parent_title"):
+    for field in ("display_title", "_state_db_title", "parent_title", "preview"):
         value = item.get(field)
         if isinstance(value, str):
             item[field] = _redact_text(value, _enabled=redact_enabled)
