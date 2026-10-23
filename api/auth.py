@@ -160,6 +160,15 @@ NATIVE_BEARER_READONLY_EXACT_PATHS = frozenset({
     # siblings (/api/voice/session, /interrupt, /close) stay in the exact-POST
     # set above and can never be reached through this read-only branch.
     '/api/voice/stream',
+    # Interactive-attention SSE channels: the native Android client replaces its
+    # approval/clarify polling with these long-lived GET streams
+    # (api/route_approvals.py::_handle_approval_sse_stream,
+    # api/clarify.py::_handle_clarify_sse_stream). Read-only by construction —
+    # they only push the queue head that the matching GET /pending already
+    # serves, and answering still goes through the exact-POST entries above.
+    # The safe-method guard keeps a POST from ever reaching them.
+    '/api/approval/stream',
+    '/api/clarify/stream',
 })
 NATIVE_BEARER_READONLY_PREFIXES = ('/api/kanban/',)
 NATIVE_BEARER_READONLY_METHODS = frozenset({'GET', 'HEAD'})

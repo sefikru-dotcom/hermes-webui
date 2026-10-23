@@ -4,7 +4,9 @@ Covers the read-only fast-path in api/auth.py for the new native screens:
 GET/HEAD on the single ``/api/kanban/`` prefix plus the exact paths
 ``/api/crons/delivery-options``, ``/api/crons/history``, ``/api/insights``,
 ``/api/logs``, ``/api/provider/quota``, ``/api/push/fcm/status``,
-``/api/settings`` and ``/api/skills/usage``.
+``/api/settings``, ``/api/skills/usage``, the voice-gateway read
+``/api/voice/stream`` and the interactive-attention reads
+``/api/approval/stream`` / ``/api/clarify/stream``.
 
   * before admission (read-only sets monkeypatched empty) a valid device
     Bearer gets 401 on these routes — after admission the same request
@@ -43,6 +45,10 @@ EXPECTED_READONLY_EXACT_PATHS = {
     '/api/skills/usage',
     # Voice gateway downstream SSE read (api/voice_session.py).
     '/api/voice/stream',
+    # Interactive-attention SSE reads the native client subscribes to instead of
+    # polling approval/clarify (api/route_approvals.py, api/clarify.py).
+    '/api/approval/stream',
+    '/api/clarify/stream',
 }
 EXPECTED_READONLY_PREFIXES = ('/api/kanban/',)
 SAFE_METHODS = ('GET', 'HEAD')
