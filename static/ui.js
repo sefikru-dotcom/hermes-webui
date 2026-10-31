@@ -12328,11 +12328,12 @@ function isCompactWorklogMode(){
 // folded card that streams in place (one row per turn, click to expand),
 // 'hidden' keeps the upstream behaviour of dropping reasoning rows entirely.
 function thinkingMode(){
+  // show_thinking is the master switch — a /reasoning hide sets it false
+  // while thinking_mode stays expanded/collapsed; the explicit mode must
+  // never resurrect hidden reasoning on reload (mirrors boot.js).
+  if(window._showThinking===false) return 'hidden';
   const m=window._thinkingMode;
   if(m==='expanded'||m==='collapsed'||m==='hidden') return m;
-  if(window._showThinking===false) return 'hidden';
-  // Unset / 'auto' means the historical behaviour: reasoning renders expanded,
-  // so other WebUI profiles on the shared static bundle see no change at all.
   return 'expanded';
 }
 function isThinkingCollapsed(){

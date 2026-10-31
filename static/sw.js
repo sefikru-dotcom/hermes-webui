@@ -10,7 +10,7 @@
 // MANUAL BUMP: run_state.js added to SHELL_ASSETS (409 conflict liveness probe:
 // a dead stream id from /api/chat/start must not be adopted as a busy run).
 // The `__WEBUI_VERSION__` token below keeps busting by commit.
-const CACHE_NAME = 'hermes-shell-__WEBUI_VERSION__-mars-run-state-liveness-v1';
+const CACHE_NAME = 'hermes-shell-__WEBUI_VERSION__-mars-think-scroll-v1';
 
 // Static assets that form the app shell.
 //
@@ -23,7 +23,7 @@ const CACHE_NAME = 'hermes-shell-__WEBUI_VERSION__-mars-run-state-liveness-v1';
 // either the authenticated app shell or login code, and stale cached responses
 // can make valid password submits fail until the user clears browser cache.
 // Navigations populate './' only after a successful non-redirect network load.
-const VQ = '?v=__WEBUI_VERSION__-mars-run-state-liveness-v1';
+const VQ = '?v=__WEBUI_VERSION__-mars-think-scroll-v1';
 const SHELL_ASSETS = [
   './static/style.css' + VQ,
   './static/pwa-startup.js' + VQ,

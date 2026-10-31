@@ -3535,9 +3535,13 @@ function _resolveChatThinkingMode(raw){
 // 'auto' is the historical behaviour: reasoning renders expanded unless
 // show_thinking was turned off. Mirrors ui.js thinkingMode().
 function _effectiveChatThinkingMode(values){
+  // show_thinking is the master switch: even an explicit expanded/collapsed
+  // thinking_mode must not resurrect hidden reasoning on reload (a /reasoning
+  // hide writes only show_thinking=false, leaving thinking_mode unchanged).
+  if(window._showThinking===false) return 'hidden';
   const mode=values&&values.thinkingMode;
   if(mode==='expanded'||mode==='collapsed'||mode==='hidden') return mode;
-  return window._showThinking===false?'hidden':'expanded';
+  return 'expanded';
 }
 
 function _chatUxClassState(values){
