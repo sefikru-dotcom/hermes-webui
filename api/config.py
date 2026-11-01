@@ -6862,10 +6862,24 @@ def _save_models_cache_to_disk(cache: dict) -> None:
         if runtime_version is not None:
             payload["_webui_version"] = runtime_version
         cache_path = _get_models_cache_path()
-        tmp = str(cache_path) + f".{os.getpid()}.tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(payload, f, indent=2)
-        os.rename(tmp, str(cache_path))
+        tmp = str(cache_path) + f".{os.getpid()}.{threading.get_ident()}.tmp"
+        try:
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(payload, f, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            # os.rename() cannot overwrite an existing file on Windows
+            # ([WinError 183]) — it raised on every save once a cache file
+            # already existed, stranding the *.tmp sibling and leaving the
+            # on-disk cache frozen. os.replace() is the atomic overwrite on
+            # both POSIX and Windows.
+            os.replace(tmp, str(cache_path))
+        except Exception:
+            try:
+                os.unlink(tmp)
+            except Exception:
+                pass
+            raise
     except Exception:
         pass  # Non-fatal -- cache will rebuild on next call
 

@@ -251,12 +251,18 @@ def _json_response_body(payload, *, pretty: bool = True) -> bytes:
     return _json.dumps(payload, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
 
 
-def j(handler, payload, status: int=200, extra_headers: dict=None, *, pretty: bool = True) -> None:
-    """Send a JSON response.
+def j(handler, payload, status: int=200, extra_headers: dict=None, *, pretty: bool = True) -> bool:
+    """Send a JSON response and report the request as handled.
 
     *extra_headers*: optional dict of additional headers to include
     (e.g., {'Set-Cookie': '...'}).  Headers are sent before end_headers().
+
+    Returns True so extracted route clusters can ``return j(...)`` and be
+    recognised as handled. Returning None there made the dispatcher treat the
+    route as unclaimed and append a second (404) response onto the same
+    keep-alive connection, shifting every following response on the socket.
     """
+
     body = _json_response_body(payload, pretty=pretty)
     handler.send_response(status)
     handler.send_header('Content-Type', 'application/json; charset=utf-8')
@@ -277,6 +283,7 @@ def j(handler, payload, status: int=200, extra_headers: dict=None, *, pretty: bo
         for k, v in extra_headers.items():
             handler.send_header(k, v)
     _safe_write(handler, body)
+    return True
 
 
 def t(
@@ -285,8 +292,8 @@ def t(
     status: int=200,
     content_type: str='text/plain; charset=utf-8',
     extra_headers: dict=None,
-) -> None:
-    """Send a plain text or HTML response."""
+) -> bool:
+    """Send a plain text or HTML response and report the request as handled."""
     body = payload if isinstance(payload, bytes) else str(payload).encode('utf-8')
     handler.send_response(status)
     handler.send_header('Content-Type', content_type)
@@ -298,6 +305,7 @@ def t(
             handler.send_header(k, v)
     flush_pending_auth_cookies(handler)
     _safe_write(handler, body)
+    return True
 
 
 MAX_BODY_BYTES = 20 * 1024 * 1024  # 20MB limit for non-upload POST bodies
