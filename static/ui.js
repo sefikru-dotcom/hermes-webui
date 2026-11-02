@@ -17154,11 +17154,32 @@ function _abandonMessageScrollSnapshot(){
 function _restorePinnedMessageScrollSnapshot(snapshot){
   const el=$('messages');
   if(!el||!snapshot||snapshot.pinned!==true||snapshot.userUnpinned===true) return false;
+  // A programmatic tail restore must never move a tail-following reader UP the
+  // transcript to a position the transcript has already grown past. During a
+  // stream the content grows under the snapshot, so the stored `bottom` distance
+  // resolves to a scrollTop far above the live tail; writing it yanks the
+  // viewport up ~thousands of px and the live-follow writer immediately snaps it
+  // back down — the visible "chat fights itself" bounce. Repeat renders
+  // (external refresh, measurement passes) then ping-pong the two writers for as
+  // long as the render loop runs. For a snapshot taken while PINNED, the only
+  // legitimate write is down to the tail, never up to a stale one.
+  const previousTop=Number(_lastScrollTop);
   const maxTop=Math.max(0,el.scrollHeight-el.clientHeight);
   const bottom=Number(snapshot.bottom);
   const target=Number.isFinite(bottom)?maxTop-Math.max(0,bottom):maxTop;
+  const clampedTarget=Math.max(0,Math.min(target,maxTop));
+  if(Number.isFinite(previousTop)&&clampedTarget<previousTop-2) return false;
+  // A restore may only take over from the CURRENT viewport, never from the stale
+  // flag: the reader can have scrolled up between the snapshot and this call
+  // (that is exactly the reported case — they start reading back the moment the
+  // answer lands). Re-pinning on a stale `snapshot.pinned` would clear
+  // _messageUserUnpinned without moving anything, and the next token/follow pass
+  // would then drag them to the bottom. Bail out unless the pane is still at the
+  // tail right now; an unpinned reader keeps their own restore path.
+  if(typeof _messageBottomDistance==='function'&&_messageBottomDistance()>8) return false;
+  if(_messageUserUnpinned) return false;
   _programmaticScroll=true;_programmaticScrollSetAt=performance.now();
-  el.scrollTop=Math.max(0,Math.min(target,maxTop));
+  el.scrollTop=clampedTarget;
   // Sync _lastScrollTop after programmatic restore so sticky-unpin does not false-trigger (#1731).
   _lastScrollTop=el.scrollTop;_lastMessageClientHeight=el.clientHeight;
   _messageUserUnpinned=false;
