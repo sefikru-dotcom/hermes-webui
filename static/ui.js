@@ -4564,9 +4564,9 @@ function _marsSetModelReasoning(model,provider,effort,pill,list,row){
     if(pill) pill.setAttribute('aria-expanded','false');
     _marsReasoningOpenRow=null;
     _marsRefreshActiveChip(model);
-    showToast('🧠 '+t('model_reasoning_saved',model,_marsReasoningLabel(effort)));
+    showToast(t('model_reasoning_saved',model,_marsReasoningLabel(effort)));
   }).catch(function(){
-    showToast('🧠 '+t('model_reasoning_failed'));
+    showToast(t('model_reasoning_failed'));
   });
 }
 
@@ -5861,9 +5861,9 @@ document.addEventListener('click',function(e){
           const effVal=(st&&st.reasoning_effort)||effort;
           const display=_formatReasoningEffortLabel(effVal);
           _applyReasoningChip(effVal, st||{});
-          showToast('🧠 Reasoning effort set to '+display);
+          showToast(t('model_reasoning_saved',(payload&&payload.model)||S.model||t('default')||'Default',display));
         })
-        .catch(function(){showToast('🧠 Failed to set effort');});
+        .catch(function(){showToast(t('model_reasoning_failed'));});
       closeReasoningDropdown();
     }
   }
@@ -12989,7 +12989,7 @@ function _materializeTransparentToolDetail(row){
       const modes=document.createElement('div');
       modes.className='transparent-detail-modes';
       modes.setAttribute('role','tablist');
-      modes.innerHTML=`<span class="transparent-detail-mode active" role="tab" tabindex="0" data-mode="full" onclick="_setTransparentDetailMode(this,'full')">Full</span><span class="transparent-detail-mode" role="tab" tabindex="0" data-mode="output" onclick="_setTransparentDetailMode(this,'output')">Output</span>`;
+      modes.innerHTML=`<span class="transparent-detail-mode active" role="tab" tabindex="0" data-mode="full" onclick="_setTransparentDetailMode(this,'full')">${esc(t('transparent_detail_full'))}</span><span class="transparent-detail-mode" role="tab" tabindex="0" data-mode="output" onclick="_setTransparentDetailMode(this,'output')">${esc(t('transparent_detail_output'))}</span>`;
       const firstChild=detail.firstChild;
       if(firstChild&&firstChild.parentNode===detail) detail.insertBefore(modes, firstChild);
       else detail.appendChild(modes);
@@ -13068,7 +13068,7 @@ function _transparentToolDetailHtml(tc, status){
     if(typeof _redactToolTargetLabel==='function'){ try{ sv=_redactToolTargetLabel(sv); }catch(e){} }
     return `<div class="tool-arg-pair"><span class="tool-arg-key">${esc(String(k))}</span><span class="tool-arg-val">${esc(sv)}</span></div>`;
   }).join('');
-  return `<div class="tool-card-detail" data-transparent-detail-mode="full"><div class="transparent-detail-modes" role="tablist"><span class="transparent-detail-mode active" role="tab" tabindex="0" data-mode="full" onclick="_setTransparentDetailMode(this,'full')">Full</span><span class="transparent-detail-mode" role="tab" tabindex="0" data-mode="output" onclick="_setTransparentDetailMode(this,'output')">Output</span></div><div class="tool-card-args">${argHtml}</div>${preview?`<div class="tool-card-result"><pre>${esc(preview)}</pre></div>`:''}</div>`;
+  return `<div class="tool-card-detail" data-transparent-detail-mode="full"><div class="transparent-detail-modes" role="tablist"><span class="transparent-detail-mode active" role="tab" tabindex="0" data-mode="full" onclick="_setTransparentDetailMode(this,'full')">${esc(t('transparent_detail_full'))}</span><span class="transparent-detail-mode" role="tab" tabindex="0" data-mode="output" onclick="_setTransparentDetailMode(this,'output')">${esc(t('transparent_detail_output'))}</span></div><div class="tool-card-args">${argHtml}</div>${preview?`<div class="tool-card-result"><pre>${esc(preview)}</pre></div>`:''}</div>`;
 }
 function _syncTransparentEventControls(turn){
   if(!turn||!isTransparentStream()) return;
@@ -13246,7 +13246,7 @@ function _decorateTransparentEventRow(row, opts){
         statusEl.textContent='';
         statusEl.removeAttribute('data-status');
       }else{
-        statusEl.textContent=status;
+        statusEl.textContent=status==='Failed'?t('activity_status_failed'):(status==='Interrupted'?t('activity_status_interrupted'):(status==='Running'?t('activity_status_running'):status));
         statusEl.setAttribute('data-status',status.toLowerCase());
       }
       row.setAttribute('data-event-status',status);
@@ -13303,7 +13303,7 @@ function _decorateTransparentEventRow(row, opts){
         const modes=document.createElement('div');
         modes.className='transparent-detail-modes';
         modes.setAttribute('role','tablist');
-        modes.innerHTML=`<span class="transparent-detail-mode active" role="tab" tabindex="0" data-mode="full" onclick="_setTransparentDetailMode(this,'full')">Full</span><span class="transparent-detail-mode" role="tab" tabindex="0" data-mode="output" onclick="_setTransparentDetailMode(this,'output')">Output</span>`;
+        modes.innerHTML=`<span class="transparent-detail-mode active" role="tab" tabindex="0" data-mode="full" onclick="_setTransparentDetailMode(this,'full')">${esc(t('transparent_detail_full'))}</span><span class="transparent-detail-mode" role="tab" tabindex="0" data-mode="output" onclick="_setTransparentDetailMode(this,'output')">${esc(t('transparent_detail_output'))}</span>`;
         // Guard: firstChild may be orphaned from a prior DOM rebuild.
         const firstChild=detail.firstChild;
         if(firstChild&&firstChild.parentNode===detail) detail.insertBefore(modes, firstChild);
@@ -19887,11 +19887,11 @@ function _toolWorklogActionParts(tc){
 }
 function _toolWorklogSummary(toolCalls, opts){
   const cards=Array.from(toolCalls||[]).filter(tc=>tc);
-  if(!cards.length) return (opts&&opts.live)?'Running':'Worklog';
+  if(!cards.length) return (opts&&opts.live)?t('activity_status_running'):t('activity_mode_short_stream_window');
   if(cards.length===1){
     const part=_toolWorklogActionParts(cards[0]);
     const line=_toolWorklogSummaryLine(part.kind,part.isDone?'done':'running',1);
-    return part.isErr?`${line}, 1 failed`:line;
+    return part.isErr?`${line}, ${t('tool_worklog_failed_count',1)}`:line;
   }
   const order=['shell','read','search','write','skill','memory','web','list','delegate','unknown'];
   const runningCounts={}, doneCounts={};
@@ -19912,7 +19912,7 @@ function _toolWorklogSummary(toolCalls, opts){
     return out;
   };
   const lines=[...emit(runningCounts,'running'),...emit(doneCounts,'done')];
-  if(failed) lines.push(`${failed} failed`);
+  if(failed) lines.push(t('tool_worklog_failed_count',failed));
   return lines.length?_toolWorklogJoin(lines):_toolActionLabel(cards[0]);
 }
 function _toolWorklogListEl(group){
