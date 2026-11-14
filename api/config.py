@@ -10731,6 +10731,13 @@ def save_settings(settings: dict) -> dict:
                 if not isinstance(v, str) or v.strip().lower() not in {"auto", "expanded", "collapsed", "hidden"}:
                     continue
                 current[k] = v.strip().lower()
+                # A bare thinking_mode write (e.g. AppearanceStore's settings
+                # select) must not leave the show_thinking master gate stale:
+                # /reasoning hide sets show_thinking=false, and boot.js then
+                # force-hides reasoning on reload no matter the chosen mode.
+                # Only auto-sync when show_thinking wasn't sent explicitly.
+                if "show_thinking" not in settings:
+                    current["show_thinking"] = current[k] != "hidden"
                 continue
             # Coerce bool keys
             if k in _SETTINGS_BOOL_KEYS:

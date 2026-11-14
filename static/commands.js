@@ -1867,9 +1867,21 @@ function cmdStatus(){
   });
   renderMessages();
 }
+// Locale probe for /reasoning toasts: prefer a host-provided getLocale(), then
+// the loaded i18n bundle, then <html lang>.  Without this the RU copy below
+// would be unreachable dead code.
+function _reasoningLocale(){
+  try{ if(typeof getLocale==='function') return String(getLocale()||'').toLowerCase(); }catch(_e0){}
+  let lang='';
+  try{ if(typeof _locale!=='undefined'&&_locale&&_locale._speech) lang=String(_locale._speech); }catch(_e1){}
+  if(!lang){
+    try{ lang=String((document.documentElement&&document.documentElement.lang)||''); }catch(_e2){}
+  }
+  return lang.toLowerCase();
+}
 function cmdReasoning(args){
   const arg=(args||'').trim().toLowerCase();
-  const BRAIN='\uD83E\uDDE0';
+  const RU=(typeof getLocale==='function'&&getLocale()==='ru')||_reasoningLocale().indexOf('ru')===0;
   // Matches hermes_constants.VALID_REASONING_EFFORTS + 'none' (CLI parity).
   // Keep this WebUI effort list in sync with hermes-agent#29248.
   const EFFORTS=['none','minimal','low','medium','high','xhigh','max'];
@@ -1877,20 +1889,30 @@ function cmdReasoning(args){
   function _fmtStatus(st){
     const vis=(st && st.show_reasoning===false)?'off':'on';
     const eff=(st && st.reasoning_effort)||'default';
-    return BRAIN+' Reasoning effort: '+eff+' \u00B7 display: '+vis
+    if(RU){
+      return 'Уровень размышлений: '+eff+' \u00B7 показ: '+(vis==='off'?'выкл':'вкл')
+        +'  |  /reasoning show|hide|none|minimal|low|medium|high|xhigh|max';
+    }
+    return 'Reasoning effort: '+eff+' \u00B7 display: '+vis
       +'  |  /reasoning show|hide|none|minimal|low|medium|high|xhigh|max';
   }
   if(!arg){
     // Status — read from the same config.yaml keys the CLI uses.
     const q=(typeof _reasoningEffortQuery==='function')?_reasoningEffortQuery():'';
     api('/api/reasoning'+q).then(function(st){showToast(_fmtStatus(st));})
-      .catch(function(){showToast(BRAIN+' /reasoning — status unavailable',null,'error');});
+      .catch(function(){
+        showToast(RU?'Не удалось получить статус /reasoning':'/reasoning \u2014 status unavailable',null,'error');
+      });
     return true;
   }
   if(arg==='show'||arg==='on'||arg==='hide'||arg==='off'){
     const on=(arg==='show'||arg==='on');
     // Update the UI render gate immediately for responsiveness.
     window._showThinking=on;
+    // /reasoning hide leaves _thinkingMode at 'hidden'; without this a later
+    // `show` would flip the gate back on while the mode still forces hide.
+    if(on&&window._thinkingMode==='hidden') window._thinkingMode='expanded';
+    if(typeof _applyThinkingModeClasses==='function') _applyThinkingModeClasses();
     if(!on&&typeof removeThinking==='function') removeThinking();
     if(typeof renderMessages==='function') renderMessages();
     // Persist via /api/reasoning → config.yaml display.show_reasoning
@@ -1899,7 +1921,9 @@ function cmdReasoning(args){
     // /api/reasoning on every page load.
     api('/api/reasoning',{method:'POST',body:JSON.stringify({display:arg})}).catch(function(){});
     api('/api/settings',{method:'POST',body:JSON.stringify({show_thinking:on})}).catch(function(){});
-    showToast(BRAIN+' Thinking blocks: '+(on?'on':'off')+' (saved)');
+    showToast(RU
+      ? 'Блоки рассуждений: '+(on?'вкл':'выкл')+' (сохранено)'
+      : 'Thinking blocks: '+(on?'on':'off')+' (saved)');
     return true;
   }
   if(EFFORTS.includes(arg)){
@@ -1910,15 +1934,21 @@ function cmdReasoning(args){
     api('/api/reasoning',{method:'POST',body:JSON.stringify({effort:arg})})
       .then(function(st){
         const eff=(st && st.reasoning_effort)||arg;
-        showToast(BRAIN+' Reasoning effort: '+eff+' (saved; applies to next turn)');
+        showToast(RU
+          ? 'Уровень размышлений: '+eff+' (сохранено; со следующего хода)'
+          : 'Reasoning effort: '+eff+' (saved; applies to next turn)');
         if(typeof _applyReasoningChip==='function') _applyReasoningChip(eff, st||{});
       })
       .catch(function(e){
-        showToast(BRAIN+' Failed to set effort: '+(e && e.message ? e.message : arg));
+        showToast(RU
+          ? 'Не удалось задать уровень: '+(e && e.message ? e.message : arg)
+          : 'Failed to set effort: '+(e && e.message ? e.message : arg));
       });
     return true;
   }
-  showToast('Unknown argument: '+arg+' \u2014 use show|hide|'+EFFORTS.join('|'));
+  showToast(RU
+    ? 'Неизвестный аргумент: '+arg+' \u2014 используйте show|hide|'+EFFORTS.join('|')
+    : 'Unknown argument: '+arg+' \u2014 use show|hide|'+EFFORTS.join('|'));
   return true;
 }
 function cmdVoice(){

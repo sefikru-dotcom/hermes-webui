@@ -12977,6 +12977,10 @@ function _applySavedSettingsUi(saved, body, opts){
   window._notificationsEnabled=body.notifications_enabled;
   window._whatsNewSummaryEnabled=!!body.whats_new_summary_enabled;
   window._showThinking=body.show_thinking!==false;
+  // /reasoning hide flips the master gate off; a later thinking_mode pick in
+  // Settings must win over that stale flag (boot.js reads show_thinking).
+  if(window._thinkingMode==='hidden') window._showThinking=false;
+  if(typeof _applyThinkingModeClasses==='function') _applyThinkingModeClasses();
   window._simplifiedToolCalling=true;
   _syncChatActivityDisplayModeControl(body.chat_activity_display_mode);
   _syncTransparentEventTimestampsControl(body.transparent_stream_event_timestamps, body.chat_activity_display_mode);
