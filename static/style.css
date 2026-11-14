@@ -8945,14 +8945,14 @@ html.mars-mode-window .live-worklog.tool-call-group-collapsed{
   padding:0;
 }
 
-/* Full mode: smart structured display with bounded scroll */
-html.mars-mode-full .tool-call-group.tool-call-group-collapsed .tool-call-group-body,
-html.mars-mode-full .tool-worklog-group.tool-call-group-collapsed .tool-worklog-body{
+/* Full mode: smart structured display with bounded scroll when expanded */
+html.mars-mode-full .tool-call-group:not(.tool-call-group-collapsed) .tool-call-group-body,
+html.mars-mode-full .tool-worklog-group:not(.tool-call-group-collapsed) .tool-worklog-body{
   display:block;
   max-height:360px;
   overflow-y:auto;
 }
-html.mars-mode-full .thinking-card.thinking-card-collapsed .thinking-card-body{
+html.mars-mode-full:not(.mars-thinking-collapsed) .thinking-card:not(.thinking-card-collapsed) .thinking-card-body{
   max-height:280px;
   overflow-y:auto;
   opacity:1;
