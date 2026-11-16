@@ -10,9 +10,9 @@
 // (an oscillation = two writers fighting), and the last attributed scrollTop
 // writes with their stacks so the guilty call site is named.
 
-import { spawn } from 'node:child_process';
 import http from 'node:http';
 import fs from 'node:fs';
+import { launchChrome, killTree } from './lib/browser_proc.mjs';
 
 const TAG = '[trace]';
 const PORT = 8787;
@@ -81,7 +81,7 @@ async function main() {
   if (!target) { console.log(`${TAG} no sessions`); process.exit(2); }
   console.log(`${TAG} session ${target.id} (${target.n} msgs)`);
 
-  const chrome = spawn('google-chrome', [
+  const chrome = launchChrome([
     '--headless=new', '--remote-debugging-port=0', `--user-data-dir=${PROFILE}`,
     '--no-first-run', '--no-default-browser-check', '--disable-gpu',
     '--no-sandbox', '--disable-dev-shm-usage', '--disable-setuid-sandbox',
@@ -211,7 +211,7 @@ async function main() {
   } else console.log(`${TAG} writes: none`);
 
   browser.close();
-  chrome.kill('SIGKILL');
+  killTree(chrome);
   process.exit(0);
 }
 

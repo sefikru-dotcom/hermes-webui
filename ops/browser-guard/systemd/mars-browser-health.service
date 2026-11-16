@@ -1,0 +1,14 @@
+[Unit]
+Description=Mars WebUI health probe (HTTP, memory PSI, swap, leaked test browsers)
+Documentation=file:/opt/hermes-webui/ops/browser-guard/README.md
+After=hermes-webui.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/hermes-webui/.venv/bin/python3 /opt/hermes-webui/ops/browser-guard/browser_health.py
+Nice=10
+IOSchedulingClass=idle
+MemoryMax=96M
+# 0 ok, 1 warn — both are "the probe ran". 2 (critical) stays a failed unit.
+SuccessExitStatus=0 1
+TimeoutStartSec=60

@@ -11,9 +11,9 @@
 //
 // Exit 0 = the reader keeps their place after the reply.
 
-import { spawn } from 'node:child_process';
 import http from 'node:http';
 import fs from 'node:fs';
+import { launchChrome, killTree } from './lib/browser_proc.mjs';
 
 const TAG = '[e2e]';
 const PORT = 8787;
@@ -73,7 +73,7 @@ async function main() {
   if (login.status !== 200) { console.log(`${TAG} login ${login.status}`); process.exit(2); }
   const cookie = (login.headers['set-cookie'] || []).map((c) => String(c).split(';')[0]).join('; ');
 
-  const chrome = spawn('google-chrome', [
+  const chrome = launchChrome([
     '--headless=new', '--remote-debugging-port=0', `--user-data-dir=${PROFILE}`,
     '--no-first-run', '--no-default-browser-check', '--disable-gpu',
     '--no-sandbox', '--disable-dev-shm-usage', '--disable-setuid-sandbox',
@@ -127,7 +127,7 @@ async function main() {
       return { sid: d && d.session && d.session.session_id };
     }catch(e){ return {err:String(e&&e.message||e)}; } })()`, true);
   console.log(`${TAG} new session: ${JSON.stringify(created)}`);
-  if (!created || !created.sid) { browser.close(); chrome.kill('SIGKILL'); process.exit(2); }
+  if (!created || !created.sid) { browser.close(); killTree(chrome); process.exit(2); }
 
   // SPA route is /session/<sid> — a ?session= query is NOT the session URL.
   await S('Page.navigate', { url: `http://127.0.0.1:${PORT}/session/${encodeURIComponent(created.sid)}` });
@@ -142,7 +142,7 @@ async function main() {
     if (st && st.sid === created.sid) { hydrated = true; console.log(`${TAG} hydrated after ${((i + 1) * 0.25).toFixed(1)}s: ${JSON.stringify(st)}`); break; }
     await sleep(250);
   }
-  if (!hydrated) { console.log(`${TAG} abort: session never hydrated`); browser.close(); chrome.kill('SIGKILL'); process.exit(2); }
+  if (!hydrated) { console.log(`${TAG} abort: session never hydrated`); browser.close(); killTree(chrome); process.exit(2); }
 
   // Give the transcript something to scroll: the reply alone is short, so seed
   // tall filler rows on top, exactly like a long history would present.
@@ -161,7 +161,7 @@ async function main() {
       return {ok:true, sid, keys:d?Object.keys(d).slice(0,8):null};
     }catch(e){ return {ok:false, err:String(e&&e.message||e)}; } })()`, true);
   console.log(`${TAG} chat/start: ${JSON.stringify(sent)}`);
-  if (!sent || !sent.ok) { browser.close(); chrome.kill('SIGKILL'); process.exit(2); }
+  if (!sent || !sent.ok) { browser.close(); killTree(chrome); process.exit(2); }
 
   // While the reply streams, the reader scrolls up into history (this is the
   // moment the report describes: they start reading back during/after the answer).
@@ -224,7 +224,7 @@ async function main() {
   const ok = !pulled && !oscillated;
   console.log(`${TAG} VERDICT=${ok ? 'PASS' : 'FAIL'}`);
   browser.close();
-  chrome.kill('SIGKILL');
+  killTree(chrome);
   process.exit(ok ? 0 : 1);
 }
 

@@ -9,9 +9,10 @@
 //
 // Usage: node scripts/live_scroll_probe.mjs [--port 8787] [--duration 6000]
 
-import { execFile, spawn } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import http from 'node:http';
 import fs from 'node:fs';
+import { launchChrome, killTree } from './lib/browser_proc.mjs';
 
 const TAG = '[live-probe]';
 const args = process.argv.slice(2);
@@ -112,7 +113,7 @@ async function main() {
   if (!target) { console.log(`${TAG} abort: no sessions`); process.exit(2); }
 
   // 3. launch chrome
-  const chrome = spawn('google-chrome', [
+  const chrome = launchChrome([
     '--headless=new', '--remote-debugging-port=0', `--user-data-dir=${PROFILE}`,
     '--no-first-run', '--no-default-browser-check', '--disable-gpu',
     '--no-sandbox', '--disable-dev-shm-usage', '--disable-setuid-sandbox',
@@ -313,7 +314,7 @@ async function main() {
   }
 
   browser.close();
-  chrome.kill('SIGKILL');
+  killTree(chrome);
   process.exit(snapped ? 1 : 0);
 }
 

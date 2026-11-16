@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // Minimal diagnostic: which URL form actually hydrates a session in the SPA, and
 // is the client state object readable from CDP?
-import { spawn } from 'node:child_process';
 import http from 'node:http';
 import fs from 'node:fs';
+import { launchChrome, killTree } from './lib/browser_proc.mjs';
 
 const TAG = '[diag]';
 const PORT = 8787;
@@ -56,7 +56,7 @@ async function main() {
     .filter((s) => s.id).sort((a, b) => b.n - a.n)[0];
   console.log(`${TAG} target ${target.id} (${target.n})`);
 
-  const chrome = spawn('google-chrome', ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${PROFILE}`,
+  const chrome = launchChrome(['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${PROFILE}`,
     '--no-first-run', '--no-default-browser-check', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--disable-setuid-sandbox',
     '--window-size=393,873', 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'] });
   const wsUrl = await new Promise((resolve, reject) => {
@@ -89,6 +89,6 @@ async function main() {
     console.log(`${TAG} ${url}\n      -> ${JSON.stringify(probe)}`);
   }
 
-  browser.close(); chrome.kill('SIGKILL'); process.exit(0);
+  browser.close(); killTree(chrome); process.exit(0);
 }
 main().catch((e) => { console.log(`${TAG} error: ${e.message}`); process.exit(2); });

@@ -13,9 +13,9 @@
 // position immediately after the gesture and 3 s later, plus every attributed
 // scrollTop write that happened in between.
 
-import { spawn } from 'node:child_process';
 import http from 'node:http';
 import fs from 'node:fs';
+import { launchChrome, killTree } from './lib/browser_proc.mjs';
 
 const TAG = '[touch-probe]';
 const PORT = 8787;
@@ -85,7 +85,7 @@ async function main() {
   const target = scored[0];
   if (!target) { console.log(`${TAG} no sessions`); process.exit(2); }
 
-  const chrome = spawn('google-chrome', [
+  const chrome = launchChrome([
     '--headless=new', '--remote-debugging-port=0', `--user-data-dir=${PROFILE}`,
     '--no-first-run', '--no-default-browser-check', '--disable-gpu',
     '--no-sandbox', '--disable-dev-shm-usage', '--disable-setuid-sandbox',
@@ -172,7 +172,7 @@ async function main() {
   } else console.log(`${TAG} writes: none`);
 
   browser.close();
-  chrome.kill('SIGKILL');
+  killTree(chrome);
   process.exit(wroteBack ? 1 : 0);
 }
 

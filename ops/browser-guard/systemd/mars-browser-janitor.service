@@ -1,0 +1,14 @@
+[Unit]
+Description=Mars test-browser janitor (kills leaked headless browsers, clears temp profiles)
+Documentation=file:/opt/hermes-webui/ops/browser-guard/README.md
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/hermes-webui/.venv/bin/python3 /opt/hermes-webui/ops/browser-guard/browser_janitor.py
+Nice=10
+IOSchedulingClass=idle
+MemoryMax=128M
+# 1 == "leaks were found and killed", which is a successful run.
+SuccessExitStatus=0 1
+TimeoutStartSec=180

@@ -15,9 +15,9 @@
 //
 // Exit 0 = contract holds.
 
-import { spawn } from 'node:child_process';
 import http from 'node:http';
 import fs from 'node:fs';
+import { launchChrome, killTree } from './lib/browser_proc.mjs';
 
 const TAG = '[verify]';
 const PORT = 8787;
@@ -83,7 +83,7 @@ async function main() {
   })).filter((s) => s.id).sort((a, b) => b.n - a.n)[0];
   if (!target) { console.log(`${TAG} no sessions`); process.exit(2); }
 
-  const chrome = spawn('google-chrome', [
+  const chrome = launchChrome([
     '--headless=new', '--remote-debugging-port=0', `--user-data-dir=${PROFILE}`,
     '--no-first-run', '--no-default-browser-check', '--disable-gpu',
     '--no-sandbox', '--disable-dev-shm-usage', '--disable-setuid-sandbox',
@@ -211,7 +211,7 @@ async function main() {
   const allOk = aOk && bOk && cOk;
   console.log(`${TAG} VERDICT=${allOk ? 'PASS' : 'FAIL'} (A=${aOk} B=${bOk} C=${cOk})`);
   browser.close();
-  chrome.kill('SIGKILL');
+  killTree(chrome);
   process.exit(allOk ? 0 : 1);
 }
 

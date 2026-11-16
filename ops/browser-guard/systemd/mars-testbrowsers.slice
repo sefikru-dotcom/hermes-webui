@@ -1,0 +1,12 @@
+[Unit]
+Description=Mars test browsers (isolated from hermes-webui.service)
+Documentation=file:/opt/hermes-webui/ops/browser-guard/README.md
+
+[Slice]
+# A leaked test browser must die here, not take the WebUI with it.
+MemoryAccounting=yes
+MemoryHigh=1200M
+MemoryMax=1800M
+MemorySwapMax=0
+TasksMax=2048
+CPUQuota=300%
