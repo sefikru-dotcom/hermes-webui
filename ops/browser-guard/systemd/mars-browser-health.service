@@ -5,7 +5,10 @@ After=hermes-webui.service
 
 [Service]
 Type=oneshot
-ExecStart=/opt/hermes-webui/.venv/bin/python3 /opt/hermes-webui/ops/browser-guard/browser_health.py
+# run-guard.sh picks a working python3 at run time: a hardcoded
+# /opt/hermes-webui/.venv/bin/python3 turns into a dangling uv symlink and the
+# unit dies with 203/EXEC. See README "Интерпретатор".
+ExecStart=/opt/hermes-webui/ops/browser-guard/run-guard.sh /opt/hermes-webui/ops/browser-guard/browser_health.py
 Nice=10
 IOSchedulingClass=idle
 MemoryMax=96M

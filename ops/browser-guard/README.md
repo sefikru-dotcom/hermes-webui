@@ -21,7 +21,35 @@
 | `guard_lib.py` | общее определение «что считается тестовым браузером» и чтение /proc |
 | `systemd/mars-testbrowsers.slice` | лимиты изолированной слайсы (1800 МБ, без swap) |
 | `systemd/mars-browser-{janitor,health}.*` | таймеры и oneshot-юниты |
-| `install.sh` | установка юнитов с бэкапом существующих |
+| `run-guard.sh` | выбирает рабочий python3 и запускает им пробу/janitor (юниты не хардкодят интерпретатор) |
+| `install.sh` | установка юнитов с бэкапом существующих и preflight-проверкой интерпретатора |
+
+## Интерпретатор
+
+Юниты **не** содержат путь к Python. Они запускают `run-guard.sh`, а он
+перебирает кандидатов и берёт первый, который существует, исполняем и реально
+стартует (`-x` + `python -c 'import sys'`):
+
+1. `$MARS_GUARD_PYTHON` — ручной override;
+2. `/usr/local/lib/hermes-agent/venv/bin/python` — runtime агента (3.12), на нём
+   же работает сам WebUI;
+3. `/opt/hermes-webui/.venv/bin/python3` — только если ссылка ещё жива;
+4. `/usr/bin/python3`, затем `python3` из `PATH`.
+
+Почему так: `.venv/bin/python3` — симлинк в CPython, которым управляет `uv`
+(`~/.local/share/uv/python/cpython-3.13-*`). 17.11.2026 `uv` вычистил эту
+генерацию, симлинк повис, и юниты с `ExecStart=/opt/hermes-webui/.venv/bin/python3`
+падали с `status=203/EXEC`, не запуская ни пробу, ни janitor. Живые юниты на
+сервере были вручную переведены на `/usr/bin/python3` — это работало, но не было
+версионировано и расходилось с репозиторием.
+
+Скрипты guard'а используют только стандартную библиотеку, поэтому подходит любой
+рабочий `python3`; отдельный venv для них не нужен. Проверить выбор:
+
+```bash
+/opt/hermes-webui/ops/browser-guard/run-guard.sh --print \
+  /opt/hermes-webui/ops/browser-guard/browser_health.py
+```
 
 ## Три уровня защиты
 
@@ -69,6 +97,14 @@ journalctl -u mars-browser-health -n 20 --no-pager
 tail -5 /var/log/mars-guard/health.jsonl
 ```
 
+Запуск руками — через тот же резолвер, что и у юнитов (иначе легко снова
+наткнуться на мёртвый `.venv/bin/python3`):
+
+```bash
+/opt/hermes-webui/ops/browser-guard/run-guard.sh \
+  /opt/hermes-webui/ops/browser-guard/browser_health.py --json
+```
+
 Порог критики: HTTP не отвечает или > 6 c, memory PSI full avg10 ≥ 40%,
 swap ≥ 90%, память службы ≥ 5300 МБ, ≥ 4 тестовых браузера в cgroup службы.
 
@@ -87,7 +123,8 @@ Janitor безопасен по построению:
 Проверить классификацию, ничего не убивая:
 
 ```bash
-/opt/hermes-webui/.venv/bin/python3 ops/browser-guard/browser_janitor.py --dry-run
+/opt/hermes-webui/ops/browser-guard/run-guard.sh \
+  /opt/hermes-webui/ops/browser-guard/browser_janitor.py --dry-run
 ```
 
 ## Что НЕ покрыто
@@ -112,3 +149,8 @@ Janitor безопасен по построению:
 sudo /opt/hermes-webui/ops/browser-guard/install.sh --dry-run
 sudo /opt/hermes-webui/ops/browser-guard/install.sh
 ```
+
+`install.sh` сначала резолвит интерпретатор (`run-guard.sh --print`) и падает с
+понятным сообщением, если рабочего python3 нет, — чтобы не поставить юниты,
+которые не стартуют. Он не трогает постоянный браузер `mars-browser.service` и не
+включает ничего, кроме двух таймеров guard'а.
