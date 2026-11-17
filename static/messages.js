@@ -2866,6 +2866,14 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
 
   // ── Shared SSE handler wiring (used for initial connection and reconnect) ──
   let _reconnectAttempted=false;
+  // Text of the provider-wait notice this pane is currently showing, so the
+  // agent's `clear` frame retires exactly that line and nothing else. A wait
+  // notice that is never cleared otherwise stays pinned until the turn ends.
+  let _providerWaitStatusText='';
+  // Safety net only: the agent re-emits a heartbeat every ~30s while it is
+  // genuinely waiting, so this TTL expires a notice whose clear frame was lost
+  // (aborted stream, dropped SSE frame), never a live one.
+  const _PROVIDER_WAIT_STATUS_TTL_MS=90000;
   let _terminalStateReached=false;
   let _deferredStreamRecoveryBound=false;
   let _pendingStreamEndRecovery=false;
@@ -7131,6 +7139,35 @@ function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
               if(_liveAsst) api.attachToTurn(_liveAsst,_pendingTurnAttribution);
             }
           }
+        }
+        // Provider-wait / recovery notices (agent thinking_callback → warning
+        // SSE). Live status, not history: `clear` retires the notice this pane
+        // owns, so a recovered stream stops saying "waiting on …" instead of
+        // leaving it pinned until `done`.
+        if(d.type==='provider_wait'){
+          // Replay can deliver a frame from another run of this session; never
+          // paint an old wait line onto the current turn.
+          if(d.stream_id&&streamId&&d.stream_id!==streamId) return;
+          if(d.clear){
+            const _statusEl=typeof $==='function'?$('composerStatus'):null;
+            if(_providerWaitStatusText&&_statusEl&&_statusEl.textContent===_providerWaitStatusText){
+              setComposerStatus('');
+            }
+            _providerWaitStatusText='';
+            return;
+          }
+          const _waitText=`${d.message||''}`;
+          if(!_waitText) return;
+          _providerWaitStatusText=_waitText;
+          setComposerStatus(_waitText,_PROVIDER_WAIT_STATUS_TTL_MS);
+          return;
+        }
+        // Agent warnings (context-overflow blocked, compression summary failed,
+        // auxiliary task failed): a one-shot notice, never a sticky status.
+        if(d.type==='agent_warn'){
+          if(d.stream_id&&streamId&&d.stream_id!==streamId) return;
+          setComposerStatus(`${d.message||'Warning'}`,8000);
+          return;
         }
         // Show as a small inline notice, not a full error
         setComposerStatus(`${d.message||'Warning'}`,d.type==='fallback'?4000:undefined);
