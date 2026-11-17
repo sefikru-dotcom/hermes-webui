@@ -5237,6 +5237,106 @@ def new_session(workspace=None, model=None, profile=None, model_provider=None, p
         s.save()
     return s
 
+def ensure_empty_session_persisted(session) -> bool:
+    """Materialise a zero-message session sidecar for a draft-only new chat.
+
+    ``new_session()`` keeps a brand-new chat in ``SESSIONS`` only until the
+    first message (#1171), but its composer draft is already durable: drafts
+    live in their own sidecar (``api/drafts.py``). After a restart the draft is
+    still on disk while the session is gone, so ``GET /api/session``,
+    ``GET /api/session/draft`` and ``POST /api/session/draft`` all 404 — the
+    WebUI then clears its remembered new-chat draft and the text the user typed
+    is unrecoverable even though it was never lost.
+
+    Writing a minimal session file the first time a draft gets content keeps
+    the chat reloadable: the row stays invisible in the sidebar (``all_sessions``
+    hides Untitled rows with zero messages, #1171), the draft overlay still wins
+    on every read, and ``POST /api/chat/start`` can resolve the session after a
+    restart instead of 404ing.
+
+    The write is exclusive: the payload is fully written and fsynced to a temp
+    file and then hardlinked onto the target, so it fails with
+    ``FileExistsError`` if a real ``Session.save()`` (for example the first
+    message of a racing ``/api/chat/start``) got there first. It can therefore
+    never clobber or truncate a live transcript, and after the first draft it
+    never runs again on the autosave path.
+
+    Returns True only when this call created the file.
+    """
+    sid = str(getattr(session, "session_id", "") or "")
+    if not is_safe_session_id(sid):
+        return False
+    target = SESSION_DIR / f"{sid}.json"
+    try:
+        if target.exists():
+            return False
+    except OSError:
+        return False
+    now = time.time()
+    created_at = getattr(session, "created_at", None)
+    if not isinstance(created_at, (int, float)):
+        created_at = now
+    # Metadata first: ``load_metadata_only()`` reads this prefix and needs
+    # session_id/title/created_at/updated_at before the ``messages`` key.
+    payload = json.dumps(
+        {
+            "session_id": sid,
+            "title": getattr(session, "title", None) or "Untitled",
+            "workspace": getattr(session, "workspace", None),
+            "created_workspace": getattr(session, "created_workspace", None),
+            "model": getattr(session, "model", None),
+            "model_provider": getattr(session, "model_provider", None),
+            "created_at": created_at,
+            "updated_at": now,
+            "profile": getattr(session, "profile", None),
+            "project_id": getattr(session, "project_id", None),
+            "personality": getattr(session, "personality", None),
+            "enabled_toolsets": getattr(session, "enabled_toolsets", None),
+            "read_only": bool(getattr(session, "read_only", False)),
+            "message_count": 0,
+            "messages": [],
+            "tool_calls": [],
+            "anchor_activity_scenes": {},
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
+    tmp = target.with_suffix(
+        f".tmp.draft.{os.getpid()}.{threading.current_thread().ident}"
+    )
+    try:
+        with open(tmp, "w", encoding="utf-8") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        try:
+            os.link(tmp, target)  # atomic + exclusive: a racing save() wins
+        except FileExistsError:
+            return False
+        except OSError:
+            # Filesystems without hard links: exclusive create is still safe
+            # (the file only ever holds zero messages, and any real save()
+            # replaces it wholesale).
+            try:
+                with open(target, "xb") as handle:
+                    handle.write(payload.encode("utf-8"))
+                    handle.flush()
+                    os.fsync(handle.fileno())
+            except FileExistsError:
+                return False
+    except OSError:
+        logger.debug(
+            "Failed to materialise draft-only session %s", sid, exc_info=True
+        )
+        return False
+    finally:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+    return True
+
+
 def _hide_from_default_sidebar(session: dict, *, show_cron: bool = False, show_webhook: bool = False, show_kanban: bool = False) -> bool:
     """Return True for internal/background sessions hidden from the default list."""
     sid = str(session.get('session_id') or '')

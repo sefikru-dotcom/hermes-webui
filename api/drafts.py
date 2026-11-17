@@ -320,6 +320,21 @@ def write_draft(sid: str, *, text=None, files=None, inline=None) -> tuple[dict, 
             return next_draft, False
 
 
+def draft_has_payload(draft) -> bool:
+    """Return True when a draft dict holds text or attachments.
+
+    Callers that dispose of "empty" sessions must not treat a draft-bearing
+    chat as disposable: the draft is durable user input even when the session
+    itself has zero messages (a brand-new chat whose first message was never
+    sent).
+    """
+    if not isinstance(draft, dict):
+        return False
+    text = draft.get("text")
+    files = draft.get("files")
+    return bool(text) or bool(isinstance(files, list) and any(files))
+
+
 def clear_draft(sid: str) -> dict:
     """Explicitly clear the draft (writes an authoritative empty sidecar)."""
     draft, _unchanged = write_draft(sid, text="", files=[])

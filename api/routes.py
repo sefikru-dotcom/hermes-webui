@@ -11148,6 +11148,45 @@ def _handle_session_get(handler, parsed) -> bool:
         return j(handler, {"session": public_session_projection(sess)})
 
 
+def _handle_session_draft_get(handler, parsed) -> bool:
+    """GET /api/session/draft?session_id=X — return the current composer draft.
+
+    Drafts live in an atomic sidecar (api/drafts.py), so this read never parses
+    the conversation and never takes the agent lock. It used to be an ``if
+    handler.command == "GET"`` branch inside ``handle_post`` — which ``do_GET``
+    can never reach, so every draft read 404'd. Dispatch lives in ``handle_get``
+    now.
+    """
+    query = parse_qs(parsed.query)
+    sid = query.get("session_id", [""])[0] if parsed.query else ""
+    if not sid:
+        return bad(handler, "session_id is required", 400)
+    if not is_safe_session_id(sid):
+        return bad(handler, "Session not found", 404)
+    from api.drafts import resolve_draft as _resolve_draft
+    from api.drafts import sidecar_path as _draft_sidecar_path
+
+    with LOCK:
+        cached_session = SESSIONS.get(sid)
+    # A brand-new chat may exist only in memory; a draft-only chat that survived
+    # a restart has a session file and/or a draft sidecar. Anything else is an
+    # unknown session id.
+    if (
+        cached_session is None
+        and not (SESSION_DIR / f"{sid}.json").exists()
+        and not _draft_sidecar_path(sid).exists()
+    ):
+        return bad(handler, "Session not found", 404)
+    # Same ownership boundary as GET /api/session (which this route now shares a
+    # dispatcher with): a draft is user text, so a request under profile A must
+    # not read the draft of a session owned by profile B. Unknown ids already
+    # 404'd above; the helper only rejects a KNOWN other-profile owner.
+    if not _session_id_visible_to_request_profile(handler, sid):
+        return True
+    draft = _resolve_draft(sid, getattr(cached_session, "composer_draft", None))
+    return j(handler, {"draft": draft})
+
+
 def handle_get(handler, parsed) -> bool:
     """Handle all GET routes. Returns True if handled, False for 404."""
     proxy_result = _handle_extension_sidecar_proxy(handler, parsed, "GET")
@@ -11621,6 +11660,9 @@ def handle_get(handler, parsed) -> bool:
         query = parse_qs(parsed.query)
         _handle_session_compress_status(handler, query.get("session_id", [""])[0])
         return True
+
+    if parsed.path == "/api/session/draft":
+        return _handle_session_draft_get(handler, parsed)
 
     if parsed.path == "/api/session":
         return _handle_session_get(handler, parsed)
@@ -13425,23 +13467,10 @@ def handle_post(handler, parsed) -> bool:
         def _draft_mark(name):
             _draft_stages.append((name, _draft_time.monotonic()))
         _draft_mark("enter")
-        from api.drafts import resolve_draft as _resolve_draft
+        from api.drafts import draft_has_payload as _draft_has_payload
         from api.drafts import write_draft as _write_draft
-        if handler.command == "GET":
-            query = parse_qs(parsed.query)
-            sid = query.get("session_id", [""])[0] if parsed.query else ""
-            if not sid:
-                return bad(handler, "session_id is required", 400)
-            if not is_safe_session_id(sid):
-                return bad(handler, "Session not found", 404)
-            with LOCK:
-                cached_session = SESSIONS.get(sid)
-            if cached_session is None and not (SESSION_DIR / f"{sid}.json").exists():
-                return bad(handler, "Session not found", 404)
-            draft = _resolve_draft(sid, getattr(cached_session, "composer_draft", None))
-            _draft_mark("after_read")
-            return j(handler, {"draft": draft})
-        # POST
+        # Reads (GET ?session_id=) are dispatched by handle_get — see
+        # _handle_session_draft_get(). This block is POST-only.
         try:
             require(body, "session_id")
         except ValueError as e:
@@ -13495,6 +13524,23 @@ def handle_post(handler, parsed) -> bool:
         # save() also refreshes the legacy field; never save here.
         if cached_session is not None and not getattr(cached_session, "_loaded_metadata_only", False):
             cached_session.composer_draft = dict(saved_draft)
+            # A brand-new chat lives only in SESSIONS until its first message
+            # (#1171), but its draft is already durable on disk. Without a
+            # session file a restart orphans that draft: GET /api/session and
+            # GET/POST /api/session/draft all 404, the WebUI clears its
+            # remembered new-chat draft and the typed text is unrecoverable
+            # even though the sidecar still holds it. Materialise a
+            # zero-message session file once — exclusive create, so a racing
+            # real save() always wins and no transcript can be clobbered.
+            if _draft_has_payload(saved_draft):
+                try:
+                    from api.models import ensure_empty_session_persisted as _ensure_empty_session_persisted
+
+                    _ensure_empty_session_persisted(cached_session)
+                except Exception:
+                    logger.debug(
+                        "Failed to materialise draft-only session %s", sid, exc_info=True
+                    )
         _draft_mark("after_write")
         payload = {"ok": True, "draft": saved_draft}
         if unchanged:
@@ -19311,6 +19357,19 @@ def _handle_memory_read(handler, parsed=None):
 # ── POST route helpers ────────────────────────────────────────────────────────
 
 
+def _session_draft_has_payload(sid: str) -> bool:
+    """Return True when the composer draft for ``sid`` still holds content."""
+    try:
+        from api.drafts import draft_has_payload
+        from api.drafts import resolve_draft
+
+        return draft_has_payload(resolve_draft(sid))
+    except Exception:
+        logger.debug("draft payload check failed for %s", sid, exc_info=True)
+        # Unknown → never delete a session that might be backing a draft.
+        return True
+
+
 def _handle_sessions_cleanup(handler, body, zero_only=False):
     cleaned = 0
     phase1_removed_ids = set()
@@ -19325,6 +19384,12 @@ def _handle_sessions_cleanup(handler, body, zero_only=False):
                 should_delete = s and len(s.messages) == 0
             else:
                 should_delete = s and s.title == "Untitled" and len(s.messages) == 0
+            # A draft-only new chat is materialised as a zero-message session
+            # (models.ensure_empty_session_persisted). Deleting it here would
+            # orphan a draft the user can still see in the composer, so a
+            # session that still has draft content is not "empty".
+            if should_delete and _session_draft_has_payload(p.stem):
+                should_delete = False
             if should_delete:
                 with LOCK:
                     SESSIONS.pop(p.stem, None)
