@@ -6925,7 +6925,11 @@ def _session_is_subagent_view_only(sid: str) -> bool:
     if _is_subagent_child_session_id(sid):
         return True
     try:
-        s = get_session(sid)
+        # Metadata-only: the source tag lives in the JSON metadata prefix. A
+        # full load here made POST /api/session/draft (autosave) parse the
+        # entire conversation just to check a boolean, which defeated the
+        # sidecar fast path.
+        s = get_session(sid, metadata_only=True)
     except Exception:
         return False
     src = (
@@ -13406,6 +13410,14 @@ def handle_post(handler, parsed) -> bool:
         # GET ?session_id=X  → return current draft
         # POST body          → save draft { session_id, text?, files? }
         # HTTP method is in handler.command (e.g. "POST", "GET"), parsed has no .method
+        #
+        # Draft autosave must never touch the session JSON: the pre-sidecar
+        # implementation called get_session() (full conversation parse), took the
+        # per-session agent lock and called s.save() (full re-serialise + fsync +
+        # index churn). On a multi-thousand-message session that is 4-5s of
+        # blocking I/O per debounced autosave, serialised against the agent.
+        # Drafts now live in an atomic sidecar (api/drafts.py); the inline
+        # ``composer_draft`` field remains the legacy fallback.
         import time as _draft_time
         _draft_t0 = _draft_time.monotonic()
         _draft_stages = []
@@ -13413,16 +13425,21 @@ def handle_post(handler, parsed) -> bool:
         def _draft_mark(name):
             _draft_stages.append((name, _draft_time.monotonic()))
         _draft_mark("enter")
+        from api.drafts import resolve_draft as _resolve_draft
+        from api.drafts import write_draft as _write_draft
         if handler.command == "GET":
             query = parse_qs(parsed.query)
             sid = query.get("session_id", [""])[0] if parsed.query else ""
             if not sid:
                 return bad(handler, "session_id is required", 400)
-            try:
-                s = get_session(sid)
-            except KeyError:
+            if not is_safe_session_id(sid):
                 return bad(handler, "Session not found", 404)
-            draft = getattr(s, "composer_draft", {}) or {}
+            with LOCK:
+                cached_session = SESSIONS.get(sid)
+            if cached_session is None and not (SESSION_DIR / f"{sid}.json").exists():
+                return bad(handler, "Session not found", 404)
+            draft = _resolve_draft(sid, getattr(cached_session, "composer_draft", None))
+            _draft_mark("after_read")
             return j(handler, {"draft": draft})
         # POST
         try:
@@ -13430,14 +13447,16 @@ def handle_post(handler, parsed) -> bool:
         except ValueError as e:
             return bad(handler, str(e))
         sid = body["session_id"]
+        if not is_safe_session_id(sid):
+            return bad(handler, "Session not found", 404)
         if _session_is_subagent_view_only(sid):
             return bad(handler, "Subagent sessions are view-only and cannot store a draft from WebUI", 400)
         text = body.get("text")
         files = body.get("files")
         # Stage-326 hardening (per Opus advisor): size + type validation on
         # the draft inputs. Without this, a misbehaving or malicious client
-        # can persist multi-MB strings into the session JSON on every keystroke
-        # via the 400ms debounced auto-save.
+        # can persist multi-MB strings on every keystroke via the debounced
+        # auto-save.
         _MAX_DRAFT_TEXT = 50_000  # 50 KB cap on textarea content
         _MAX_DRAFT_FILES = 50  # max number of attached file references
         if text is not None and not isinstance(text, str):
@@ -13448,34 +13467,35 @@ def handle_post(handler, parsed) -> bool:
             files = []
         if isinstance(files, list) and len(files) > _MAX_DRAFT_FILES:
             files = files[:_MAX_DRAFT_FILES]
-        try:
-            s = get_session(sid)
-        except KeyError:
+        # static/sessions.js _clearComposerDraft() sends {text: ""} with no
+        # files key: that is an explicit clear, not a text-only edit. Clear the
+        # attachments too, otherwise a stale file reference keeps the draft
+        # non-empty and can resurrect the new-chat draft restore.
+        if text == "" and files is None:
+            files = []
+        # Existence check without a full load: a persisted sidecar on disk, or a
+        # session that only lives in the in-memory cache (a brand-new chat has no
+        # file until its first message is sent).
+        with LOCK:
+            cached_session = SESSIONS.get(sid)
+        if cached_session is None and not (SESSION_DIR / f"{sid}.json").exists():
             return bad(handler, "Session not found", 404)
-        _draft_mark("after_get_session")
-        unchanged = False
-        with _get_session_agent_lock(sid):
-            _draft_mark("acquired_lock")
-            current_draft = dict(getattr(s, "composer_draft", {}) or {})
-            next_draft = dict(current_draft)
-            if text is not None:
-                next_draft["text"] = text
-            if files is not None:
-                next_draft["files"] = files
-            if next_draft == current_draft:
-                unchanged = True
-                saved_draft = current_draft
-            else:
-                s.composer_draft = next_draft
-                # Draft persistence is not conversation activity. Touching updated_at
-                # here makes the active-session external-refresh poll force-reload the
-                # current chat every few seconds while the user is typing, and that
-                # delayed reload can restore an older draft over newer local input.
-                _draft_mark("before_save")
-                s.save(touch_updated_at=False, skip_index=True)
-                _draft_mark("after_save")
-                saved_draft = s.composer_draft
-        _draft_mark("released_lock")
+        _draft_mark("after_lookup")
+        try:
+            saved_draft, unchanged = _write_draft(
+                sid,
+                text=text,
+                files=files,
+                inline=getattr(cached_session, "composer_draft", None),
+            )
+        except OSError:
+            logger.warning("Failed to persist composer draft for %s", sid, exc_info=True)
+            return bad(handler, "Failed to persist draft", 500)
+        # Keep the resident session's inline copy in sync so the next full
+        # save() also refreshes the legacy field; never save here.
+        if cached_session is not None and not getattr(cached_session, "_loaded_metadata_only", False):
+            cached_session.composer_draft = dict(saved_draft)
+        _draft_mark("after_write")
         payload = {"ok": True, "draft": saved_draft}
         if unchanged:
             payload["unchanged"] = True
@@ -13618,6 +13638,14 @@ def handle_post(handler, parsed) -> bool:
             except Exception:
                 logger.debug("Failed to unlink session file %s", p)
             sidecar_deleted = not p.exists()
+            # The draft sidecar is a separate file; a later session that reuses
+            # this id must never inherit the deleted conversation's draft.
+            try:
+                from api.drafts import delete_draft as _delete_session_draft
+
+                _delete_session_draft(sid)
+            except Exception:
+                logger.debug("Failed to unlink draft sidecar for %s", sid, exc_info=True)
             try:
                 prune_session_from_index(sid)
             except Exception:

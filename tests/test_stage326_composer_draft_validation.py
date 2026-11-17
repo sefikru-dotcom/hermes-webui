@@ -2,47 +2,35 @@
 
 Opus advisor flagged that POST /api/session/draft accepted text/files of
 arbitrary size and type. A misbehaving or malicious client could persist
-multi-MB strings into the session JSON on every keystroke via the 400ms
-debounced auto-save. The hardening:
+multi-MB strings on every keystroke via the debounced auto-save. The hardening
+(kept when drafts moved to the sidecar store):
 
 - text: must be str; clamped to 50 KB
 - files: must be list; clamped to 50 entries
+
+The persistence contract also changed: the autosave must NOT run a full
+get_session()/Session.save() (4-5s on large sessions). These source-level
+checks pin the validation order and the absence of a full save; behavioural
+coverage lives in tests/test_draft_sidecar.py.
 """
-import json
-import os
-import sys
-import threading
-import urllib.request
-from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
-import pytest
 
-# These tests directly call the handler logic by importing the routes module
-# and exercising the validation through a minimal mock handler. We don't need
-# a full HTTP server.
+ROUTES_SRC = Path(__file__).parents[1].joinpath("api", "routes.py").read_text(encoding="utf-8")
 
 
-@pytest.fixture
-def isolated_state_dir(tmp_path, monkeypatch):
-    """Point STATE_DIR at a tmpdir so saved sessions don't pollute reality."""
-    monkeypatch.setenv("HERMES_WEBUI_STATE_DIR", str(tmp_path))
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
-    monkeypatch.setenv("HERMES_BASE_HOME", str(tmp_path))
-    yield tmp_path
+def _draft_route_block() -> str:
+    start = ROUTES_SRC.index('    if parsed.path == "/api/session/draft":')
+    end = ROUTES_SRC.index('    if parsed.path == "/api/session/update":', start)
+    return ROUTES_SRC[start:end]
 
 
-def test_draft_text_clamped_to_50kb(isolated_state_dir):
+def test_draft_text_clamped_to_50kb():
     """Posting a >50KB text field should be silently truncated to 50_000 chars."""
-    # Read the routes.py source and assert the clamp logic is present.
-    src = Path(__file__).parents[1].joinpath("api", "routes.py").read_text(encoding="utf-8")
-
-    # The clamp constant must exist.
+    src = ROUTES_SRC
     assert "_MAX_DRAFT_TEXT = 50_000" in src or "_MAX_DRAFT_TEXT=50_000" in src.replace(" ", ""), (
         "routes.py must define _MAX_DRAFT_TEXT clamp for the composer-draft POST handler"
     )
-
-    # And the truncation must be applied.
     assert "text = text[:_MAX_DRAFT_TEXT]" in src, (
         "routes.py must truncate over-large draft text to _MAX_DRAFT_TEXT"
     )
@@ -50,69 +38,64 @@ def test_draft_text_clamped_to_50kb(isolated_state_dir):
 
 def test_draft_files_clamped_to_50_entries():
     """Posting a >50-entry files list should be silently truncated."""
-    src = Path(__file__).parents[1].joinpath("api", "routes.py").read_text(encoding="utf-8")
-    assert "_MAX_DRAFT_FILES = 50" in src, (
+    assert "_MAX_DRAFT_FILES = 50" in ROUTES_SRC, (
         "routes.py must define _MAX_DRAFT_FILES clamp"
     )
-    assert "files = files[:_MAX_DRAFT_FILES]" in src, (
+    assert "files = files[:_MAX_DRAFT_FILES]" in ROUTES_SRC, (
         "routes.py must truncate over-large draft files list"
     )
 
 
 def test_draft_text_type_coerced_to_string():
     """Non-string text must be coerced to empty string, not stored as-is."""
-    src = Path(__file__).parents[1].joinpath("api", "routes.py").read_text(encoding="utf-8")
-    # The type-coerce pattern must be present.
-    assert 'if text is not None and not isinstance(text, str):' in src, (
+    assert 'if text is not None and not isinstance(text, str):' in ROUTES_SRC, (
         "routes.py must coerce non-string text to empty string before persist"
     )
 
 
 def test_draft_files_type_coerced_to_list():
     """Non-list files must be coerced to empty list."""
-    src = Path(__file__).parents[1].joinpath("api", "routes.py").read_text(encoding="utf-8")
-    assert 'if files is not None and not isinstance(files, list):' in src, (
+    assert 'if files is not None and not isinstance(files, list):' in ROUTES_SRC, (
         "routes.py must coerce non-list files to empty list before persist"
     )
 
 
-def test_draft_validation_appears_before_persist():
-    """The validation must run BEFORE the lock acquire / save, not after."""
-    src = Path(__file__).parents[1].joinpath("api", "routes.py").read_text(encoding="utf-8")
-    # Anchor on the unique POST-validation comment marker.
-    marker_idx = src.find("Stage-326 hardening (per Opus advisor)")
-    persist_idx = src.find("s.composer_draft = next_draft\n                # Draft persistence is not conversation activity")
-    assert marker_idx != -1 and persist_idx != -1, (
-        "could not locate validation marker or persist site"
+def test_draft_validation_appears_before_sidecar_write():
+    """The validation must run BEFORE the sidecar write, not after."""
+    block = _draft_route_block()
+    marker_idx = block.find("Stage-326 hardening (per Opus advisor)")
+    write_idx = block.find("_write_draft(")
+    assert marker_idx != -1 and write_idx != -1, (
+        "could not locate validation marker or sidecar write site"
     )
-    assert marker_idx < persist_idx, (
-        "validation block must run before composer_draft persist"
-    )
+    assert marker_idx < write_idx, "validation block must run before the draft write"
 
 
-def test_draft_save_does_not_touch_session_updated_at():
-    """Autosaving the composer must not look like conversation activity.
+def test_draft_route_uses_sidecar_and_never_saves_the_session():
+    """Autosave must not parse/re-serialise the conversation or lock the agent.
 
-    If POST /api/session/draft bumps updated_at, the frontend's active-session
-    external refresh poll treats every keystroke autosave as a remote session
-    update and force-reloads the current chat a few seconds later.
+    This is the regression that made draft autosave take 4-5s on large
+    sessions: get_session() + _get_session_agent_lock() + s.save() on every
+    debounced keystroke burst.
     """
-    src = Path(__file__).parents[1].joinpath("api", "routes.py").read_text(encoding="utf-8")
-    persist_idx = src.find("s.composer_draft = next_draft")
-    assert persist_idx != -1, "could not locate composer draft persist site"
-    save_idx = src.find("s.save(touch_updated_at=False, skip_index=True)", persist_idx)
-    assert save_idx != -1, "composer draft save must preserve session updated_at and skip index churn"
+    block = _draft_route_block()
+    code = "\n".join(
+        line for line in block.splitlines() if not line.strip().startswith("#")
+    )
+    assert "from api.drafts import write_draft" in code or "_write_draft" in code
+    assert "get_session(" not in code, (
+        "draft autosave must not call get_session(); it is a full conversation load"
+    )
+    assert "_get_session_agent_lock(" not in code, (
+        "draft autosave must not take the agent lock"
+    )
+    assert ".save(" not in code, (
+        "draft autosave must not call Session.save(); the sidecar is the store"
+    )
 
 
-def test_draft_save_skips_unchanged_payload_before_persist():
-    """Duplicate debounced draft POSTs should not rewrite the full session JSON."""
-    src = Path(__file__).parents[1].joinpath("api", "routes.py").read_text(encoding="utf-8")
-    draft_idx = src.find('current_draft = dict(getattr(s, "composer_draft", {}) or {})')
-    unchanged_idx = src.find("if next_draft == current_draft", draft_idx)
-    save_idx = src.find("s.save(touch_updated_at=False, skip_index=True)", draft_idx)
-
-    assert draft_idx != -1, "draft route should snapshot current composer_draft"
-    assert unchanged_idx != -1, "draft route should no-op unchanged normalized payloads"
-    assert save_idx != -1, "draft route should still save changed drafts"
-    assert unchanged_idx < save_idx, "unchanged guard must run before full session save"
-    assert 'payload["unchanged"] = True' in src
+def test_draft_unchanged_payload_still_short_circuits():
+    """Duplicate debounced draft POSTs should not rewrite the sidecar."""
+    block = _draft_route_block()
+    assert "unchanged" in block
+    assert 'payload["unchanged"] = True' in block
