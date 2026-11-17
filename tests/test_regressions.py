@@ -343,37 +343,91 @@ def test_deleted_session_does_not_appear_in_list(cleanup_test_sessions):
 
 
 def test_server_delete_prunes_session_index(cleanup_test_sessions):
-    """session/delete should prune the deleted row without discarding the index."""
-    src = (REPO_ROOT / "server.py").read_text()
-    routes_src = (REPO_ROOT / "api" / "routes.py").read_text() if (REPO_ROOT / "api" / "routes.py").exists() else ""
-    # Find the delete handler in either file
-    for label, text in [("server.py", src), ("api/routes.py", routes_src)]:
-        # Accept both single-quote and double-quote style (formatting varies by contributor)
-        delete_idx = max(
-            text.find("if parsed.path == '/api/session/delete':"),
-            text.find('if parsed.path == "/api/session/delete":'),
-        )
-        if delete_idx >= 0:
-            delete_block = text[delete_idx:delete_idx+2400]
-            assert "prune_session_from_index(sid)" in delete_block, \
-                f"{label} session/delete must prune SESSION_INDEX_FILE"
-            return
-    assert False, "session/delete handler not found in server.py or api/routes.py"
+    """session/delete must prune the deleted row from the persisted sidebar index.
+
+    Behavioral check (replaces a fixed-offset source grep): seed the on-disk
+    index the same way a sidebar visit would, delete through the public API,
+    and require the row to be gone from the index afterwards.
+    """
+    from api.config import SESSION_INDEX_FILE
+
+    sid = make_session(cleanup_test_sessions)
+    _make_session_visible(sid)
+    entries = []
+    if SESSION_INDEX_FILE.exists():
+        entries = json.loads(SESSION_INDEX_FILE.read_text(encoding="utf-8"))
+    entries = [e for e in entries if e.get("session_id") != sid]
+    entries.append({"session_id": sid, "title": "regression-test-delete-R8", "updated_at": time.time()})
+    SESSION_INDEX_FILE.write_text(json.dumps(entries), encoding="utf-8")
+
+    result, status = post("/api/session/delete", {"session_id": sid})
+    assert status == 200 and result.get("ok") is True
+
+    remaining = json.loads(SESSION_INDEX_FILE.read_text(encoding="utf-8"))
+    assert all(e.get("session_id") != sid for e in remaining), \
+        "session/delete must prune SESSION_INDEX_FILE (ghost row would reappear in the sidebar)"
 
 
 def test_server_delete_removes_session_bak_snapshot(cleanup_test_sessions):
-    """session/delete must remove sidecar backups so deleted sessions stay deleted."""
-    routes_src = (REPO_ROOT / "api" / "routes.py").read_text()
-    delete_idx = max(
-        routes_src.find("if parsed.path == '/api/session/delete':"),
-        routes_src.find('if parsed.path == "/api/session/delete":'),
-    )
-    assert delete_idx >= 0, "session/delete handler not found in api/routes.py"
-    delete_block = routes_src[delete_idx:delete_idx+2400]
-    assert "with_suffix('.json.bak').unlink" in delete_block or 'with_suffix(".json.bak").unlink' in delete_block, \
+    """session/delete must remove sidecar backups so deleted sessions stay deleted.
+
+    Behavioral check (replaces a fixed-offset source grep): a real
+    ``<sid>.json.bak`` sibling must be gone after the delete, otherwise a later
+    orphan-backup recovery would resurrect the deleted conversation.
+    """
+    from api.config import SESSION_DIR
+
+    sid = make_session(cleanup_test_sessions)
+    _make_session_visible(sid)
+    session_path = SESSION_DIR / f"{sid}.json"
+    assert session_path.exists(), "precondition: session file missing"
+    bak_path = session_path.with_suffix(".json.bak")
+    bak_path.write_text(session_path.read_text(encoding="utf-8"), encoding="utf-8")
+    assert bak_path.exists(), "precondition: backup snapshot missing"
+
+    result, status = post("/api/session/delete", {"session_id": sid})
+    assert status == 200 and result.get("ok") is True
+
+    assert not bak_path.exists(), \
         "session/delete must unlink <sid>.json.bak to avoid later orphan-backup recovery"
+    assert not session_path.exists(), "session/delete must unlink <sid>.json"
+
 
 # ── R9: Token/tool SSE events write to wrong session after switch ─────────────
+
+def _js_handler_body(src: str, start: int) -> str:
+    """Return the balanced-brace body of the JS handler beginning at ``start``.
+
+    Fixed-offset slices of minified JS go stale whenever the handler grows a
+    line; extracting the real body keeps the assertion about the handler, not
+    about a byte budget.
+    """
+    open_idx = src.find("{", start)
+    if open_idx < 0:
+        return ""
+    depth = 0
+    quote = None
+    escape = False
+    for i in range(open_idx, len(src)):
+        ch = src[i]
+        if quote:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == quote:
+                quote = None
+            continue
+        if ch in "'\"`":
+            quote = ch
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return src[open_idx + 1:i]
+    return src[open_idx + 1:]
+
 
 def test_token_handler_guards_session_id(cleanup_test_sessions):
     """R9a: The SSE token event handler must check activeSid before writing to DOM.
@@ -387,12 +441,17 @@ def test_token_handler_guards_session_id(cleanup_test_sessions):
     if token_idx < 0:
         token_idx = src.find("es.addEventListener('token'")
     assert token_idx >= 0, "token event handler not found"
-    token_block = src[token_idx:token_idx+300]
-    assert "activeSid" in token_block, \
-        "token handler must check activeSid before writing to DOM"
-    assert "S.session.session_id!==activeSid" in token_block or \
-           "S.session.session_id===activeSid" in token_block, \
-    "token handler must compare current session to activeSid"
+    token_block = _js_handler_body(src, token_idx)
+    assert token_block, "token handler body not found"
+    guard_idx = max(
+        token_block.find("S.session.session_id!==activeSid"),
+        token_block.find("S.session.session_id===activeSid"),
+    )
+    assert guard_idx >= 0, "token handler must compare current session to activeSid"
+    dom_write_idx = token_block.find("ensureAssistantRow(")
+    assert dom_write_idx >= 0, "token handler must render the assistant row"
+    assert guard_idx < dom_write_idx, \
+        "token handler must check activeSid BEFORE writing tokens into the DOM"
 
 
 def test_tool_handler_guards_session_id(cleanup_test_sessions):
@@ -989,7 +1048,7 @@ def test_ui_js_can_upgrade_thinking_spinner_into_live_reasoning_card(cleanup_tes
     renders provider reasoning as a Worklog Thinking Card.
     """
     src = (REPO_ROOT / "static/ui.js").read_text()
-    assert "function _thinkingMarkup(text='')" in src or 'function _thinkingMarkup(text="")' in src, \
+    assert re.search(r"function _thinkingMarkup\(text=''", src) or re.search(r'function _thinkingMarkup\(text=""', src), \
         "ui.js must centralize thinking row markup so it can switch between spinner and live text"
     assert ("function updateThinking(text='', options){appendThinking(text, options);}" in src
             or 'function updateThinking(text="", options){appendThinking(text, options);}' in src), \

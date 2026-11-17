@@ -1043,11 +1043,33 @@ def test_custom_slug_cold_stale_not_picked_still_strips_5979():
     assert model == bare, f"unmarked stale cold custom:slug id must strip (legacy), got {model!r}"
 
 
-def test_warm_models_catalog_provenance_if_cold_publishes_from_disk_5979():
+def test_warm_models_catalog_provenance_if_cold_publishes_from_disk_5979(monkeypatch):
     """The send-path warm helper publishes provenance from a valid disk cache
     when memory is cold — restoring the endpoint-advertised signal so #433
     strips and #5979 preserves — WITHOUT a live rebuild.
+
+    The setup publishes a catalog to disk deterministically. The live provider
+    rebuild is network-bound and, past its foreground budget, returns a
+    fallback WITHOUT publishing provenance (the worker publishes out-of-band
+    later) — so pinning the legacy synchronous publish and stubbing the rebuild
+    seam keeps this test about the warm helper, not about probe latency.
     """
+    canned_catalog = {
+        'active_provider': 'custom:llm-proxy',
+        'default_model': 'x-ai/grok-4.5',
+        'configured_model_badges': {},
+        'groups': [{
+            'provider_id': 'custom:llm-proxy',
+            'models': [
+                {'id': 'x-ai/grok-4.5'},
+                {'id': 'x-ai/grok-composer-2.5-fast'},
+            ],
+        }],
+        'aliases': {},
+    }
+    monkeypatch.setattr(config, '_LIVE_REBUILD_BUDGET_SECONDS', 0, raising=False)
+    monkeypatch.setattr(config, '_invoke_models_rebuild',
+                        lambda builder: canned_catalog, raising=False)
     old_cfg = dict(config.cfg)
     config.cfg.clear()
     config.cfg.update({

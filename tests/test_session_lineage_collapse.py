@@ -2087,7 +2087,13 @@ def test_sidebar_search_and_rows_use_read_only_display_title():
     assert "const rawTitle=_sessionDisplayTitle(s);" in js
     assert "const tags=_sessionTitleTags(rawTitle);" in js
     assert "const segTitle=_sessionDisplayTitle(seg)||t('session_lineage_segment_untitled');" in js
-    assert "const childTitle=_sessionDisplayTitle(child)||'Untitled child session';" in js
+    child_title_line = next(
+        (line for line in js.splitlines()
+         if "const childTitle=" in line and "_sessionDisplayTitle(child)" in line),
+        "",
+    )
+    assert "_sessionDisplayTitle(child)||'Untitled child session'" in child_title_line, \
+        "child rows must fall back to the read-only display title, not a stale persisted title"
 
 
 def test_child_session_parent_segment_note_uses_display_title():
