@@ -1274,8 +1274,147 @@ _SECRET_SHAPED_RE = re.compile(
 
 def _redact_prefill_status_text(text: str) -> str:
     """Return a short, non-secret diagnostic string for prefill status."""
+    return _redacted_status_text(text)
+
+
+# ── Provider-wait / recovery notices (thinking_callback → SSE) ───────────────
+# ``AIAgent._emit_wait_notice`` rewrites the *live status line* through
+# ``thinking_callback`` (CLI spinner, TUI/Desktop ``thinking.delta``, gateway
+# activity): "⏳ waiting on <model> — 90s with no response yet", "⚠ no response
+# from provider in 60s — reconnecting...", "⏳ waiting on provider — retrying in
+# 30s (attempt 1/5)", "↻ ... asking it to continue (1/3)", and "" to clear the
+# line once activity resumes. The same callback also carries the cosmetic
+# quiet-mode spinner text ("🌸 pondering...") that ``announce_api_call`` writes
+# before every request, and it is NOT the reasoning channel
+# (``reasoning_callback`` is).
+#
+# The WebUI never bound ``thinking_callback`` at all, so every honest
+# wait/recovery notice was dropped: a slow provider looked like an anonymous
+# spinner for minutes and a reconnect was invisible, while CLI/TUI/Desktop all
+# showed the notice. The bridge below forwards ONLY the honest notices, verbatim
+# and redacted, into the existing ``warning`` SSE event — the transient composer
+# status surface the frontend already renders for retry/fallback lines
+# (static/messages.js ``source.addEventListener('warning')`` → ``setComposerStatus``).
+# Nothing here invents progress text, and nothing from the reasoning channel is
+# routed into it.
+
+_WAIT_NOTICE_MAX_CHARS = 240
+_WAIT_NOTICE_MIN_INTERVAL_SECONDS = 3.0
+
+# Every wait/recovery notice the agent emits is prefixed with one of these status
+# glyphs ("⏳ waiting on ...", "⚠ no response from provider ...", "↻ ... asking it to
+# continue ...", "⚙ processing prompt ..."). Requiring the prefix is what keeps
+# ordinary prose that merely mentions waiting out of the status line.
+_WAIT_NOTICE_GLYPHS = ("⏳", "⌛", "⚠", "↻", "⚙")
+
+# Substrings taken from the agent's own emitters (hermes-agent
+# agent/chat_completion_nonstream.py, agent/chat_completion_stream_monitor.py,
+# agent/chat_completion_helpers.py, agent/turn_recovery.py,
+# agent/turn_truncation.py). A text must match one to be forwarded, which is what
+# keeps the CLI kawaii spinner ("pondering/processing/reasoning...") out.
+_WAIT_NOTICE_MARKERS = (
+    'waiting on ',  # "⏳ waiting on <model> — ..." / "⏳ waiting on provider — retrying in Ns"
+    'no response from provider',
+    'no output from provider',
+    'no stream output for',
+    'reconnecting',  # "⚠ no response from provider in Ns — reconnecting..."
+    'retrying in ',
+    'asking it to continue',  # "↻ ... asking it to continue (n/3)"
+    'into memory',  # "⏳ loading <model> into memory — 42%"
+    'processing prompt',  # "⚙ processing prompt — 12%"
+)
+
+# Recovery notices are rare and carry the state change the user is waiting for,
+# so they bypass the heartbeat rate limit instead of being coalesced away.
+_WAIT_NOTICE_URGENT_MARKERS = (
+    'reconnecting',
+    'retrying in ',
+    'no response from provider',
+    'no output from provider',
+    'asking it to continue',
+)
+
+_AGENT_WARN_MAX_CHARS = 240
+_AGENT_WARN_MAX_PER_TURN = 8
+
+
+def _redacted_status_text(text, *, limit: int = 240) -> str:
+    """Collapse whitespace and mask secret-shaped values in a status string."""
     clean = _SECRET_SHAPED_RE.sub("[REDACTED]", str(text or ""))
-    return " ".join(clean.split())[:240]
+    return " ".join(clean.split())[:limit]
+
+
+def _provider_wait_notice_text(text) -> str:
+    """Return the redacted notice when ``text`` is an honest wait/recovery notice, else "".
+
+    Empty ("clear the line"), multi-line, oversized, and cosmetic-spinner texts
+    are rejected — only the agent's documented wait/recovery shapes pass.
+    """
+    raw = str(text or "").strip()
+    if not raw or len(raw) > _WAIT_NOTICE_MAX_CHARS:
+        return ""
+    if "\n" in raw or "\r" in raw:
+        return ""
+    if not raw.startswith(_WAIT_NOTICE_GLYPHS):
+        return ""
+    lowered = raw.lower()
+    if not any(marker in lowered for marker in _WAIT_NOTICE_MARKERS):
+        return ""
+    return _redacted_status_text(raw, limit=_WAIT_NOTICE_MAX_CHARS)
+
+
+class _ProviderWaitNoticeBridge:
+    """Dedupe/rate-limit honest provider-wait notices on their way to the SSE queue.
+
+    One instance per turn. It holds the last emitted notice so repeated
+    heartbeats and bursts of rewrites cannot spam the browser. A cleared line
+    ("" from the agent) or a non-notice resets the state, so the same notice can
+    surface again after a recovery.
+    """
+
+    def __init__(self, *, min_interval=_WAIT_NOTICE_MIN_INTERVAL_SECONDS, clock=None):
+        self._min_interval = max(0.0, float(min_interval))
+        self._clock = clock or time.monotonic
+        self._last_text = ""
+        self._last_ts = None
+
+    def observe(self, text, *, session_id: str = ""):
+        """Return the ``warning`` payload for an honest notice, or None to drop it."""
+        notice = _provider_wait_notice_text(text)
+        if not notice:
+            # "" (agent cleared the line) or CLI cosmetics: nothing to show, and
+            # the next identical notice is allowed to fire again.
+            self._last_text = ""
+            self._last_ts = None
+            return None
+        if notice == self._last_text:
+            return None
+        now = self._clock()
+        urgent = any(marker in notice.lower() for marker in _WAIT_NOTICE_URGENT_MARKERS)
+        if not urgent and self._last_ts is not None and (now - self._last_ts) < self._min_interval:
+            return None
+        self._last_text = notice
+        self._last_ts = now
+        payload = {"type": "provider_wait", "message": notice}
+        if session_id:
+            payload["session_id"] = session_id
+        return payload
+
+
+def _agent_warn_payload(message):
+    """Payload for an agent ``warn`` lifecycle status, or None when unusable.
+
+    ``status_callback(kind='warn', ...)`` carries the agent's own user-visible
+    warnings (``_emit_warning``: context-overflow blocked, compression summary
+    failed, auxiliary task failed, facade lease timeout). The WebUI dropped all
+    of them, so a turn that silently lost compression or an auxiliary call
+    looked healthy. They are forwarded verbatim (redacted, bounded) into the same
+    transient ``warning`` surface — nothing is generated here.
+    """
+    text = _redacted_status_text(message, limit=_AGENT_WARN_MAX_CHARS)
+    if not text:
+        return None
+    return {"type": "agent_warn", "message": text}
 
 
 def _valid_prefill_messages(value) -> list[dict]:
@@ -9774,6 +9913,30 @@ def _run_agent_streaming(
     # parse_fallback_notice). Kept verbatim so turn-settle can persist the real
     # reason/cooldown instead of inferring one from the model difference.
     _captured_fallback_notice = [None]
+    # Agent ``warn`` lifecycle statuses already forwarded this turn — last text
+    # (consecutive dedupe) and a count (per-turn cap) so a chatty turn cannot
+    # flood the composer status line.
+    _captured_agent_warn = ['', 0]
+    # thinking_callback bridge: the agent rewrites its live status line with
+    # honest wait/recovery notices; forward them into the existing `warning` SSE.
+    _wait_notice_bridge = _ProviderWaitNoticeBridge()
+
+    def _agent_thinking_callback(text):
+        """Bridge the agent's live status-line rewrite into the WebUI status surface.
+
+        ``thinking_callback`` is the status line, not the reasoning channel: it
+        carries provider-wait / reconnect / retry notices and "" to clear them,
+        plus the cosmetic CLI spinner text. Only the honest notices are
+        forwarded, into the existing ``warning`` SSE event (transient composer
+        status), deduped and rate-limited by the bridge.
+        """
+        try:
+            payload = _wait_notice_bridge.observe(text, session_id=session_id)
+        except Exception:
+            logger.debug("wait-notice bridge failed for stream %s", stream_id, exc_info=True)
+            return
+        if payload:
+            put('warning', payload)
 
     def _agent_status_callback(kind, message):
         """Bridge Agent lifecycle status into WebUI SSE.
@@ -9810,6 +9973,22 @@ def _run_agent_streaming(
         if _is_fallback_notice:
             _captured_fallback_notice[0] = _message
             put('warning', {'type': 'fallback', 'message': _message})
+            return
+        # The agent's own user-visible warnings (_emit_warning → kind 'warn'):
+        # context-overflow blocked, compression summary failed, auxiliary task
+        # failed, facade lease timeout. Dropped before this fix, so a turn that
+        # degraded silently looked healthy. Forwarded verbatim into the same
+        # transient surface, deduped and capped per turn.
+        if _kind == 'warn':
+            _warn_payload = _agent_warn_payload(_message)
+            if (
+                _warn_payload is not None
+                and _warn_payload['message'] != _captured_agent_warn[0]
+                and _captured_agent_warn[1] < _AGENT_WARN_MAX_PER_TURN
+            ):
+                _captured_agent_warn[0] = _warn_payload['message']
+                _captured_agent_warn[1] += 1
+                put('warning', _warn_payload)
 
     # xsession wakeup misroute root fix (Option 1): pre-init so the outer
     # finally can always reset even if an exception fires before the bind.
@@ -11021,6 +11200,12 @@ def _run_agent_streaming(
                 _agent_kwargs['tool_complete_callback'] = on_tool_complete
             if 'status_callback' in _agent_params:
                 _agent_kwargs['status_callback'] = _agent_status_callback
+            # Provider-wait progress: the agent rewrites its live status line
+            # through thinking_callback; without this binding every honest
+            # wait/reconnect notice was dropped and a slow provider looked like
+            # an anonymous spinner for minutes.
+            if 'thinking_callback' in _agent_params:
+                _agent_kwargs['thinking_callback'] = _agent_thinking_callback
             if 'max_iterations' in _agent_params and _max_iterations_cfg is not None:
                 _agent_kwargs['max_iterations'] = _max_iterations_cfg
             if 'max_tokens' in _agent_params and _max_tokens_cfg is not None:
@@ -11147,6 +11332,8 @@ def _run_agent_streaming(
                         agent.tool_complete_callback = _agent_kwargs.get('tool_complete_callback')
                     if hasattr(agent, 'status_callback'):
                         agent.status_callback = _agent_kwargs.get('status_callback')
+                    if hasattr(agent, 'thinking_callback'):
+                        agent.thinking_callback = _agent_kwargs.get('thinking_callback')
                     if hasattr(agent, 'interim_assistant_callback'):
                         agent.interim_assistant_callback = _agent_kwargs.get('interim_assistant_callback')
                     if hasattr(agent, 'reasoning_callback'):
