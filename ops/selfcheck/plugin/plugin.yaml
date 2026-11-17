@@ -1,0 +1,6 @@
+name: mars-selfcheck
+version: "1.2.0"
+description: "Self-healing syntax guard & bounded auto-test runner: after write_file / patch / skill_manage the written file is re-checked on disk (py compile, node --check, json.loads, yaml.safe_load, bash -n) and mars-test runs the project's tests in a copy bounded by bytes/files/time. Refuses scratch trees without a project marker (/root/workspace), skips caches/builds/artifacts, uses /var/tmp on disk and always cleans up its sandbox. Non-blocking — the file stays written."
+author: "SKY (Mars)"
+hooks:
+  - transform_tool_result
