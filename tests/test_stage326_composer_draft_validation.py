@@ -20,7 +20,13 @@ ROUTES_SRC = Path(__file__).parents[1].joinpath("api", "routes.py").read_text(en
 
 
 def _draft_route_block() -> str:
-    start = ROUTES_SRC.index('    if parsed.path == "/api/session/draft":')
+    """The POST /api/session/draft block inside handle_post.
+
+    ``/api/session/draft`` also appears in handle_get (the read used to be an
+    unreachable branch in handle_post), so the search must start at handle_post.
+    """
+    post_start = ROUTES_SRC.index("def handle_post(")
+    start = ROUTES_SRC.index('    if parsed.path == "/api/session/draft":', post_start)
     end = ROUTES_SRC.index('    if parsed.path == "/api/session/update":', start)
     return ROUTES_SRC[start:end]
 

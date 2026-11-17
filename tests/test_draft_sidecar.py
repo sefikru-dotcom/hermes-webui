@@ -83,7 +83,11 @@ def _call_draft_route(monkeypatch, body=None, command="POST", query=""):
         _safe_webui_print=lambda *args, **kwargs: None,
     )
     parsed = SimpleNamespace(path="/api/session/draft", query=query)
-    result = routes.handle_post(handler, parsed)
+    # GET /api/session/draft is dispatched by handle_get; only POST reaches
+    # handle_post (the old "if handler.command == 'GET'" branch there was
+    # unreachable from do_GET).
+    route = routes.handle_get if command == "GET" else routes.handle_post
+    result = route(handler, parsed)
     return result, captured
 
 
@@ -168,27 +172,208 @@ def test_metadata_only_get_session_reports_sidecar_draft(store):
     assert meta.composer_draft == {"text": "meta draft", "files": []}
 
 
-def test_in_memory_new_chat_draft_roundtrips_without_creating_session_file(store, monkeypatch):
-    """A brand-new chat has no session file until its first message.
+def test_new_chat_draft_materialises_the_session_once_and_survives_restart(store, monkeypatch):
+    """A brand-new chat has no session file until its first message (#1171).
 
-    The draft autosave must still work there (the pre-sidecar route resolved the
-    session from the SESSIONS cache) and a page reload must find the draft
-    through GET /api/session/draft — without materialising a zero-message file.
+    Its draft is durable on disk, so without a session file a restart orphans
+    the draft: GET /api/session, GET/POST /api/session/draft all 404 and the
+    WebUI drops the remembered new-chat draft. The first draft write therefore
+    materialises a zero-message session file exactly once.
     """
     session = models.new_session(workspace=str(Path.cwd()))
     sid = session.session_id
-    assert not (store / f"{sid}.json").exists()
+    path = store / f"{sid}.json"
+    assert not path.exists()
 
     result, captured = _call_draft_route(
-        monkeypatch, {"session_id": sid, "text": "new chat draft", "files": []}
+        monkeypatch, {"session_id": sid, "text": "typed but not sent", "files": []}
     )
     assert result is True
-    assert captured["payload"]["draft"]["text"] == "new chat draft"
-    assert not (store / f"{sid}.json").exists()
+    assert captured["payload"]["draft"]["text"] == "typed but not sent"
+
+    # One durable, zero-message session file, metadata in the prefix order
+    # load_metadata_only() needs.
+    assert path.exists()
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert data["session_id"] == sid
+    assert data["title"] == "Untitled"
+    assert data["message_count"] == 0
+    assert data["messages"] == []
+    assert data["profile"] == session.profile
+
+    # A second keystroke must not re-save the session (no full save per key).
+    before_bytes = path.read_bytes()
+    before_mtime = path.stat().st_mtime_ns
+    result, captured = _call_draft_route(
+        monkeypatch, {"session_id": sid, "text": "typed but not sent, more", "files": []}
+    )
+    assert result is True
+    assert path.read_bytes() == before_bytes
+    assert path.stat().st_mtime_ns == before_mtime
+
+    # ── restart: cold process, empty cache, no in-memory session ───────────
+    models.SESSIONS.clear()
+    assert not models.SESSIONS
 
     result, captured = _call_draft_route(monkeypatch, command="GET", query=f"session_id={sid}")
     assert result is True
-    assert captured["payload"]["draft"]["text"] == "new chat draft"
+    assert captured["payload"]["draft"]["text"] == "typed but not sent, more"
+
+    reloaded = models.get_session(sid)
+    assert reloaded.session_id == sid
+    assert reloaded.messages == []
+    assert reloaded.composer_draft["text"] == "typed but not sent, more"
+
+    # The WebUI restore path (_restoreRememberedNewChatDraftSession) reads the
+    # detail endpoint with messages=0 and requires an empty Untitled session
+    # that still carries the draft.
+    handler = SimpleNamespace(command="GET", _safe_webui_print=lambda *a, **k: None)
+    detail = _capture(monkeypatch)
+    parsed = SimpleNamespace(
+        path="/api/session",
+        query=f"session_id={sid}&messages=0&resolve_model=0",
+    )
+    assert routes.handle_get(handler, parsed) is True
+    payload_session = detail["payload"]["session"]
+    assert payload_session["message_count"] == 0
+    assert payload_session["title"] == "Untitled"
+    assert payload_session["composer_draft"]["text"] == "typed but not sent, more"
+
+    # Still an empty chat: the sidebar keeps hiding it (#1171).
+    assert all(row.get("session_id") != sid for row in models.all_sessions())
+
+
+def test_clear_on_a_brand_new_chat_does_not_materialise_a_session(store, monkeypatch):
+    """An explicit clear is not draft content: no ghost session file appears."""
+    session = models.new_session(workspace=str(Path.cwd()))
+    sid = session.session_id
+
+    result, captured = _call_draft_route(monkeypatch, {"session_id": sid, "text": ""})
+    assert result is True
+    assert captured["payload"]["draft"] == {"text": "", "files": []}
+    assert not (store / f"{sid}.json").exists()
+    assert not drafts.sidecar_path(sid).exists()
+
+
+def test_materialisation_never_clobbers_an_existing_session_file(store, monkeypatch):
+    """The materialising write is exclusive: a real save() always wins."""
+    session = models.new_session(workspace=str(Path.cwd()))
+    sid = session.session_id
+    path = store / f"{sid}.json"
+    session.messages = [{"role": "user", "content": "the first message"}]
+    session.save(skip_index=True)
+    before = path.read_bytes()
+
+    assert models.ensure_empty_session_persisted(session) is False
+    assert path.read_bytes() == before
+    assert json.loads(before.decode("utf-8"))["message_count"] == 1
+
+
+# ── GET dispatch regression ─────────────────────────────────────────────────
+
+def test_get_draft_is_dispatched_by_handle_get(store, monkeypatch):
+    _make_session("s1")
+    drafts.write_draft("s1", text="dispatch me", files=[])
+
+    result, captured = _call_draft_route(monkeypatch, command="GET", query="session_id=s1")
+    assert result is True
+    assert captured["status"] == 200
+    assert captured["payload"]["draft"]["text"] == "dispatch me"
+
+
+def test_handle_post_no_longer_serves_draft_reads():
+    """The GET branch inside handle_post was unreachable from do_GET."""
+    src = Path(routes.__file__).read_text(encoding="utf-8")
+    post = src[src.index("def handle_post("):]
+    start = post.index('    if parsed.path == "/api/session/draft":')
+    end = post.index('    if parsed.path == "/api/session/update":', start)
+    assert 'handler.command == "GET"' not in post[start:end]
+
+
+def test_get_draft_validates_the_session_id(store, monkeypatch):
+    result, captured = _call_draft_route(monkeypatch, command="GET", query="")
+    assert result is True
+    assert captured["status"] == 400
+
+    result, captured = _call_draft_route(monkeypatch, command="GET", query="session_id=nope")
+    assert result is True
+    assert captured["status"] == 404
+
+    result, captured = _call_draft_route(
+        monkeypatch, command="GET", query="session_id=..%2F..%2Fetc%2Fpasswd"
+    )
+    assert result is True
+    assert captured["status"] == 404
+
+
+def test_view_only_subagent_session_rejects_writes_but_allows_draft_reads(store, monkeypatch):
+    _make_session("s1")
+    drafts.write_draft("s1", text="owned by the delegate runner", files=[])
+    monkeypatch.setattr(routes, "_session_is_subagent_view_only", lambda sid: True)
+
+    result, captured = _call_draft_route(monkeypatch, {"session_id": "s1", "text": "hijack"})
+    assert result is True
+    assert captured["status"] == 400
+    assert drafts.resolve_draft("s1")["text"] == "owned by the delegate runner"
+
+    result, captured = _call_draft_route(monkeypatch, command="GET", query="session_id=s1")
+    assert result is True
+    assert captured["payload"]["draft"]["text"] == "owned by the delegate runner"
+
+
+def test_get_draft_respects_the_active_profile_boundary(store, monkeypatch):
+    """A draft is user text: cross-profile reads must 404, not leak."""
+    _make_session("other-profile")
+    session = models.Session.load("other-profile")
+    session.profile = "someone-else"
+    session.save(skip_index=True)
+    drafts.write_draft("other-profile", text="private text", files=[])
+
+    monkeypatch.setattr(routes, "_get_active_profile_name", lambda: "default")
+    result, captured = _call_draft_route(
+        monkeypatch, command="GET", query="session_id=other-profile"
+    )
+    assert result is True
+    assert captured["status"] == 404
+    assert "draft" not in captured["payload"]
+
+    # Same profile → readable again.
+    monkeypatch.setattr(routes, "_get_active_profile_name", lambda: "someone-else")
+    result, captured = _call_draft_route(
+        monkeypatch, command="GET", query="session_id=other-profile"
+    )
+    assert captured["payload"]["draft"]["text"] == "private text"
+
+
+def test_draft_get_is_dispatched_only_after_the_auth_gate():
+    """do_GET must authenticate before handle_get dispatches the draft read."""
+    server_src = (
+        Path(routes.__file__).parent.parent / "server.py"
+    ).read_text(encoding="utf-8")
+    do_get = server_src[server_src.index("def do_GET(self)"):]
+    do_get = do_get[: do_get.index("def _handle_write")]
+    assert do_get.index("check_auth(self, parsed)") < do_get.index(
+        "handle_get(self, parsed)"
+    ), "the draft GET must never be reachable before authentication"
+
+
+def test_zero_message_cleanup_keeps_a_draft_only_session(store, monkeypatch):
+    session = models.new_session(workspace=str(Path.cwd()))
+    sid = session.session_id
+    _call_draft_route(monkeypatch, {"session_id": sid, "text": "keep me", "files": []})
+    path = store / f"{sid}.json"
+    assert path.exists()
+
+    _capture(monkeypatch)
+    handler = SimpleNamespace(command="POST", _safe_webui_print=lambda *a, **k: None)
+    assert routes._handle_sessions_cleanup(handler, {}, zero_only=True) is True
+    assert path.exists()
+    assert drafts.resolve_draft(sid)["text"] == "keep me"
+
+    # Once the draft is cleared the session is a genuine empty chat again.
+    drafts.write_draft(sid, text="", files=[])
+    routes._handle_sessions_cleanup(handler, {}, zero_only=True)
+    assert not path.exists()
 
 
 def test_draft_route_404s_for_unknown_session(store, monkeypatch):
