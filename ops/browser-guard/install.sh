@@ -39,6 +39,17 @@ echo "== Mars browser-guard install =="
 echo "source: $HERE"
 echo "target: $SYSTEMD_DIR"
 
+# Preflight: refuse to install units that cannot start. A hardcoded venv path is
+# exactly what broke on 2026-11-17 (dangling uv symlink -> 203/EXEC), so the
+# interpreter is resolved by the same helper the units use.
+chmod 0755 "$HERE/run-guard.sh" "$HERE/browser-guard.sh" "$HERE/browser_janitor.py" "$HERE/browser_health.py" 2>/dev/null || true
+if ! PY="$("$HERE/run-guard.sh" --print "$HERE/browser_health.py")"; then
+  echo "preflight FAILED: no working python3 for the guard scripts" >&2
+  echo "set MARS_GUARD_PYTHON=/path/to/python3 and retry" >&2
+  exit 1
+fi
+echo "interpreter: $PY"
+
 for unit in "${UNITS[@]}"; do
   src="$HERE/systemd/$unit"
   dst="$SYSTEMD_DIR/$unit"
@@ -52,7 +63,7 @@ for unit in "${UNITS[@]}"; do
 done
 
 echo "  chmod scripts"
-run chmod 0755 "$HERE/browser-guard.sh" "$HERE/browser_janitor.py" "$HERE/browser_health.py"
+run chmod 0755 "$HERE/browser-guard.sh" "$HERE/run-guard.sh" "$HERE/browser_janitor.py" "$HERE/browser_health.py"
 
 echo "  systemctl daemon-reload"
 run systemctl daemon-reload
