@@ -227,6 +227,31 @@ def is_safe_session_id(sid) -> bool:
     return all(c in _SAFE_SID_CHARS for c in sid)
 
 
+def _apply_composer_draft_sidecar(session):
+    """Overlay the authoritative draft sidecar onto a loaded ``Session``.
+
+    ``POST /api/session/draft`` writes the sidecar without touching the session
+    JSON, so a session loaded from disk (or still resident in the LRU cache)
+    can carry a stale inline ``composer_draft``. The sidecar wins whenever it
+    exists — including when it is empty, which is an explicit clear.
+    """
+    if session is None:
+        return session
+    sid = str(getattr(session, "session_id", "") or "")
+    if not sid:
+        return session
+    try:
+        from api.drafts import resolve_draft
+
+        draft = resolve_draft(sid, getattr(session, "composer_draft", None))
+    except Exception:
+        logger.debug("draft sidecar overlay failed for %s", sid, exc_info=True)
+        return session
+    if isinstance(draft, dict) and draft != getattr(session, "composer_draft", None):
+        session.composer_draft = draft
+    return session
+
+
 def _cleanup_stale_tmp_files() -> None:
     """Best-effort removal of stale ``*.tmp.*`` files from SESSION_DIR.
 
@@ -1473,6 +1498,13 @@ class Session:
                 f"Reload with metadata_only=False before mutating state. "
                 f"See #1558."
             )
+        # The sidecar is authoritative for drafts; refresh the inline legacy
+        # copy from it so an exported/downgraded reader still sees the newest
+        # draft. Best-effort: a draft read failure must never block a save.
+        try:
+            _apply_composer_draft_sidecar(self)
+        except Exception:
+            logger.debug("draft sidecar merge before save failed for %s", self.session_id, exc_info=True)
         if touch_updated_at:
             self.updated_at = time.time()
         # Write metadata fields first so load_metadata_only() can read them
@@ -1681,7 +1713,7 @@ class Session:
                     )
                 except Exception:
                     logger.debug("legacy sidecar facts cache populate failed for %s", sid, exc_info=True)
-        return session
+        return _apply_composer_draft_sidecar(session)
 
     @classmethod
     def load_metadata_only(cls, sid, *, index_message_counts=None):
@@ -4898,11 +4930,11 @@ def _resolve_session_once(
                 logger.debug(
                     "state.db newer-sidecar sync failed on cache hit for session %s", sid, exc_info=True,
                 )
-        return cached
+        return _apply_composer_draft_sidecar(cached)
     if metadata_only:
         s = Session.load_metadata_only(sid)
         if s:
-            return s
+            return _apply_composer_draft_sidecar(s)
     else:
         if not allow_full_load:
             raise _FullSessionResolveRequired
@@ -4942,7 +4974,7 @@ def _resolve_session_once(
                             SESSIONS.pop(sid, None)
             except Exception:
                 pass  # repair is best-effort
-        return s
+        return _apply_composer_draft_sidecar(s)
     raise KeyError(sid)
 
 
