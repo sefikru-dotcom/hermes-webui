@@ -463,7 +463,20 @@ def _write_session_index(updates=None, *, session_dir: Path | None = None, sessi
                 raise ValueError("session index must be a list")
             with LOCK:
                 in_memory_ids = set(SESSIONS.keys())
-                updated_map = {s.session_id: s.compact() for s in updates}
+                # ``updates`` accepts Session objects (compacted here) and
+                # already-projected index rows. Callers that repaired a single
+                # field (the bounded preview backfill) must not overwrite the
+                # indexed counters with sidecar-derived ones.
+                updated_map = {}
+                for _update in updates:
+                    if isinstance(_update, dict):
+                        _entry = dict(_update)
+                        _sid = _entry.get('session_id')
+                    else:
+                        _entry = _update.compact()
+                        _sid = _update.session_id
+                    if _sid:
+                        updated_map[_sid] = _entry
 
             existing = [
                 e for e in existing
@@ -5765,6 +5778,13 @@ def _refresh_index_rows_from_sidecar_metadata(
         if not sidecar:
             out.append(session)
             continue
+        if str(getattr(sidecar, 'session_id', '') or '') != str(sid):
+            # A degenerate or foreign sidecar (empty payload, truncated JSON that
+            # still parses, rotated id) mints a fresh random id in Session().
+            # Overlaying its compact() would blank the live row's title and
+            # counters, so keep the index row as-is.
+            out.append(session)
+            continue
         compact = sidecar.compact(include_runtime=True)
         refreshed = dict(session)
         for key in (
@@ -6526,7 +6546,7 @@ def _backfill_index_previews(index, *, sidebar_metadata_only: bool = False, diag
     * the index is ordered newest-first, so the rows a client actually shows
       first get their subtitle on the very first request.
 
-    Returns the loaded sessions to hand to ``_write_session_index``.
+    Returns the rebuilt index rows to hand to ``_write_session_index``.
     """
     if not isinstance(index, list) or not index:
         return []
@@ -6550,8 +6570,22 @@ def _backfill_index_previews(index, *, sidebar_metadata_only: bool = False, diag
             # Leave the key absent: a transient load failure is retried on a
             # later request, still inside the per-call budget.
             continue
-        index[i] = full.compact(sidebar_metadata_only=sidebar_metadata_only)
-        filled.append(full)
+        if str(getattr(full, 'session_id', '') or '') != str(sid):
+            # A degenerate or foreign sidecar (empty payload, truncated JSON
+            # that still parses, rotated id) must not replace a live index row:
+            # Session() mints a fresh random id for it, so the real row would
+            # silently disappear as an empty Untitled session.
+            continue
+        # Fill ONLY the missing key. The index row stays authoritative for
+        # counters and lineage fields — it can be fresher than the sidecar after
+        # a compression write — so replacing the whole row here regressed
+        # message_count/updated_at/session_source on every preview backfill.
+        merged = dict(row)
+        merged['preview'] = full.compact(
+            sidebar_metadata_only=sidebar_metadata_only,
+        ).get('preview')
+        index[i] = merged
+        filled.append(merged)
     return filled
 
 
@@ -6599,7 +6633,7 @@ def all_sessions(
                 if 'last_message_at' not in s:
                     _diag_stage(diag, "all_sessions.backfill_load")
                     full = Session.load(s.get('session_id'))
-                    if full:
+                    if full and str(getattr(full, 'session_id', '') or '') == str(s.get('session_id')):
                         index[i] = full.compact(sidebar_metadata_only=sidebar_metadata_only)
                         backfilled.append(full)
             if backfilled:

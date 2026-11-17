@@ -1266,64 +1266,221 @@ def test_load_metadata_only_skips_index_read_when_sidecar_has_message_count(monk
 
 
 def test_all_sessions_reuses_loaded_index_counts_for_legacy_sidecar_refresh(monkeypatch):
-    """Refreshing multiple legacy lineage rows must not parse _index.json per row."""
+    """Refreshing legacy lineage rows must not parse _index.json per row."""
     index_file = models.SESSION_INDEX_FILE
-    rows = []
-    for sid, count in (("legacy_lineage_a", 3), ("legacy_lineage_b", 4)):
-        payload = {
-            "session_id": sid,
-            "title": sid,
-            "workspace": "/tmp",
-            "model": "test",
-            "created_at": 100.0,
-            "updated_at": 200.0,
-            "pinned": False,
-            "archived": False,
-            "parent_session_id": "lineage_parent",
-            "messages": [{"role": "user", "content": "legacy"}],
-            "tool_calls": [],
-        }
-        # Deliberately bypass Session.save(): pre-fix legacy sidecars do not have
-        # a persisted message_count field in their metadata prefix.
-        (models.SESSION_DIR / f"{sid}.json").write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-        rows.append({
-            "session_id": sid,
-            "title": sid,
-            "workspace": "/tmp",
-            "model": "test",
-            "created_at": 100.0,
-            "updated_at": 100.0,
-            "last_message_at": 100.0,
-            "message_count": count,
-            "pinned": False,
-            "archived": False,
-            "parent_session_id": "lineage_parent",
-        })
-    _write_index_file(index_file, rows)
 
     # The index is parsed from raw bytes (json.loads decodes UTF-8 in one pass),
     # so count read_bytes rather than read_text.
     original_read_bytes = Path.read_bytes
-    index_reads = 0
+    reads = [0]
 
     def _counting_read_bytes(self, *args, **kwargs):
-        nonlocal index_reads
         if self == index_file:
-            index_reads += 1
+            reads[0] += 1
         return original_read_bytes(self, *args, **kwargs)
 
     monkeypatch.setattr(Path, "read_bytes", _counting_read_bytes)
     monkeypatch.setattr(models, "_enrich_sidebar_lineage_metadata", lambda _sessions: None)
 
-    result = models.all_sessions()
+    def _run(spec):
+        rows = []
+        for sid, count in spec:
+            payload = {
+                "session_id": sid,
+                "title": sid,
+                "workspace": "/tmp",
+                "model": "test",
+                "created_at": 100.0,
+                "updated_at": 200.0,
+                "pinned": False,
+                "archived": False,
+                "parent_session_id": "lineage_parent",
+                "messages": [{"role": "user", "content": "legacy"}],
+                "tool_calls": [],
+            }
+            # Deliberately bypass Session.save(): pre-fix legacy sidecars do not
+            # have a persisted message_count field in their metadata prefix.
+            (models.SESSION_DIR / f"{sid}.json").write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            rows.append({
+                "session_id": sid,
+                "title": sid,
+                "workspace": "/tmp",
+                "model": "test",
+                "created_at": 100.0,
+                "updated_at": 100.0,
+                "last_message_at": 100.0,
+                "message_count": count,
+                "pinned": False,
+                "archived": False,
+                "parent_session_id": "lineage_parent",
+            })
+        _write_index_file(index_file, rows)
+        models._PERSISTED_SESSION_IDS_CACHE = (None, None, frozenset())
+        reads[0] = 0
+        result = models.all_sessions()
+        return {row["session_id"]: row["message_count"] for row in result}, reads[0]
 
-    counts = {row["session_id"]: row["message_count"] for row in result}
+    small = (("legacy_lineage_a", 3), ("legacy_lineage_b", 4))
+    counts, reads_small = _run(small)
     assert counts["legacy_lineage_a"] == 3
     assert counts["legacy_lineage_b"] == 4
-    assert index_reads == 1
+
+    counts_big, reads_big = _run(
+        small
+        + (
+            ("legacy_lineage_c", 5),
+            ("legacy_lineage_d", 6),
+            ("legacy_lineage_e", 7),
+        )
+    )
+    assert counts_big["legacy_lineage_c"] == 5
+    assert counts_big["legacy_lineage_e"] == 7
+
+    # At most two _index.json parses per request: one for the request itself and
+    # one for the bounded preview write-back (every index write re-reads under
+    # the write lock). The count must also stay FLAT as rows grow — a parse per
+    # refreshed legacy row is what made /api/sessions an O(n^2) poll.
+    assert reads_small <= 2
+    assert reads_small == reads_big
+
+
+def test_preview_backfill_preserves_indexed_metadata(monkeypatch):
+    """The R3 preview backfill must add `preview` only, never replace the row.
+
+    An index row can be fresher than its sidecar (compression/continuation
+    writes update the index counters first). Rebuilding the whole row from the
+    sidecar regressed message_count/updated_at/lineage fields on the first
+    /api/sessions poll after an upgrade.
+    """
+    index_file = models.SESSION_INDEX_FILE
+    indexed_updated_at = time.time() + 60.0
+    _write_index_file(
+        index_file,
+        [
+            {
+                "session_id": "preview_sid",
+                "title": "Preview Row",
+                "workspace": "/tmp",
+                "model": "test",
+                "created_at": 100.0,
+                "updated_at": indexed_updated_at,
+                "last_message_at": indexed_updated_at,
+                "message_count": 7,
+                "pinned": False,
+                "archived": False,
+                "parent_session_id": "parent_sid",
+                "session_source": "continuation",
+            }
+        ],
+    )
+    (models.SESSION_DIR / "preview_sid.json").write_text(
+        json.dumps(
+            {
+                "session_id": "preview_sid",
+                "title": "Preview Row",
+                "workspace": "/tmp",
+                "model": "test",
+                "created_at": 100.0,
+                "updated_at": 200.0,
+                "messages": [{"role": "user", "content": "legacy subtitle"}],
+                "message_count": 1,
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(models, "_enrich_sidebar_lineage_metadata", lambda _sessions: None)
+
+    rows = models.all_sessions()
+
+    row = next(r for r in rows if r["session_id"] == "preview_sid")
+    assert row["preview"] == "legacy subtitle"
+    assert row["message_count"] == 7
+    assert row["updated_at"] == indexed_updated_at
+    assert row["parent_session_id"] == "parent_sid"
+    assert row["session_source"] == "continuation"
+
+    # The repair is persisted (so the row is loaded once) and keeps the indexed
+    # counters instead of overwriting them with the sidecar projection.
+    persisted = _read_index(index_file)[0]
+    assert persisted["session_id"] == "preview_sid"
+    assert persisted["message_count"] == 7
+    assert persisted["updated_at"] == indexed_updated_at
+    assert persisted["preview"] == "legacy subtitle"
+
+
+def test_preview_backfill_ignores_sidecar_without_matching_session_id(monkeypatch):
+    """A degenerate sidecar must not erase a live index row.
+
+    Session.load() on a payload that carries no session_id mints a fresh random
+    id, so replacing the row with its compact() dropped the real entry from the
+    sidebar (it became an empty Untitled session) instead of merely leaving
+    `preview` absent.
+    """
+    index_file = models.SESSION_INDEX_FILE
+    _write_index_file(
+        index_file,
+        [
+            {
+                "session_id": "degenerate_sidecar",
+                "title": "Alpha",
+                "workspace": "/tmp",
+                "model": "test",
+                "created_at": 100.0,
+                "updated_at": 200.0,
+                "last_message_at": 200.0,
+                "message_count": 1,
+                "pinned": False,
+                "archived": False,
+            }
+        ],
+    )
+    (models.SESSION_DIR / "degenerate_sidecar.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(models, "_enrich_sidebar_lineage_metadata", lambda _sessions: None)
+
+    rows = models.all_sessions()
+
+    assert [r["session_id"] for r in rows] == ["degenerate_sidecar"]
+    assert rows[0]["title"] == "Alpha"
+    assert rows[0]["message_count"] == 1
+    # No repair was persisted, so the next poll retries the (still absent) key.
+    assert "preview" not in _read_index(index_file)[0]
+
+
+def test_last_message_at_backfill_ignores_sidecar_without_matching_session_id(monkeypatch):
+    """The legacy last_message_at backfill must not swap in a foreign-id row.
+
+    Same defect class as the preview backfill: Session.load() on a payload with
+    no session_id mints a random id, so writing that compact back dropped the
+    real row from the sidebar instead of merely leaving the key absent.
+    """
+    index_file = models.SESSION_INDEX_FILE
+    _write_index_file(
+        index_file,
+        [
+            {
+                "session_id": "degenerate_backfill",
+                "title": "Bravo",
+                "workspace": "/tmp",
+                "model": "test",
+                "created_at": 100.0,
+                "updated_at": 200.0,
+                "message_count": 1,
+                "pinned": False,
+                "archived": False,
+            }
+        ],
+    )
+    (models.SESSION_DIR / "degenerate_backfill.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(models, "_enrich_sidebar_lineage_metadata", lambda _sessions: None)
+
+    rows = models.all_sessions()
+
+    assert [r["session_id"] for r in rows] == ["degenerate_backfill"]
+    assert rows[0]["title"] == "Bravo"
+    assert rows[0]["message_count"] == 1
 
 
 def test_session_save_does_not_persist_metadata_message_count_hint():
