@@ -332,8 +332,16 @@ def test_clear_and_reasoning_never_reach_the_status_surface(tmp_path):
     fake_queue = _run_stream(session, "stream_no_reasoning_leak", agent_cls, workspace=tmp_path)
 
     payloads = _warnings(fake_queue)
-    assert [payload["message"] for payload in payloads] == [HEARTBEAT_NOTICE]
-    assert not any("chain of thought" in payload["message"] for payload in payloads)
+    # The notice, then the agent's clear frame — and nothing from the reasoning
+    # channel ever reaches this surface.
+    assert [payload.get("message") for payload in payloads] == [HEARTBEAT_NOTICE, None]
+    assert payloads[1] == {
+        "type": "provider_wait",
+        "clear": True,
+        "session_id": "no_reasoning_leak",
+        "stream_id": "stream_no_reasoning_leak",
+    }
+    assert not any("chain of thought" in str(payload.get("message") or "") for payload in payloads)
 
 
 def test_secret_shaped_values_are_redacted_in_wait_notices(tmp_path):
@@ -352,6 +360,92 @@ def test_secret_shaped_values_are_redacted_in_wait_notices(tmp_path):
     assert "[REDACTED]" in messages[0]
     # Nothing anywhere in the stream carries the raw value.
     assert not any("sk-live-abcdef0123456789ABCDEF" in str(data) for _, data in _events(fake_queue))
+
+
+def test_agent_clear_frame_retires_the_wait_notice(tmp_path):
+    """Recovery must retire the wait line, not leave it pinned until `done`."""
+    def script(agent):
+        agent.thinking_callback(HEARTBEAT_NOTICE)
+        agent.thinking_callback("")  # tokens resumed: the agent clears its line
+        agent.stream_delta_callback("answer")
+
+    agent_cls = _agent_class(script)
+    session = _prepare_session("wait_clear", "stream_wait_clear", pending_user_message="hi")
+    fake_queue = _run_stream(session, "stream_wait_clear", agent_cls, workspace=tmp_path)
+
+    payloads = _warnings(fake_queue, "provider_wait")
+    assert [payload.get("message") for payload in payloads] == [HEARTBEAT_NOTICE, None]
+    clear = payloads[1]
+    assert clear.get("clear") is True
+    # Turn identity travels with both frames so replay from another run can be
+    # dropped by the browser instead of painting a stale wait line.
+    assert clear["stream_id"] == "stream_wait_clear"
+    assert clear["session_id"] == "wait_clear"
+    assert payloads[0]["stream_id"] == "stream_wait_clear"
+    # Notice before clear, nothing else on the surface: a replay of the journal
+    # reproduces "show, then clear".
+    assert [
+        (data.get("type"), bool(data.get("clear")))
+        for event, data in _events(fake_queue)
+        if event == "warning"
+    ] == [("provider_wait", False), ("provider_wait", True)]
+
+
+def test_journal_replay_reproduces_notice_then_clear(tmp_path):
+    """A reconnect replays the run journal: the clear must be in it, in order.
+
+    Without the clear frame in the journal, replay re-showed "waiting on …"
+    with nothing to retire it, so an already-recovered turn painted a stale
+    wait line onto the composer.
+    """
+    from api.run_journal import read_run_events
+
+    def script(agent):
+        agent.thinking_callback(HEARTBEAT_NOTICE)
+        agent.thinking_callback("")
+
+    agent_cls = _agent_class(script)
+    session = _prepare_session("wait_replay", "stream_wait_replay", pending_user_message="hi")
+    _run_stream(session, "stream_wait_replay", agent_cls, workspace=tmp_path)
+
+    journal = read_run_events("wait_replay", "stream_wait_replay")
+    warning_frames = [
+        event.get("payload") or {}
+        for event in journal["events"]
+        if event.get("event") == "warning"
+    ]
+    assert [frame.get("message") for frame in warning_frames] == [HEARTBEAT_NOTICE, None]
+    assert warning_frames[1].get("clear") is True
+    assert warning_frames[0].get("stream_id") == "stream_wait_replay"
+
+
+def test_no_clear_frame_when_no_notice_was_shown(tmp_path):
+    """A turn that never showed a wait line must not clear someone else's status."""
+    def script(agent):
+        agent.thinking_callback("🌸 pondering...")
+        agent.thinking_callback("")
+        agent.thinking_callback("")
+
+    agent_cls = _agent_class(script)
+    session = _prepare_session("no_clear", "stream_no_clear", pending_user_message="hi")
+    fake_queue = _run_stream(session, "stream_no_clear", agent_cls, workspace=tmp_path)
+
+    assert _warnings(fake_queue) == []
+
+
+def test_clear_frame_survives_a_spinner_write_between_notice_and_recovery(tmp_path):
+    def script(agent):
+        agent.thinking_callback(HEARTBEAT_NOTICE)
+        agent.thinking_callback("💫 cogitating...")  # next request's cosmetic line
+        agent.thinking_callback("")
+
+    agent_cls = _agent_class(script)
+    session = _prepare_session("clear_after_spinner", "stream_clear_after_spinner", pending_user_message="hi")
+    fake_queue = _run_stream(session, "stream_clear_after_spinner", agent_cls, workspace=tmp_path)
+
+    payloads = _warnings(fake_queue, "provider_wait")
+    assert [payload.get("message") for payload in payloads] == [HEARTBEAT_NOTICE, None]
+    assert payloads[-1].get("clear") is True
 
 
 # ── anti-spam ────────────────────────────────────────────────────────────────
@@ -389,12 +483,36 @@ def test_bridge_rate_limits_heartbeats_but_not_recovery():
     assert bridge.observe("⏳ waiting on test-model — 94s with no response yet", session_id="s") is not None
 
 
-def test_bridge_forgets_state_when_the_agent_clears_the_line():
+def test_bridge_forwards_the_clear_frame_and_forgets_the_notice():
     bridge = streaming._ProviderWaitNoticeBridge(min_interval=30.0, clock=lambda: 0.0)
 
     assert bridge.observe(HEARTBEAT_NOTICE, session_id="s") is not None
-    assert bridge.observe("", session_id="s") is None  # recovery clears the line
+    clear = bridge.observe("", session_id="s")  # recovery clears the line
+    assert clear == {"type": "provider_wait", "clear": True, "session_id": "s"}
+    # One clear per shown notice: a second empty frame has nothing to retire.
+    assert bridge.observe("", session_id="s") is None
+    # ... and the same notice may surface again after the recovery.
     assert bridge.observe(HEARTBEAT_NOTICE, session_id="s") is not None
+
+
+def test_bridge_does_not_clear_a_status_it_does_not_own():
+    """`""` is forwarded only when this turn is actually showing a notice."""
+    bridge = streaming._ProviderWaitNoticeBridge(min_interval=30.0, clock=lambda: 0.0)
+    assert bridge.observe("", session_id="s") is None
+    assert bridge.observe("🌸 pondering...", session_id="s") is None
+    assert bridge.observe("", session_id="s") is None
+
+
+def test_cli_spinner_text_does_not_swallow_the_clear_frame():
+    """`announce_api_call` writes spinner text through the same callback."""
+    bridge = streaming._ProviderWaitNoticeBridge(min_interval=0.0, clock=lambda: 0.0)
+    assert bridge.observe(HEARTBEAT_NOTICE, session_id="s") is not None
+    assert bridge.observe("✨ processing...", session_id="s") is None
+    assert bridge.observe("", session_id="s") == {
+        "type": "provider_wait",
+        "clear": True,
+        "session_id": "s",
+    }
 
 
 def test_wait_notice_classifier_rejects_non_notices():
@@ -501,12 +619,42 @@ def test_cached_agent_rebinds_thinking_callback_to_the_new_turn(tmp_path):
 # ── routing target is an existing frontend surface ──────────────────────────
 
 
-def test_warning_event_is_an_existing_frontend_status_surface():
-    """We route into `warning` because the frontend already renders it."""
+def _warning_listener_block() -> str:
     src = (ROOT / "static" / "messages.js").read_text(encoding="utf-8")
     start = src.find("source.addEventListener('warning'")
     assert start != -1, "the `warning` SSE listener is gone — pick another existing event"
     end = src.find("source.addEventListener('error'", start)
-    block = src[start:end]
+    return src[start:end]
+
+
+def test_warning_event_is_an_existing_frontend_status_surface():
+    """We route into `warning` because the frontend already renders it."""
+    block = _warning_listener_block()
     assert "setComposerStatus(" in block
     assert "if(!S.session||S.session.session_id!==activeSid) return;" in block
+
+
+def test_frontend_retires_the_wait_notice_on_the_clear_frame():
+    """The clear frame must only retire the notice this pane is showing."""
+    block = _warning_listener_block()
+    assert "d.type==='provider_wait'" in block
+    assert "if(d.clear)" in block
+    # Ownership check: compare the rendered text before clearing, so an
+    # unrelated status (upload error, reconnect line) is never wiped.
+    assert "_providerWaitStatusText" in block
+    assert ".textContent===_providerWaitStatusText" in block
+    # The provider_wait branch must be handled before the generic sticky call.
+    assert block.index("d.type==='provider_wait'") < block.index("d.type==='fallback'?4000:undefined")
+
+
+def test_frontend_never_paints_a_wait_line_from_another_run():
+    block = _warning_listener_block()
+    assert "d.stream_id&&streamId&&d.stream_id!==streamId" in block
+
+
+def test_frontend_wait_notice_is_bounded_not_sticky():
+    """A lost clear frame must not leave the composer status pinned forever."""
+    src = (ROOT / "static" / "messages.js").read_text(encoding="utf-8")
+    assert "_PROVIDER_WAIT_STATUS_TTL_MS" in src
+    block = _warning_listener_block()
+    assert "setComposerStatus(_waitText,_PROVIDER_WAIT_STATUS_TTL_MS)" in block

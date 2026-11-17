@@ -1363,13 +1363,35 @@ def _provider_wait_notice_text(text) -> str:
     return _redacted_status_text(raw, limit=_WAIT_NOTICE_MAX_CHARS)
 
 
+def _provider_wait_payload(data, *, session_id: str = "", stream_id: str = "") -> dict:
+    """Build a ``provider_wait`` warning payload tagged with its turn identity.
+
+    ``stream_id`` lets the browser drop a frame that replay delivered from a
+    different run than the one it is attached to, so an old wait line cannot
+    land on a healthy turn.
+    """
+    payload = {"type": "provider_wait"}
+    payload.update(data)
+    if session_id:
+        payload["session_id"] = session_id
+    if stream_id:
+        payload["stream_id"] = stream_id
+    return payload
+
+
 class _ProviderWaitNoticeBridge:
     """Dedupe/rate-limit honest provider-wait notices on their way to the SSE queue.
 
     One instance per turn. It holds the last emitted notice so repeated
-    heartbeats and bursts of rewrites cannot spam the browser. A cleared line
-    ("" from the agent) or a non-notice resets the state, so the same notice can
-    surface again after a recovery.
+    heartbeats and bursts of rewrites cannot spam the browser, and it remembers
+    which notice the browser is currently showing so the agent's documented
+    clear frame (``""`` once tokens resume) can retire exactly that notice.
+
+    Dropping the clear frame is what pinned "⏳ waiting on <model>" on the
+    composer after the provider recovered: the notice only disappeared when the
+    turn ended. The clear is forwarded as ``{"type": "provider_wait", "clear":
+    true}``, which the frontend applies only while it still displays our notice,
+    so an unrelated status line is never wiped.
     """
 
     def __init__(self, *, min_interval=_WAIT_NOTICE_MIN_INTERVAL_SECONDS, clock=None):
@@ -1377,16 +1399,30 @@ class _ProviderWaitNoticeBridge:
         self._clock = clock or time.monotonic
         self._last_text = ""
         self._last_ts = None
+        # Notice currently shown in the browser; "" when the line is clean.
+        self._shown_notice = ""
 
-    def observe(self, text, *, session_id: str = ""):
-        """Return the ``warning`` payload for an honest notice, or None to drop it."""
-        notice = _provider_wait_notice_text(text)
+    def observe(self, text, *, session_id: str = "", stream_id: str = ""):
+        """Return the ``warning`` payload to emit, or None to drop this frame."""
+        raw = str(text or "")
+        notice = _provider_wait_notice_text(raw)
         if not notice:
-            # "" (agent cleared the line) or CLI cosmetics: nothing to show, and
-            # the next identical notice is allowed to fire again.
+            if raw.strip():
+                # Cosmetic CLI spinner text ("🌸 pondering..."): nothing to show.
+                # It must NOT cancel ownership of a live notice, otherwise the
+                # clear frame that follows a recovery would be swallowed and the
+                # wait line would stay pinned until `done`.
+                self._last_text = ""
+                self._last_ts = None
+                return None
+            # "" is the agent's documented clear frame. Forward it only when this
+            # turn owns a visible notice — never clear a status someone else set.
+            if not self._shown_notice:
+                return None
+            self._shown_notice = ""
             self._last_text = ""
             self._last_ts = None
-            return None
+            return _provider_wait_payload({"clear": True}, session_id=session_id, stream_id=stream_id)
         if notice == self._last_text:
             return None
         now = self._clock()
@@ -1395,13 +1431,11 @@ class _ProviderWaitNoticeBridge:
             return None
         self._last_text = notice
         self._last_ts = now
-        payload = {"type": "provider_wait", "message": notice}
-        if session_id:
-            payload["session_id"] = session_id
-        return payload
+        self._shown_notice = notice
+        return _provider_wait_payload({"message": notice}, session_id=session_id, stream_id=stream_id)
 
 
-def _agent_warn_payload(message):
+def _agent_warn_payload(message, *, stream_id: str = ""):
     """Payload for an agent ``warn`` lifecycle status, or None when unusable.
 
     ``status_callback(kind='warn', ...)`` carries the agent's own user-visible
@@ -1414,7 +1448,10 @@ def _agent_warn_payload(message):
     text = _redacted_status_text(message, limit=_AGENT_WARN_MAX_CHARS)
     if not text:
         return None
-    return {"type": "agent_warn", "message": text}
+    payload = {"type": "agent_warn", "message": text}
+    if stream_id:
+        payload["stream_id"] = stream_id
+    return payload
 
 
 def _valid_prefill_messages(value) -> list[dict]:
@@ -9931,7 +9968,7 @@ def _run_agent_streaming(
         status), deduped and rate-limited by the bridge.
         """
         try:
-            payload = _wait_notice_bridge.observe(text, session_id=session_id)
+            payload = _wait_notice_bridge.observe(text, session_id=session_id, stream_id=stream_id)
         except Exception:
             logger.debug("wait-notice bridge failed for stream %s", stream_id, exc_info=True)
             return
@@ -9980,7 +10017,7 @@ def _run_agent_streaming(
         # degraded silently looked healthy. Forwarded verbatim into the same
         # transient surface, deduped and capped per turn.
         if _kind == 'warn':
-            _warn_payload = _agent_warn_payload(_message)
+            _warn_payload = _agent_warn_payload(_message, stream_id=stream_id)
             if (
                 _warn_payload is not None
                 and _warn_payload['message'] != _captured_agent_warn[0]
